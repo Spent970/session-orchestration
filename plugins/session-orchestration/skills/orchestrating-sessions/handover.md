@@ -11,7 +11,8 @@ each waits on, why the restart (pane asks carry over by themselves). No rules an
 coordinator's Start reads those, and each restated rule is re-sent on its every wake. Then start your successor:
 
 1. `session-status --successor` (`--account DIR` for the weekly-limit move): it opens a tab running an interactive
-   `claude -n NAME-next 'Act as a coordinator. You succeed …'`. Nothing opened: hand the user the command it prints
+   `claude --model M --effort E -n NAME-next 'Act as a coordinator. You succeed …'`, on the model and effort you run on
+   (else config `plan.models.coordinator`). Nothing opened: hand the user the command it prints
    (`hand_command`, key `coordinator`). Then arm `--await ready` (Bash, background) and end your turn. From here act
    on no message: forward each, text on stdin, with `session-status --inbox-add --from '<name> (<id8>)'`, run by its
    full path with a quoted heredoc (`<<'EOF'`), so the approval hook reads the text as text even when it quotes a merge.

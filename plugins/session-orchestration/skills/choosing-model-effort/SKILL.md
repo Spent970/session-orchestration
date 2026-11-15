@@ -6,8 +6,9 @@ description: Size a piece of work into a plan.models kind (scan, mechanical, bui
 # Choosing a model and effort
 
 Each kind maps to a model and effort through config `plan.models.<kind>` (defaults: `scan` haiku/low, `mechanical`
-and `release` sonnet/medium, `build` opus/medium, `design` and `review` opus/xhigh). Size the work into a kind, then
-take that kind's values. Never `fable` unless the user names it.
+and `release` sonnet/medium, `build` opus/medium, `design` and `review` opus/xhigh, `coordinator` opus/medium). Size the work into a kind, then take that kind's values.
+Never `fable` unless the user names it. `coordinator` is what a coordinator's start and its successor run on (a
+successor or handed-over session keeps what its predecessor ran on, fable too, when the transcript says).
 
 ## Size the work
 

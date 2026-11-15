@@ -163,7 +163,7 @@ set -uo pipefail
 # session's cost and outcome.
 if [ "${1:-}" = --kind ]; then
   { [ $# = 2 ] || { [ $# = 3 ] && [[ $3 =~ ^[A-Za-z0-9._-]{1,80}$ ]]; }; } && me=$(config "plan.models.$2" 2>/dev/null) ||
-    { echo "usage: session-status --kind design|build|mechanical|review|release|scan [SESSION-NAME]" >&2; exit 2; }
+    { echo "usage: session-status --kind design|build|mechanical|review|release|scan|coordinator [SESSION-NAME]" >&2; exit 2; }
   usage "$2" start "${me%%/*}" "${me#*/}" ${3:+"$3"}
   echo "--model ${me%%/*} --effort ${me#*/}"; exit
 fi
@@ -330,7 +330,9 @@ fi
 
 # Coordinator handover (handover.md), with NAME the coordinator's name:
 #   --successor [--account DIR]   the old coordinator starts NAME-next, interactive, in a tab of the configured
-#                                 terminal under DIR (default its own account), first prompt `Act as a coordinator`;
+#                                 terminal under DIR (default its own account), first prompt `Act as a coordinator`,
+#                                 on the model and effort the caller runs on (lib.sh last_model), else config
+#                                 plan.models.coordinator;
 #                                 its own tab is titled NAME first (title_tty), so a NAME-next title left from its
 #                                 own start as a successor doesn't pass for a successor's open tab
 #   --await ready                 the old one waits until NAME-next has finished its Start (handover/NAME.ready)
@@ -400,7 +402,10 @@ if [ "${1:-}" = --successor ]; then
   # The name goes into a command typed into a shell: only the characters name_session and open_pane give one.
   [[ $n =~ ^[A-Za-z0-9._-]+$ ]] || { echo "\"$n\" has characters a shell would read (a /rename?): not handed over; rename it with name_session first"; exit 2; }
   # SESSION_STATUS_CLAUDE: the claude command, for a dev build's successor (`claude --plugin-dir DIR`)
-  cmd="${SESSION_STATUS_CLAUDE:-claude} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
+  # the model and effort this coordinator runs on (fable too: the user chose it), else config plan.models.coordinator
+  read -r sm se < <(last_model "$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id".jsonl 2>/dev/null | head -1)")
+  cm=$(config plan.models.coordinator 2>/dev/null); sm=${sm:-${cm%%/*}}; se=${se:-${cm#*/}}
+  cmd="${SESSION_STATUS_CLAUDE:-claude} --model $sm --effort $se -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
   case $acct in "$HOME/.claude") pre='env -u CLAUDE_CONFIG_DIR ' ;; *) pre="CLAUDE_CONFIG_DIR=$(tilde "$acct") " ;; esac
   load_terminal
   # a coordinator that was a successor itself may still have the NAME-next tab title (--await name's retitle didn't
@@ -1204,7 +1209,9 @@ fi
 # in the project root, under the caller's account (plus --permission-mode default where it defaults to plan), with a
 # brief naming KEY.md, WHAT NEXT and a `Supersedes: ID` line (the owner mapping reads it). NAME: the old name if
 # it starts with KEY (any case), else KEY-<old name>; the old one is stopped, so the names don't clash live.
-# --model M / --effort E go onto the `claude --bg` line (none: the daemon's defaults). A chunk session (a `Chunk:
+# --model M / --effort E go onto the `claude --bg` line (never fable); each one left out is what the old session last
+# ran on (lib.sh last_model: its transcript, fable included when the user put it there), then (--self, a chunk) its
+# plan row, then the daemon's default. A chunk session (a `Chunk:
 # KEY/N` line in its first prompt) needs no KEY.md: its successor, KEY-cN, continues from `## cN: handoff` in
 # KEY-build.md and follows KEY-cN.md, both in the replies folder. --self (ID = $CLAUDE_CODE_SESSION_ID): a session
 # hands itself over as its last step, with no coordinator running (one would start the successor): it isn't
@@ -1217,7 +1224,7 @@ if [ -n "$HANDOVER" ]; then
   [ -z "$self" ] || [ -n "$want" ] || { echo "--self: CLAUDE_CODE_SESSION_ID is unset (run it from the session handing itself over)"; exit 2; }
   [ "${#want}" -ge 8 ] && [ -n "$next" ] && [ $# = 1 ] ||
     { echo "usage: session-status --handover ID|--self [--model M] [--effort E] [--] 'WHAT NEXT' (ID: 8+ characters)"; exit 2; }
-  [ -z "$model" ] || model_ok "$model" || { echo "--model $model: not a model name like opus (never fable)"; exit 2; }
+  [ -z "$model" ] || model_ok "$model" || { echo "--model $model: not a model name like opus (never fable; leave --model out to keep the old session's)"; exit 2; }
   [ -z "$effort" ] || model_ok opus "$effort" || { echo "--effort $effort: one of low medium high xhigh max"; exit 2; }
   row=$(find_session "$want") || { echo "couldn't list the sessions; try again"; exit 1; }
   [ -n "$row" ] || { echo "no session $want in any account"; exit 2; }
@@ -1227,6 +1234,7 @@ if [ -n "$HANDOVER" ]; then
   fi
   read_row id name st pre started cwd kind status pid
   f=$(transcript_of "$id"); [ -n "$f" ] || { echo "no transcript for \"$name\" (${id:0:8}): not handed over"; exit 2; }
+  read -r om oe < <(last_model "$f"); model=${model:-${om:-}}; effort=${effort:-${oe:-}}   # what it ran on, fable too
   first=$(first_prompt "$f")
   rdir=$(sed -nE 's/.*[Rr]eplies folder[^`]*`([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1); rdir=${rdir%/}
   [ -n "$rdir" ] || { echo "$ROOT/CLAUDE.md names no replies folder: nothing to hand over from"; exit 2; }

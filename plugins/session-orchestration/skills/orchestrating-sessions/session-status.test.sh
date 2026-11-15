@@ -29,11 +29,15 @@ out=$(AGENTS_JSON="[{\"sessionId\":\"s9\",\"name\":\"sub-coordinator\",\"cwd\":\
 out=$(of sub) && { echo "--coordinator-of, not running: exit 0"; exit 1; }; [[ $out == *"sub-coordinator ("*") isn't running"* ]] ||
   { echo "--coordinator-of, not running: $out"; exit 1; }
 rc=0; out=$(of sub --start) || rc=$?
-[ "$rc" = 5 ] && [ "$out" = "no terminal opens it here (config terminal): run in a new terminal: cd $(printf %q "$root/sub") && claude -n sub-coordinator 'Act as a coordinator'" ] ||
+[ "$rc" = 5 ] && [ "$out" = "no terminal opens it here (config terminal): run in a new terminal: cd $(printf %q "$root/sub") && claude --model opus --effort medium -n sub-coordinator 'Act as a coordinator'" ] ||
   { echo "--coordinator-of --start: $out"; exit 1; }
+# coord_start's model: config plan.models.coordinator
+echo '{"plan": {"models": {"coordinator": "sonnet/high"}}}' > "$root/sub/.claude/coordination.local.json"
+[[ $(of sub --start) == *"claude --model sonnet --effort high -n sub-coordinator"* ]] || { echo "--coordinator-of --start, plan.models.coordinator"; exit 1; }
+echo '{}' > "$root/sub/.claude/coordination.local.json"
 rc=0; out=$(of plain) || rc=$?
 [ "$rc" = 4 ] && [[ $out == *"has no coordinator of its own"* ]] || { echo "--coordinator-of, covered: rc=$rc $out"; exit 1; }
-[[ $(of plain --start) == *"claude -n plain-coordinator"* ]] || { echo "--coordinator-of --start, covered"; exit 1; }
+[[ $(of plain --start) == *"claude --model opus --effort medium -n plain-coordinator"* ]] || { echo "--coordinator-of --start, covered"; exit 1; }
 out=$(AGENTS_JSON="[{\"sessionId\":\"s8\",\"name\":\"plain-coordinator\",\"cwd\":\"$root/plain\",\"status\":\"idle\"}]" of plain) &&
   [ "$out" = plain-coordinator ] || { echo "--coordinator-of, opened before its setup: $out"; exit 1; }
 rc=0; out=$(of .) || rc=$?; [ "$rc" = 2 ] || { echo "--coordinator-of its own root: rc=$rc $out"; exit 1; }
@@ -696,6 +700,18 @@ printf '## c3b: handoff\nstate\n' > "$root/replies/PROJ-9-build.md"
 for bad in '--model fable' '--model claude-fable-5-1' '--effort ultra' '--model'; do
   out=$(run --handover "$kid" $bad -- 'x') && rc=0 || rc=$?
   [ "$rc" = 2 ] && ! calls | grep -q 'stop\|--bg' || { echo "handover $bad not refused: $out"; exit 1; }; done
+# No flags: the old session's last model and effort (a user's hand-picked fable too); a flag given wins.
+cp "$proj/$kid.jsonl" "$tmp/kid.jsonl"
+echo '{"type":"assistant","effort":"xhigh","message":{"model":"claude-fable-5-2"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model claude-fable-5-2 --effort xhigh -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept no model: $c"; exit 1; }
+run --handover "$kid" --effort low -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model claude-fable-5-2 --effort low -n PROJ-9-c3b ' <<<"$c" || { echo "handover --effort over the old one's: $c"; exit 1; }
+# A Claude Code that records no effort: the model alone.
+echo '{"type":"assistant","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model claude-opus-5-5 -n PROJ-9-c3b ' <<<"$c" || { echo "handover, model without effort: $c"; exit 1; }
+mv "$tmp/kid.jsonl" "$proj/$kid.jsonl"
 # --self: refused while a coordinator is live; else the successor starts and the caller, mid-turn, isn't stopped.
 setacct cfg "$(sess "$kid" "PROJ-9-c3b" busy 1),$(sess "$cid" coord idle 1)"; calls >/dev/null
 out=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self -- 'Go on.') && rc=0 || rc=$?
@@ -761,8 +777,14 @@ setacct cfg "$(sess "$o" p-coordinator idle 1 interactive)"
 [ "$(as "$z" --name-check p-coordinator)" = "held other $o" ] && [ "$(as "$o" --name-check p-coordinator)" = "free other" ] ||
   { echo "--name-check, one coordinator"; exit 1; }
 out=$(as "$o" --successor) && rc=0 || rc=$?
-[ "$rc" = 2 ] && grep -qF "  cd $root && CLAUDE_CONFIG_DIR=~/cfg claude -n p-coordinator-next 'Act as a coordinator. You succeed \"p-coordinator\" (0a0a0a0a): " <<<"$out" &&
+[ "$rc" = 2 ] && grep -qF "  cd $root && CLAUDE_CONFIG_DIR=~/cfg claude --model opus --effort medium -n p-coordinator-next 'Act as a coordinator. You succeed \"p-coordinator\" (0a0a0a0a): " <<<"$out" &&
   grep -qF -- '--await ready` (Bash, run_in_background)' <<<"$out" && ! grep -q 'Claude Code Desktop' <<<"$out" || { echo "--successor, plain terminal: $rc $out"; exit 1; }
+# The successor runs on what the old one last ran on, fable included (a sidechain or synthetic reply doesn't count).
+printf '%s\n' '{"type":"assistant","effort":"high","message":{"model":"claude-fable-5-2"}}' '{"type":"assistant","isSidechain":true,"effort":"low","message":{"model":"haiku"}}' \
+  '{"type":"assistant","message":{"model":"<synthetic>"}}' > "$proj/$o.jsonl"
+out=$(as "$o" --successor) && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "claude --model claude-fable-5-2 --effort high -n p-coordinator-next" <<<"$out" || { echo "--successor kept no model: $rc $out"; exit 1; }
+rm "$proj/$o.jsonl"
 # From Claude Code Desktop (no tab of its own) it says where to run the command.
 out=$(CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -q "^This is Claude Code Desktop: tell the user to run it in the session's Terminal" <<<"$out" || { echo "--successor from Desktop: $rc $out"; exit 1; }
@@ -1278,6 +1300,9 @@ c4   done     build      hook
 c5   ready    review     review
 c6   blocked  planning   loop
 EOF
+( . "$here/../../lib.sh"
+  model_ok opus && model_ok opus high && model_ok opus/high && ! model_ok opus/ultra && ! model_ok fable/high && ! model_ok claude-fable-5-2 &&
+    FABLE_OK=1 model_ok claude-fable-5-2/high && ! model_ok 'Opus' && ! model_ok opus/ ) || { echo "model_ok"; exit 1; }
 # One model/effort rule (lib.sh model_ok): no fable anywhere, efforts the CLI takes. --check reports a bad row, --next
 # doesn't start it, config falls back to the default. plan.enabled false: --next starts nothing.
 sed -e '/^| [2-6] /d' -e 's#| opus/medium | suite#| fable/high | suite#' "$plan" > "$pd/PROJ-8.md"
