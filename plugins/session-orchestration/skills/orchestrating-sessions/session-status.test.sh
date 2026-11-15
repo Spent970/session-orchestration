@@ -707,6 +707,13 @@ run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
 grep -q '^cfg --bg --model claude-fable-5-2 --effort xhigh -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept no model: $c"; exit 1; }
 run --handover "$kid" --effort low -- 'x' >/dev/null; c=$(calls)
 grep -q '^cfg --bg --model claude-fable-5-2 --effort low -n PROJ-9-c3b ' <<<"$c" || { echo "handover --effort over the old one's: $c"; exit 1; }
+# Another model given: the old effort isn't carried over to it.
+run --handover "$kid" --model haiku -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model haiku -n PROJ-9-c3b ' <<<"$c" || { echo "handover --model took the old one's effort: $c"; exit 1; }
+# requestedModel keeps the 1M-context [1m] variant that .message.model drops.
+echo '{"type":"assistant","requestedModel":"claude-opus-5-5[1m]","effort":"high","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -qF 'cfg --bg --model claude-opus-5-5[1m] --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "handover lost [1m]: $c"; exit 1; }
 # A Claude Code that records no effort: the model alone.
 echo '{"type":"assistant","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
@@ -725,6 +732,12 @@ c=$(calls)
 printf '## Plan\n\n| # | Chunk | Kind | Deps | Touches | Est | Model/effort | Done when |\n|---|---|---|---|---|---|---|---|\n| 3b | x | build | – | `a` | 60K | sonnet/low | y |\n' > "$root/replies/PROJ-9.md"
 c=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self --effort high -- 'Go on.' >/dev/null; calls)
 grep -q '^cfg --bg --model sonnet --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "self handover took no plan model: $c"; exit 1; }
+# The plan row wins over the transcript (it may have been re-planned).
+cp "$proj/$kid.jsonl" "$tmp/kid.jsonl"
+echo '{"type":"assistant","effort":"xhigh","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
+c=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self -- 'Go on.' >/dev/null; calls)
+grep -q '^cfg --bg --model sonnet --effort low -n PROJ-9-c3b ' <<<"$c" || { echo "self handover took the transcript over the plan: $c"; exit 1; }
+mv "$tmp/kid.jsonl" "$proj/$kid.jsonl"
 rm "$root/replies/PROJ-9.md"
 [ "$(CLAUDE_CODE_SESSION_ID= run --handover --self -- x; echo $?)" = "$(printf '%s\n2' '--self: CLAUDE_CODE_SESSION_ID is unset (run it from the session handing itself over)')" ] ||
   { echo "self handover without a session id"; exit 1; }
@@ -1301,8 +1314,9 @@ c5   ready    review     review
 c6   blocked  planning   loop
 EOF
 ( . "$here/../../lib.sh"
-  model_ok opus && model_ok opus high && model_ok opus/high && ! model_ok opus/ultra && ! model_ok fable/high && ! model_ok claude-fable-5-2 &&
-    FABLE_OK=1 model_ok claude-fable-5-2/high && ! model_ok 'Opus' && ! model_ok opus/ ) || { echo "model_ok"; exit 1; }
+  model_ok opus && model_ok opus high && ! model_ok opus/high && ! model_ok opus ultra && ! model_ok fable high && ! model_ok claude-fable-5-2 &&
+    FABLE_OK=1 model_ok claude-fable-5-2 high && ! model_ok 'Opus' && ! model_ok opus/ && model_ok 'opus[1m]' medium && ! model_ok 'opus[2m]' ) ||
+  { echo "model_ok"; exit 1; }
 # One model/effort rule (lib.sh model_ok): no fable anywhere, efforts the CLI takes. --check reports a bad row, --next
 # doesn't start it, config falls back to the default. plan.enabled false: --next starts nothing.
 sed -e '/^| [2-6] /d' -e 's#| opus/medium | suite#| fable/high | suite#' "$plan" > "$pd/PROJ-8.md"

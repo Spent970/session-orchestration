@@ -165,7 +165,7 @@ if [ "${1:-}" = --kind ]; then
   { [ $# = 2 ] || { [ $# = 3 ] && [[ $3 =~ ^[A-Za-z0-9._-]{1,80}$ ]]; }; } && me=$(config "plan.models.$2" 2>/dev/null) ||
     { echo "usage: session-status --kind design|build|mechanical|review|release|scan|coordinator [SESSION-NAME]" >&2; exit 2; }
   usage "$2" start "${me%%/*}" "${me#*/}" ${3:+"$3"}
-  echo "--model ${me%%/*} --effort ${me#*/}"; exit
+  echo "--model $(printf %q "${me%%/*}") --effort ${me#*/}"; exit   # %q: a [1m] model would glob where it's pasted
 fi
 # prev_name NAME: NAME-prev-K, the name a session takes when it hands off (its successor keeps NAME). NAME loses any
 # -prev-K first; K is the lowest number no session of a listed account (lib.sh list_sessions --all: live or
@@ -404,8 +404,8 @@ if [ "${1:-}" = --successor ]; then
   # SESSION_STATUS_CLAUDE: the claude command, for a dev build's successor (`claude --plugin-dir DIR`)
   # the model and effort this coordinator runs on (fable too: the user chose it), else config plan.models.coordinator
   read -r sm se < <(last_model "$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id".jsonl 2>/dev/null | head -1)")
-  cm=$(config plan.models.coordinator 2>/dev/null); sm=${sm:-${cm%%/*}}; se=${se:-${cm#*/}}
-  cmd="${SESSION_STATUS_CLAUDE:-claude} --model $sm --effort $se -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
+  [ -n "${sm:-}" ] || { cm=$(config plan.models.coordinator 2>/dev/null); sm=${cm%%/*}; se=${cm#*/}; }   # never config's effort on another model
+  cmd="${SESSION_STATUS_CLAUDE:-claude} --model $(printf %q "$sm")${se:+ --effort $se} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
   case $acct in "$HOME/.claude") pre='env -u CLAUDE_CONFIG_DIR ' ;; *) pre="CLAUDE_CONFIG_DIR=$(tilde "$acct") " ;; esac
   load_terminal
   # a coordinator that was a successor itself may still have the NAME-next tab title (--await name's retitle didn't
@@ -1209,9 +1209,9 @@ fi
 # in the project root, under the caller's account (plus --permission-mode default where it defaults to plan), with a
 # brief naming KEY.md, WHAT NEXT and a `Supersedes: ID` line (the owner mapping reads it). NAME: the old name if
 # it starts with KEY (any case), else KEY-<old name>; the old one is stopped, so the names don't clash live.
-# --model M / --effort E go onto the `claude --bg` line (never fable); each one left out is what the old session last
-# ran on (lib.sh last_model: its transcript, fable included when the user put it there), then (--self, a chunk) its
-# plan row, then the daemon's default. A chunk session (a `Chunk:
+# --model M / --effort E go onto the `claude --bg` line (never fable); each one left out is (a chunk) its plan
+# row's, else what the old session last ran on (lib.sh last_model: its transcript, fable included when the user put it
+# there; its effort only with its model), else the daemon's default. A chunk session (a `Chunk:
 # KEY/N` line in its first prompt) needs no KEY.md: its successor, KEY-cN, continues from `## cN: handoff` in
 # KEY-build.md and follows KEY-cN.md, both in the replies folder. --self (ID = $CLAUDE_CODE_SESSION_ID): a session
 # hands itself over as its last step, with no coordinator running (one would start the successor): it isn't
@@ -1234,7 +1234,6 @@ if [ -n "$HANDOVER" ]; then
   fi
   read_row id name st pre started cwd kind status pid
   f=$(transcript_of "$id"); [ -n "$f" ] || { echo "no transcript for \"$name\" (${id:0:8}): not handed over"; exit 2; }
-  read -r om oe < <(last_model "$f"); model=${model:-${om:-}}; effort=${effort:-${oe:-}}   # what it ran on, fable too
   first=$(first_prompt "$f")
   rdir=$(sed -nE 's/.*[Rr]eplies folder[^`]*`([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1); rdir=${rdir%/}
   [ -n "$rdir" ] || { echo "$ROOT/CLAUDE.md names no replies folder: nothing to hand over from"; exit 2; }
@@ -1275,7 +1274,7 @@ if [ -n "$HANDOVER" ]; then
       (( have > hops )) || { if (( have )); then echo "no new \`## c$n: handoff\` in $rdir/$key-build.md: the $have there are from \"$name\"'s $hops predecessors; ask \"$name\" to write its own, $own, first"
         else echo "no \`## c$n: handoff\` in $rdir/$key-build.md: ask \"$name\" to write $own first"; fi; exit 2; }
     fi
-    if [ -n "$self" ] && { [ -z "$model" ] || [ -z "$effort" ]; }; then   # the plan row's model/effort (--plan's parse)
+    if [ -z "$model" ] || [ -z "$effort" ]; then   # the plan row's model/effort (--plan's parse; it may be re-planned)
       me=$(bash "$SELF" --plan "$rd/$key.md" --brief "$n" 2>/dev/null | grep -m1 -oE 'Model: [^ ]+/[^ ]+'); me=${me#Model: }
       [ -z "$me" ] || ! model_ok "${me%/*}" "${me#*/}" || { model=${model:-${me%/*}}; effort=${effort:-${me#*/}}; }
     fi
@@ -1287,7 +1286,10 @@ if [ -n "$HANDOVER" ]; then
     *) slug=$(tr '[:upper:]' '[:lower:]' <<<"$base" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-40 | sed -E 's/-+$//'); new=$key${slug:+-$slug} ;;
   esac
   [ -z "$n" ] || new=$key-c$n
-  pm=${model:+ --model $model}${effort:+ --effort $effort}
+  # what it ran on, fable too; its effort only with its own model (an effort may not suit another one)
+  read -r om oe < <(last_model "$f"); { [ -z "$model" ] || [ "$model" = "${om:-}" ]; } || oe=
+  model=${model:-${om:-}}; effort=${effort:-${oe:-}}
+  pm=${model:+ --model $(printf %q "$model")}${effort:+ --effort $effort}   # %q: a [1m] model would glob under bash -c
   if [ -n "$n" ]; then
     text=$(printf 'Session task: %s\nChunk: %s/%s\nSupersedes: %s\nContinue from the last "## c%s: handoff" in %s/%s-build.md, then follow %s/%s-c%s.md.\n%s' \
       "$key" "$key" "$n" "$id" "$n" "$rd" "$key" "$rd" "$key" "$n" "$next")

@@ -17,8 +17,8 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    handoff. With `plan.enabled: false` run the task without a plan. **While the planner is evaluated**, odd task
    starts get a plan and even ones run as before, with `plan: off` in the brief (`rnd.py trial` compares the two).
 4. **Models** by kind, from `plan.models` (`default` in the table); never `fable`.
-5. **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'` (it keeps the chunk's model and effort)
-   (none for a chunk with `## cN: done`). **A `handoff ready: PROJ-123` message** (a task): `session-status
+5. **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'`,
+   which takes the chunk's model and effort from its plan row; a chunk with `## cN: done` gets none. **A `handoff ready: PROJ-123` message** (a task): `session-status
    --handover <id> -- '<next step>'`, the next step from `## Handoff` in its replies file. Message and attach the
    successor's plain name; a `-prev-K` name is a finished predecessor.
 6. **Recalibrate** with `rnd.py chunks` (its ratio line, act against est) and size the next ests by it.

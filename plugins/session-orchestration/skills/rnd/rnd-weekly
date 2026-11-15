@@ -10,12 +10,15 @@ root=${1:?usage: rnd-weekly PROJECT_ROOT [--dry-run]}
 if [ "$(uname)" = Darwin ]; then logdir=$HOME/Library/Logs; else logdir=${XDG_STATE_HOME:-$HOME/.local/state}; fi
 LOG=${RND_LOG:-$logdir/rnd-weekly.log}
 mkdir -p "$(dirname "$LOG")"
+ss=$(cd "$(dirname "$0")" && pwd)/../orchestrating-sessions/session-status   # before the cd: $0 may be relative
 cd "$root" 2>/dev/null || { echo "$(date '+%F %T') no project root $root" >> "$LOG"; exit 1; }
 name=rnd-weekly-$(date +%F)
 # model and effort: the review kind's (config plan.models.review), logged as a start line like any task start
-me=$(bash "$(dirname "$0")/../orchestrating-sessions/session-status" --kind review "$name") || me=
-# shellcheck disable=SC2206 # $me is `--model M --effort E`, words config already checked
-cmd=(claude --bg $me -n "$name" "Session task: weekly R&D run. Use the session-orchestration:rnd skill and follow it.")
+if [ "${2:-}" = "--dry-run" ]; then   # --config: no start line for a run that starts nothing
+  me=$(bash "$ss" --config plan.models.review) && me="--model ${me%%/*} --effort ${me#*/}"
+else me=$(bash "$ss" --kind review "$name"); fi || me=
+read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
+cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "Session task: weekly R&D run. Use the session-orchestration:rnd skill and follow it.")
 if [ "${2:-}" = "--dry-run" ]; then
   printf '%q ' "${cmd[@]}"; echo; command -v claude; exit 0
 fi
