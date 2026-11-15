@@ -154,7 +154,9 @@ coord_start() {
   local n out rc cmd
   n=$(coord_name "$1")
   # SESSION_STATUS_CLAUDE: the claude command, as for --successor (a dev build's `claude --plugin-dir DIR`).
-  cmd="${SESSION_STATUS_CLAUDE:-claude} -n $n 'Act as a coordinator'"
+  local me   # ROOT's config, not the caller's
+  me=$(cd "$1" 2>/dev/null && config plan.models.coordinator 2>/dev/null) || me=$(config plan.models.coordinator 2>/dev/null)
+  cmd="${SESSION_STATUS_CLAUDE:-claude} --model ${me%%/*} --effort ${me#*/} -n $n 'Act as a coordinator'"
   load_terminal; out=$(open_view "$n" "$1" "$cmd" 2>&1); rc=$?
   case $rc in
     0) [ "${out#reused}" = "$out" ] || { echo "a tab titled \"$n\" is open already ($out), so nothing started: close it, or run $cmd there"; return 1; }
@@ -214,8 +216,9 @@ detect_host() {
 #   plan.enabled        true | false: the task planner splits big tasks into chunks         default true
 #   plan.max_parallel   integer >= 1: chunk sessions at once                                default 3
 #   plan.models.KIND    MODEL/EFFORT (effort low|medium|high|xhigh|max; never fable), KIND design | build | mechanical | review
-#                       | release | scan     default opus/xhigh, opus/medium, sonnet/medium, opus/xhigh,
-#                       sonnet/medium, haiku/low
+#                       | release | scan | coordinator     default opus/xhigh, opus/medium, sonnet/medium, opus/xhigh,
+#                       sonnet/medium, haiku/low, opus/medium (coordinator: what coord_start, the feature doc's
+#                       start and --successor fall back to when the predecessor's transcript names none)
 #   handoff.at.KIND     integer tokens, 0 = off: context where hooks/context-watch.sh asks a session to hand off,
 #                       KIND chunk | task | coordinator (person only)   default 125000, 145000, 145000 (a task's
 #                       successor starts at ~45K: at 120K, handed-over review rounds handed off again within minutes)
@@ -223,16 +226,31 @@ detect_host() {
 #   handoff.stop_room   integer tokens: room left under the compaction ceiling (person only)   default 15000
 #   compact.window      integer tokens: the autoCompactWindow sessions are expected to have (person only)
 #                                                                       default 220000
-# model_ok MODEL [EFFORT]: a model name the CLI takes, never fable, and an effort it takes. One rule for config
-# plan.models, --plan (its Python copy: okme) and --handover.
-model_ok() { [[ $1 =~ ^[a-z][a-z0-9.-]*$ && $1 != *fable* ]] && { [ $# = 1 ] || [[ $2 =~ ^(low|medium|high|xhigh|max)$ ]]; }; }
+# model_ok MODEL [EFFORT]: a model name the CLI takes, never fable, and an effort it takes. MODEL/EFFORT as one
+# argument works too (plan.py calls it so). The one rule for config plan.models, --plan and --handover's flags.
+# FABLE_OK=1: fable passes (a model the user chose for that session by hand, which a handover keeps).
+model_ok() {
+  [ $# = 1 ] && [[ $1 == */* ]] && set -- "${1%%/*}" "${1#*/}"
+  [[ $1 =~ ^[a-z][a-z0-9.-]*$ ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]]; } &&
+    { [ $# = 1 ] || [[ $2 =~ ^(low|medium|high|xhigh|max)$ ]]; }
+}
+# last_model TRANSCRIPT: "MODEL EFFORT" its session last ran on (its last main-thread reply; EFFORT is empty from a
+# Claude Code that didn't record it), fable included; prints nothing when no reply names a valid one.
+last_model() {
+  local m e
+  read -r m e < <(grep '"type":"assistant"' "$1" 2>/dev/null | jq -r 'select(.isSidechain != true and (.message.model // "") != "<synthetic>")
+    | "\(.message.model // "") \(.effort // "")"' 2>/dev/null | tail -1)
+  FABLE_OK=1 model_ok "${m:-}" || return 0
+  model_ok x "${e:-}" || e=
+  echo "$m${e:+ $e}"
+}
 config() {
   local key=${1:-} v ok=
   case $key in
     tracker|host|key_pattern|approvals.delegate|features.accounts|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file) ;;
-    plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan) ;;
+    plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate features.accounts features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate features.accounts features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
@@ -263,7 +281,7 @@ config() {
     tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;; approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file) ;; telemetry) echo off ;;
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
-    plan.models.design|plan.models.review) echo opus/xhigh ;; plan.models.build) echo opus/medium ;;
+    plan.models.design|plan.models.review) echo opus/xhigh ;; plan.models.build|plan.models.coordinator) echo opus/medium ;;
     plan.models.mechanical|plan.models.release) echo sonnet/medium ;; plan.models.scan) echo haiku/low ;;
     handoff.at.chunk) echo 125000 ;; handoff.at.task) echo 145000 ;; handoff.at.coordinator) echo 145000 ;;
     handoff.hard_after) echo 25000 ;; handoff.stop_room) echo 15000 ;; compact.window) echo 220000 ;;

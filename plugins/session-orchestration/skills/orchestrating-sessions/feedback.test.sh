@@ -126,7 +126,7 @@ agent() { export AGENTS_JSON="[{\"sessionId\":\"s1\",\"name\":\"plugin-clone-coo
 agent done; out=$("$FB" coordinator 2>&1); rc=$?
 [ "$rc" = 1 ] && [[ $out == *"(plugin-clone-coordinator) isn't running"* ]] || fail "coordinator not running: rc=$rc $out"
 out=$("$FB" coordinator --start); rc=$?
-[ "$rc" = 1 ] && [ "$out" = "no terminal opens it here (config terminal): run in a new terminal: cd $(printf %q "$R") && claude -n plugin-clone-coordinator 'Act as a coordinator'" ] ||
+[ "$rc" = 1 ] && [ "$out" = "no terminal opens it here (config terminal): run in a new terminal: cd $(printf %q "$R") && claude --model opus --effort medium -n plugin-clone-coordinator 'Act as a coordinator'" ] ||
   fail "coordinator --start, plain terminal: rc=$rc $out"
 # The plugin coordinator's own footer has its own stamp, so it doesn't hide the offer elsewhere.
 rm -f "$D/.footer-shown"; [ -n "$(cd "$T/plugin-clone" && "$FB" footer)" ] || fail "footer in the plugin coordinator's root, first"

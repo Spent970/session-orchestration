@@ -14,7 +14,8 @@ while you aren't running.
 
 **Setting it up.** Once:
 1. Set `feedback.repo_dir` to a clone of the plugin repo that you can push to.
-2. Run `claude 'Act as a coordinator'` in that clone. Setup runs the first time. When `CLAUDE.md` is tracked, setup
+2. Run `claude --model opus --effort medium 'Act as a coordinator'` in that clone (config `plan.models.coordinator`,
+   which `session-status --kind coordinator` prints; `feedback coordinator --start` passes it). Setup runs the first time. When `CLAUDE.md` is tracked, setup
    writes its section to `CLAUDE.local.md`.
 
 `feedback coordinator` prints this coordinator's name (`<folder>-coordinator`) while it runs, under any account, and

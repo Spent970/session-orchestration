@@ -10,10 +10,9 @@ if not a or a[1:2] not in ([], ["--check"], ["--next"], ["--brief"], ["--done"])
 if not os.path.isfile(a[0]): die(f"no file {a[0]}")
 path = os.path.abspath(a[0]); mode = a[1] if len(a) > 1 else ""
 d, key = os.path.dirname(path), os.path.basename(path).removesuffix(".md")
-MODEL_EFFORT = r"[a-z][a-z0-9.-]*/(low|medium|high|xhigh|max)"
 KINDS = dict(m.split("=", 1) for m in os.environ["PLAN_MODELS"].split())
 MAXP, AT = max(1, int(os.environ["PLAN_MAXP"])), int(os.environ["PLAN_AT"])
-okme = lambda me: bool(re.fullmatch(MODEL_EFFORT, me)) and "fable" not in me   # lib.sh model_ok: one rule
+okme = lambda me: "/" in me and subprocess.run(["bash", "-c", '. "$0" && model_ok "$1"', os.environ["PLAN_LIB"], me]).returncode == 0   # lib.sh's one rule
 START = 60000   # ponytail: a constant session start; a later chunk calibrates it from rnd.py's measured base
 
 lines, i = open(path).read().splitlines(), 0

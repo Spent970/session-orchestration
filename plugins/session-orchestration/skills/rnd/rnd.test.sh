@@ -441,7 +441,7 @@ rm -r "$a/eeeeeeee-5555.jsonl" "$a/ffffffff-6666.jsonl" "$home/.claude-other/pro
 mkdir -p "$tmp/.local/bin"
 printf '#!/bin/sh\necho "$@" > %q\n' "$tmp/claude.args" > "$tmp/.local/bin/claude"; chmod +x "$tmp/.local/bin/claude"
 out=$(HOME=$tmp RND_LOG=$tmp/log "$here/rnd-weekly" "$tmp" --dry-run)
-grep -q 'claude --bg -n rnd-weekly-' <<<"$out" && grep -qx "$tmp/.local/bin/claude" <<<"$out" && [ ! -e "$tmp/claude.args" ] ||
+grep -q 'claude --bg --model opus --effort xhigh -n rnd-weekly-' <<<"$out" && grep -qx "$tmp/.local/bin/claude" <<<"$out" && [ ! -e "$tmp/claude.args" ] ||
   fail "rnd-weekly --dry-run starts nothing, and finds the stub" "$out"
 HOME=$tmp RND_LOG=$tmp/log "$here/rnd-weekly" "$tmp"
 grep -q 'session-orchestration:rnd' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log" || fail "rnd-weekly starts the run" "$(cat "$tmp/log")"
