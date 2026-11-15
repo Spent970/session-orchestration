@@ -180,7 +180,7 @@ A `Chunk: KEY/N` line in your first prompt marks you as one chunk of a plan:
 - The context-watch hook's soft line says how to hand off (the handoff heading, the `-prev-K` rename, whom to
   tell): follow it. With no coordinator (`session-status --coordinator` prints nothing), finish with `session-status
   --handover --self -- '<next step>'` instead: its last line names the rename, and with no `--model`/`--effort` your
-  successor runs on what you run on.
+  successor runs on your plan row's model and effort.
 - After landing, append `## cN: done` to `KEY-build.md` and run `session-status --plan FILE --done N`.
 
 ## Handing the user a command

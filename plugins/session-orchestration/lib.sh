@@ -155,8 +155,9 @@ coord_start() {
   n=$(coord_name "$1")
   # SESSION_STATUS_CLAUDE: the claude command, as for --successor (a dev build's `claude --plugin-dir DIR`).
   local me   # ROOT's config, not the caller's
-  me=$(cd "$1" 2>/dev/null && config plan.models.coordinator 2>/dev/null) || me=$(config plan.models.coordinator 2>/dev/null)
-  cmd="${SESSION_STATUS_CLAUDE:-claude} --model ${me%%/*} --effort ${me#*/} -n $n 'Act as a coordinator'"
+  me=$(cd "$1" 2>/dev/null && config plan.models.coordinator 2>/dev/null)
+  # %q: a [1m] model would glob in the shell that runs cmd
+  cmd="${SESSION_STATUS_CLAUDE:-claude}${me:+ --model $(printf %q "${me%%/*}") --effort ${me#*/}} -n $n 'Act as a coordinator'"
   load_terminal; out=$(open_view "$n" "$1" "$cmd" 2>&1); rc=$?
   case $rc in
     0) [ "${out#reused}" = "$out" ] || { echo "a tab titled \"$n\" is open already ($out), so nothing started: close it, or run $cmd there"; return 1; }
@@ -226,20 +227,20 @@ detect_host() {
 #   handoff.stop_room   integer tokens: room left under the compaction ceiling (person only)   default 15000
 #   compact.window      integer tokens: the autoCompactWindow sessions are expected to have (person only)
 #                                                                       default 220000
-# model_ok MODEL [EFFORT]: a model name the CLI takes, never fable, and an effort it takes. MODEL/EFFORT as one
-# argument works too (plan.py calls it so). The one rule for config plan.models, --plan and --handover's flags.
+# model_ok MODEL [EFFORT]: a model name the CLI takes (a 1M-context [1m] suffix too), never fable, and an effort it
+# takes. The one rule for config plan.models, --plan and --handover's flags.
 # FABLE_OK=1: fable passes (a model the user chose for that session by hand, which a handover keeps).
 model_ok() {
-  [ $# = 1 ] && [[ $1 == */* ]] && set -- "${1%%/*}" "${1#*/}"
-  [[ $1 =~ ^[a-z][a-z0-9.-]*$ ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]]; } &&
+  local re='^[a-z][a-z0-9.-]*(\[1m\])?$'
+  [[ $1 =~ $re ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]]; } &&
     { [ $# = 1 ] || [[ $2 =~ ^(low|medium|high|xhigh|max)$ ]]; }
 }
 # last_model TRANSCRIPT: "MODEL EFFORT" its session last ran on (its last main-thread reply; EFFORT is empty from a
 # Claude Code that didn't record it), fable included; prints nothing when no reply names a valid one.
 last_model() {
   local m e
-  read -r m e < <(grep '"type":"assistant"' "$1" 2>/dev/null | jq -r 'select(.isSidechain != true and (.message.model // "") != "<synthetic>")
-    | "\(.message.model // "") \(.effort // "")"' 2>/dev/null | tail -1)
+  read -r m e < <(grep '"type":"assistant"' "$1" 2>/dev/null | jq -r 'select(.type == "assistant" and .isSidechain != true and (.message.model // "") != "<synthetic>")
+    | "\(.requestedModel // .message.model // "") \(.effort // "")"' 2>/dev/null | tail -1)   # requestedModel keeps [1m]
   FABLE_OK=1 model_ok "${m:-}" || return 0
   model_ok x "${e:-}" || e=
   echo "$m${e:+ $e}"

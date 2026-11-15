@@ -12,7 +12,7 @@ path = os.path.abspath(a[0]); mode = a[1] if len(a) > 1 else ""
 d, key = os.path.dirname(path), os.path.basename(path).removesuffix(".md")
 KINDS = dict(m.split("=", 1) for m in os.environ["PLAN_MODELS"].split())
 MAXP, AT = max(1, int(os.environ["PLAN_MAXP"])), int(os.environ["PLAN_AT"])
-okme = lambda me: "/" in me and subprocess.run(["bash", "-c", '. "$0" && model_ok "$1"', os.environ["PLAN_LIB"], me]).returncode == 0   # lib.sh's one rule
+okme = lambda me: "/" in me and subprocess.run(["bash", "-c", '. "$0" && model_ok "${1%%/*}" "${1#*/}"', os.environ["PLAN_LIB"], me]).returncode == 0   # lib.sh's one rule
 START = 60000   # ponytail: a constant session start; a later chunk calibrates it from rnd.py's measured base
 
 lines, i = open(path).read().splitlines(), 0
