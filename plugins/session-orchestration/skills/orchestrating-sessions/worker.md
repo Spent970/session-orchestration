@@ -135,6 +135,18 @@ included (Teams needs one with a file). A word added after the approval isn't ap
 says how to fix the command, or holds the line to send, `needs your approval: <exact action>`: put that in your
 `blocked` report and end your turn. Never retry another way.
 
+The gated commands, edits included, and the action the hook names for each (ask with these words, not your own):
+- A comment post or edit: `gh pr|issue comment` (`--edit-last` too), `bitbucketdc-cli pr comment create|update`,
+  `forgejo-cli pr comment create|update`, `jiradc-cli issue comment create|update`: `post comment FILE on TARGET
+  (sha256 X)`. An edit is named like a new post. TARGET is `OWNER/REPO#ID` for gh and forgejo-cli, `REPO#ID` for
+  bitbucketdc-cli, the issue key for jiradc-cli.
+- A review: `post <mode> review FILE on TARGET (sha256 X)`; a bare approval `approve TARGET`.
+- A merge: `merge TARGET`, e.g. `merge OWNER/REPO#ID`. Your task's approval covers landing your own PR: the
+  coordinator relays it with the Action ending in your session's name, `merge OWNER/REPO#ID (<session name>)` (within 24h of that approval; later, ask for the merge).
+- `msgraph message send|update`: `send|update teams message FILE to <chat or message id and every option, word for
+  word> (sha256 X)`; each `--attachments` file (absolute path) is named with its own `(sha256 Y)`. Mail: `send mail`,
+  `reply to mail`, `forward mail` the same way, with no attachments.
+
 ## Asking the user
 
 Ask in plain text, never with the question box, and not through plan mode in a background session: while either

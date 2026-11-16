@@ -107,7 +107,13 @@ user a command).
   its text). Relay with that action as the Action line, verbatim, plus the task key: `Action: merge app#271
   (PROJ-5164)`. Use the hook's words, not the CLI command: an Action naming the command fails the hook even when
   `verify-approval.sh` said verified. The worker's hook allows only that PR or issue, and for a post only a body
-  file with that sha256; anything else is denied. One relay allows one run.
+  file with that sha256; anything else is denied. One relay allows one run. Every gated command (comment edits
+  included: an edit is named like a new post) and its action: [worker.md](worker.md#posting-and-merging). A Teams
+  send's `--attachments` files are each named with their own sha256 too. A `gh` merge's Action names `OWNER/REPO#ID`;
+  the user's approval of the task covers landing its own PR: relay that with the worker's session name in the
+  parentheses, `Action: merge OWNER/REPO#ID (<session name>)`, within 24h of that approval (later, ask for the
+  merge itself). A relay whose source session has since stopped still
+  verifies, by its transcript's send of that quote.
 - Never relay an approval for something that was denied or blocked in your own session.
 - A review-inbox decision isn't relayed: the user's click on the inbox page is their approval to post that row
   ([review-inbox.md](review-inbox.md)).

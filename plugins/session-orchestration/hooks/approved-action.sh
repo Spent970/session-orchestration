@@ -6,7 +6,8 @@
 # plus the body file's sha256 for a post (and, for a gh review, its kind), or "merge"/"approve" (and no sha256) for a
 # merge or a bodiless approval. A forgejo-cli REPO is its --repo OWNER/REPO. A gh REPO is OWNER/REPO (HOST/OWNER/REPO off github.com), from -R/--repo or the PR's
 # URL (never guessed from a remote: gh picks its base repo by rules of its own). A relay whose Action names no tracker key (a project with
-# session-name keys) is verified with REPO's last part #ID as the key. Then: allow, once per relay
+# session-name keys) is verified with REPO's last part #ID as the key; a merge's Action may instead end "(<this session's name>)",
+# verified with that name (approving the task covers its landing). Then: allow, once per relay
 # (~/.cache/session-status/approved/). The command must be that one CLI call alone. Anything else on
 # those commands: deny, with the exact action to report. A `gh api` call with a write method or fields, a
 # `forgejo-cli raw` call with a write method, or gh reached through a variable or $(…), is denied (asked, when
@@ -28,7 +29,7 @@
 # reserves them. A name split by quotes (g''h) isn't seen.
 # A Teams or mail send under the user's name (msgraph message send|update, mail send|reply|forward) is gated like a
 # post: the action names the body file's sha256 and everything else the call sends (chat or message id, recipients,
-# mentions, subject, …) word for word. A --draft or --dry-run sends nothing and passes. What can't be named by a
+# mentions, subject, a Teams attachment's absolute path and sha256, …) word for word. A --draft or --dry-run sends nothing and passes. What can't be named by a
 # sha256 is denied (asked, when attended): mail attachments, mail draft|scheduled send, mail rule create|update (a
 # rule can forward), calendar create|update|cancel|respond (they mail the attendees), file grant (mails an invite),
 # msgraph raw with a write method, and msgraph through a variable or $(…).
@@ -201,7 +202,19 @@ grep -qiE "$msw"'[[:space:]](.*[[:space:]])?raw[[:space:]].*--method[=[:space:]]
 grep -qE "$msind" <<<"$uq" && grep -qiE "(^|[[:space:]])($msv|raw[[:space:]].*--method[=[:space:]]+(POST|PUT|PATCH|DELETE))" <<<"$uq" &&
   attended "Blocked: msgraph reached through a variable or \$(…) can't be checked by the approval hook. Run it by its name (msgraph …, or npx -y <package> …), as one plain command."
 [ -n "$bbops" ] || [ "$ghn" -gt 0 ] || pass
-grep -qE "$ghind" <<<"$scan" &&
+# A backtick or $ inside '…' (a perl or sed program printing `gh pr create`) runs nothing: made `_`; all else stays
+# as written ("$(…)" runs, x='gh' names it). Not when the text is opaque or a quote is left open: a heredoc body's
+# apostrophe would hide real code. (A gated gh call such a program runs still reads as a post or merge the walk
+# can't find: denied below.)
+ghl=$scan
+[ "$opaque" = 1 ] || ghl=$(printf '%s' "$scan" | awk -v Q="'" '{ s = s (NR > 1 ? "\n" : "") $0 } END { n = length(s); o = ""; iq = ""
+  for (j = 1; j <= n; j++) { c = substr(s, j, 1)
+    if (iq != Q && c == "\\") { o = o c substr(s, j + 1, 1); j++; continue }
+    if (iq == "" && (c == Q || c == "\"") || c == iq) iq = (iq == "" ? c : "")
+    else if (iq == Q && (c == "`" || c == "$")) c = "_"
+    o = o c }
+  printf "%s", (iq == "" ? o : s) }') || exit 1
+grep -qE "$ghind" <<<"$ghl" &&
   attended "Blocked: gh reached through a variable or \$(…) can't be checked by the approval hook. Run it by its name (gh …), as one plain command."
 alone="Run that CLI call alone, as one plain command (the CLI, then its subcommand, then the arguments)."
 # Fails closed on anything it can't read as exactly one call: a second CLI call (chained, or glued to a token), a
@@ -275,7 +288,15 @@ while [ "$i" -lt "${#toks[@]}" ]; do
         # Variadic: every word up to the next option.
         --to|--cc|--bcc|--add-to|--remove-to|--add-cc|--remove-cc|--mention|--attachments)
           [ "$1 ${args[0]}" != '--attachments mail' ] || att=1
-          v=$1; while [ $# -gt 1 ] && [[ $2 != -* ]]; do v="$v $2"; shift; done; msx+=("$v") ;;
+          # A Teams attachment is named with its sha256 too, so the approval covers the file it sends.
+          v=$1 f=$1; while [ $# -gt 1 ] && [[ $2 != -* ]]; do
+            x=$2
+            if [ "$f" = --attachments ] && [ -z "$att" ]; then
+              case "$x" in /*) ;; *) decide deny "Blocked: give each attachment as an absolute path, so the approval can name its sha256." ;; esac
+              [ -f "$x" ] || decide deny "Blocked: no such attachment: $x"
+              x="$x (sha256 $(shasum -a 256 "$x" | cut -d' ' -f1))"
+            fi
+            v="$v $x"; shift; done; msx+=("$v") ;;
         -*) msx+=("$1") ;;
         *) if [ -z "$target" ]; then target=$1; else msx+=("$1"); fi ;;
       esac
@@ -441,7 +462,7 @@ relays=$(jq -c '
   | .[] | {name: $o.name, quote: .[0], action: .[1], sid: .[2], scwd: .[3]}' "$tp" 2>/dev/null) || exit 1
 # A relay counts for this command when its Action names the target as a whole word, and the sha256 for a post or
 # "merge"/"approve" with no sha256 for a merge or bare approval (a gh review: its kind and "review" too); then the quote must verify, with the task key the Action names.
-tried=
+tried= me=
 while IFS= read -r r; do
   [ -n "$r" ] || continue
   act=$(jq -r .action <<<"$r")
@@ -459,11 +480,17 @@ while IFS= read -r r; do
   # (A send's key from outside its action: a subject or id there may hold words like UTF-8.)
   a=$act; [ "$kind" != send ] || a=${act/"$action"/}
   key=$target; [ "$kind" = jirapost ] || key=$(grep -oE '[A-Z][A-Z0-9]+-[0-9]+' <<<"$a" | head -1)
+  # A merge is the task's landing, which approving the task covers: with session-name keys, an Action ending
+  # "(<this session's name>)" is verified with that name, so the user's yes to the task itself verifies.
+  if [ -z "$key" ] && [ "$kind" = merge ] && [[ $act =~ \(([A-Za-z0-9][A-Za-z0-9._-]*)\)[[:space:]]*$ ]]; then
+    [ -n "$me" ] || me=$(jq -r 'select(.type == "agent-name") | .agentName // empty' "$tp" 2>/dev/null | tail -1)
+    [ "${BASH_REMATCH[1]}" != "$me" ] || key=$me
+  fi
   # No tracker key (session-name keys): the user's words must name the target itself (REPO#ID; OWNER/ may precede).
   [ -n "$key" ] || key=$short
   [ -n "$key" ] || { tried="the matching relay's Action names no task key"; continue; }
   v=$(cd "$cwd" 2>/dev/null && jq -r .quote <<<"$r" |
-      bash "$here/../skills/orchestrating-sessions/verify-approval.sh" "$(jq -r .sid <<<"$r")" "$(jq -r .scwd <<<"$r")" "$(jq -r .name <<<"$r")" "$key")
+      bash "$here/../skills/orchestrating-sessions/verify-approval.sh" "$(jq -r .sid <<<"$r")" "$(jq -r .scwd <<<"$r")" "$(jq -r .name <<<"$r")" "$key" "$act")
   # One use per relay: a rerun (the CLI timed out after the server took it) needs a new approval.
   # ponytail: used up when allowed, not when the command succeeds; the deny says to check before asking again.
   used=~/.cache/session-status/approved/$(printf '%s|%s|%s' "$tp" "$action" "$r" | shasum -a 256 | cut -c1-32)

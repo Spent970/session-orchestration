@@ -839,7 +839,7 @@ const ASK_SCHEMA = {
     details: { type: 'string', description: 'Optional markdown the pane shows when the ask is expanded: what the user needs to decide (a diff summary, the reply being answered). Not part of the answer.' },
     target: { type: 'string', description: 'Optional: where the action lands, e.g. "app#282 src/a.ts:42" for an inline comment, "app#282 general", "PROJ-5195" for a Jira comment.' },
     kind: { type: 'string', enum: KINDS, description: 'Optional, with body_file only: a PR review finding\'s kind: issue (the code is wrong), suggestion (it works but could be better), question (scope or intent the author or PO decides). The pane shows it as a badge and sorts issues first.' },
-    body_file: { type: 'string', description: 'Optional absolute path of a comment body file, prepared before asking. The pane reads it now and shows its text (as markdown) and sha256; the sha256 the question names must be this one.' },
+    body_file: { type: 'string', description: 'Optional absolute path of a comment body file, prepared before asking. The pane reads it now and shows its text (as markdown) and sha256; the question must name this sha256; any other sha256 it names must be that of a file it names by absolute path (a Teams send\'s attachment).' },
   },
   required: ['key', 'question', 'options'],
 }
@@ -1623,10 +1623,18 @@ export const register: Register = on => {
         return { deny: `ask_approval: can't read body_file ${String(body_file)}: ${err instanceof Error ? err.message : String(err)}` }
       }
       // The approval names the file by its sha256: one the user didn't see here would approve another text.
-      // So the question (the Quote) must name exactly this file's sha256.
+      // So the question (the Quote) must name this file's sha256, and any other only as the hook names a Teams
+      // send's attachment: right after its absolute path, `/path (sha256 X)`, matching that file as it is now.
       const named = [...new Set([...question.matchAll(/\b[0-9a-f]{64}\b/g)].map(m => m[0]))]
-      if (named.length !== 1 || named[0] !== body.sha256) {
+      if (!named.includes(body.sha256)) {
         return { deny: `ask_approval: with body_file, the question must name its sha256 (${body.sha256}, the file as it is now)${named.length ? `, not ${named.join(', ')}` : ''}.` }
+      }
+      const pairs = [...question.matchAll(/(?<![^\s(])(\/[^\s()]+) \(sha256 ([0-9a-f]{64})\)/g)]
+        .map(m => ({ path: m[1] ?? '', hash: m[2] ?? '' })).filter(m => m.hash !== body?.sha256)
+      const paired = await Promise.all(pairs.map(m => readBody($, m.path).then(b => b.sha256 === m.hash && m.hash, () => false)))
+      const bad = named.filter(h => h !== body?.sha256 && !paired.includes(h))
+      if (bad.length) {
+        return { deny: `ask_approval: the question names sha256 ${bad.join(', ')}, which is neither body_file's (${body.sha256}) nor written right after the absolute path of the file it hashes (as the file is now).` }
       }
     }
     const text = opt(details) && clean(String(details))
