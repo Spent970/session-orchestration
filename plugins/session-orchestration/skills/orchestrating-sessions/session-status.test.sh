@@ -711,6 +711,12 @@ cp "$proj/$kid.jsonl" "$tmp/kid.jsonl"
 echo '{"type":"assistant","effort":"xhigh","message":{"model":"claude-fable-5-2"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
 grep -q '^cfg --bg --model claude-fable-5-2 --effort xhigh -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept no model: $c"; exit 1; }
+# This account's Fable limit hit (the overall one not): opus at the same effort, until it resets.
+u=$tmp/.cache/session-status/usage; mkdir -p "$u"; printf 'ffffffff-0000-0000-0000-000000000000\trow-f\n' > "$u/cfg.fable"
+printf '{"type":"assistant","uuid":"row-f","quotaLimits":{"status":"rejected","rateLimitType":"seven_day_overage_included","resetsAt":%s}}\n' $(( $(date +%s) + 3600 )) > "$proj/ffffffff-0000-0000-0000-000000000000.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model opus --effort xhigh -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept fable past its limit: $c"; exit 1; }
+rm "$proj/ffffffff-0000-0000-0000-000000000000.jsonl" "$u/cfg.fable"
 run --handover "$kid" --effort low -- 'x' >/dev/null; c=$(calls)
 grep -q '^cfg --bg --model claude-fable-5-2 --effort low -n PROJ-9-c3b ' <<<"$c" || { echo "handover --effort over the old one's: $c"; exit 1; }
 # Another model given: the old effort isn't carried over to it.
@@ -733,6 +739,14 @@ for bad in '--model opus --effort max' '--model haiku'; do
   out=$(run --handover "$kid" $bad --escalate -- 'x') && rc=0 || rc=$?
   [ "$rc" = 2 ] && [[ $out == '--escalate: '*'not handed over'* ]] && ! calls | grep -q 'stop\|--bg' ||
     { echo "handover --escalate $bad not refused: $rc $out"; exit 1; }; done
+# An account config fable.accounts lists: --model fable passes, and opus/max escalates to fable/max (fable/max is the top).
+cf=$tmp/.config/session-orchestration/config.json; mkdir -p "${cf%/*}"; rm -f "$cf.bak"; [ ! -f "$cf" ] || mv "$cf" "$cf.bak"
+echo '{"fable": {"accounts": ["~/cfg/"]}}' > "$cf"
+run --handover "$kid" --model claude-opus-5-5 --effort max --escalate -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model fable --effort max -n PROJ-9-c3b ' <<<"$c" || { echo "handover --escalate to fable: $c"; exit 1; }
+out=$(run --handover "$kid" --model fable --effort max --escalate -- 'x') && rc=0 || rc=$?
+[ "$rc" = 2 ] && [[ $out == '--escalate: fable/max has no rung above it'* ]] || { echo "handover --escalate past fable/max: $rc $out"; exit 1; }
+rm "$cf"; [ ! -f "$cf.bak" ] || mv "$cf.bak" "$cf"
 # A Claude Code that records no effort: the model alone.
 echo '{"type":"assistant","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
@@ -811,12 +825,25 @@ setacct cfg "$(sess "$o" p-coordinator idle 1 interactive)"
 out=$(as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -qF "  cd $root && CLAUDE_CONFIG_DIR=~/cfg claude --model opus --effort medium -n p-coordinator-next 'Act as a coordinator. You succeed \"p-coordinator\" (0a0a0a0a): " <<<"$out" &&
   grep -qF -- '--await ready` (Bash, run_in_background)' <<<"$out" && ! grep -q 'Claude Code Desktop' <<<"$out" || { echo "--successor, plain terminal: $rc $out"; exit 1; }
+# Per account: the coordinator default is fable/medium under an account fable.accounts lists, opus/medium elsewhere.
+cf=$tmp/.config/session-orchestration/config.json; mkdir -p "${cf%/*}"; rm -f "$cf.bak"; [ ! -f "$cf" ] || mv "$cf" "$cf.bak"
+echo '{"fable": {"accounts": ["~/cfg"]}}' > "$cf"; mkdir -p "$tmp/work"
+out=$(as "$o" --successor) && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "CLAUDE_CONFIG_DIR=~/cfg claude --model fable --effort medium -n p-coordinator-next" <<<"$out" || { echo "--successor, fable account: $rc $out"; exit 1; }
+out=$(as "$o" --successor --account "$tmp/work") && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "CLAUDE_CONFIG_DIR=~/work claude --model opus --effort medium -n p-coordinator-next" <<<"$out" || { echo "--successor, account without fable: $rc $out"; exit 1; }
+rm "$cf"; [ ! -f "$cf.bak" ] || mv "$cf.bak" "$cf"
 # The successor runs on what the old one last ran on, fable included (a sidechain or synthetic reply doesn't count).
 printf '%s\n' '{"type":"assistant","effort":"high","message":{"model":"claude-fable-5-2"}}' '{"type":"assistant","isSidechain":true,"effort":"low","message":{"model":"haiku"}}' \
   '{"type":"assistant","message":{"model":"<synthetic>"}}' > "$proj/$o.jsonl"
 out=$(as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -qF "claude --model claude-fable-5-2 --effort high -n p-coordinator-next" <<<"$out" || { echo "--successor kept no model: $rc $out"; exit 1; }
-rm "$proj/$o.jsonl"
+# Its account's Fable limit hit (the overall one not): the config's coordinator model instead, until it resets.
+u=$tmp/.cache/session-status/usage; mkdir -p "$u"; printf 'ffffffff-0000-0000-0000-000000000000\trow-f\n' > "$u/cfg.fable"
+printf '{"type":"assistant","uuid":"row-f","quotaLimits":{"status":"rejected","rateLimitType":"seven_day_overage_included","resetsAt":%s}}\n' $(( $(date +%s) + 3600 )) > "$proj/ffffffff-0000-0000-0000-000000000000.jsonl"
+out=$(as "$o" --successor) && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "claude --model opus --effort medium -n p-coordinator-next" <<<"$out" || { echo "--successor kept fable past its limit: $rc $out"; exit 1; }
+rm "$proj/$o.jsonl" "$proj/ffffffff-0000-0000-0000-000000000000.jsonl" "$u/cfg.fable"
 # From Claude Code Desktop (no tab of its own) it says where to run the command.
 out=$(CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -q "^This is Claude Code Desktop: tell the user to run it in the session's Terminal" <<<"$out" || { echo "--successor from Desktop: $rc $out"; exit 1; }
@@ -1328,7 +1355,7 @@ c3: est 70K over the 65K budget
 c6: unknown dep 9
 c6: unknown kind planning
 c6: no done-when
-c6: model/effort opus is not like opus/medium (efforts: low medium high xhigh max; no fable)
+c6: model/effort opus is not like opus/medium (efforts: low medium high xhigh max; fable only under an account fable.accounts lists)
 cycle: c6 → c6
 c2 and c3 both touch docs/*.md ~ docs/guide.md
 EOF
@@ -1396,6 +1423,24 @@ echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low",
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = "{\"t\":T,\"k\":\"start\",\"what\":\"mechanical\",\"model\":\"sonnet\",\"effort\":\"medium\",\"sess\":\"96bb4fcd0a71\"}" ] &&
   ! run --kind build 'two words' 2>/dev/null && ! run --kind build a b 2>/dev/null &&
   ! run --kind chunky 2>/dev/null && ! run --kind 2>/dev/null || { echo "--kind"; tail -3 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
+# A fable kind: plan.models.scan fable/low starts on fable under an account fable.accounts lists, else the default.
+echo '{"fable": {"accounts": ["~/elsewhere"]}, "plan": {"models": {"scan": "fable/low"}}}' > "$tmp/.config/session-orchestration/config.json"
+[ "$(run --kind scan 2>/dev/null)" = '--model haiku --effort low' ] || { echo "--kind fable, account without it"; exit 1; }
+echo '{"fable": {"accounts": ["~/elsewhere", "~/cfg"]}, "plan": {"models": {"scan": "fable/low"}}}' > "$tmp/.config/session-orchestration/config.json"
+[ "$(run --kind scan)" = '--model fable --effort low' ] && [ "$(run --kind coordinator)" = '--model fable --effort medium' ] &&
+  [ "$(run --kind design)" = '--model fable --effort xhigh' ] && [ "$(run --kind review)" = '--model fable --effort xhigh' ] &&
+  [ "$(run --kind build)" = '--model opus --effort medium' ] || { echo "--kind fable"; exit 1; }
+# The account's Fable limit reached, its overall limit not: no fable until the limit's resetsAt, then fable again.
+u=$tmp/.cache/session-status/usage; mkdir -p "$u"; fsid=ffffffff-1111-2222-3333-444444444444
+printf '30\t%s\n' $(( $(date +%s) + 86400 )) > "$u/cfg"; printf '%s\trow-fable\n' "$fsid" > "$u/cfg.fable"
+hit() { printf '{"type":"assistant","uuid":"row-fable","quotaLimits":{"status":"rejected","rateLimitType":"seven_day_overage_included","resetsAt":%s},"message":{"model":"<synthetic>","content":[{"type":"text","text":"You'"'"'ve hit your Fable limit"}]}}\n' "$1" > "$proj/$fsid.jsonl"; }
+hit $(( $(date +%s) + 3600 ))
+[ "$(run --kind design)" = '--model opus --effort xhigh' ] && [ "$(run --kind coordinator)" = '--model opus --effort medium' ] &&
+  [ "$(run --kind scan)" = '--model haiku --effort low' ] || { echo "--kind with the Fable limit hit: $(run --kind design)"; exit 1; }
+hit $(( $(date +%s) - 60 ))
+[ "$(run --kind design)" = '--model fable --effort xhigh' ] || { echo "--kind after the Fable limit reset: $(run --kind design)"; exit 1; }
+rm -f "$proj/$fsid.jsonl" "$u/cfg" "$u/cfg.fable"
+echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low", "review": "sonnet/high"}}}' > "$tmp/.config/session-orchestration/config.json"
 # KIND:S|M|L moves the effort a step (held at low and max) and logs the size with a NAME.
 [ "$(run --kind build:L claude-plugins-fix-doc)" = '--model opus --effort high' ] &&
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = '{"t":T,"k":"start","what":"build","model":"opus","effort":"high","sess":"96bb4fcd0a71","size":"L"}' ] &&

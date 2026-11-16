@@ -82,7 +82,7 @@ if mode == "--check":
         out += [f"c{n}: unknown dep {x}" for x in r["deps"] if x not in R]
         if r["kind"] not in KINDS: out.append(f"c{n}: unknown kind {r['kind'] or '(none)'}")
         if not r["done"]: out.append(f"c{n}: no done-when")
-        if r["model"] != "default" and not okme(r["model"]): out.append(f"c{n}: model/effort {r['model'] or '(none)'} is not like opus/medium (efforts: low medium high xhigh max; no fable)")
+        if r["model"] != "default" and not okme(r["model"]): out.append(f"c{n}: model/effort {r['model'] or '(none)'} is not like opus/medium (efforts: low medium high xhigh max; fable only under an account fable.accounts lists)")
         if r["est"] is None: out.append(f"c{n}: est {r['raw_est'] or '(none)'} is not like 60K")
         elif AT > 0 and r["est"] > AT - START: out.append(f"c{n}: est {r['est'] // 1000}K over the {(AT - START) // 1000}K budget")
     for cy in cycles:
