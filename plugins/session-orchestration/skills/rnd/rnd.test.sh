@@ -283,6 +283,8 @@ printf '%s\n' '{"t":1791821400,"k":"chunk","what":"scan","model":"opus","effort"
 out=$(XDG_STATE_HOME=$tmp/state rnd chunks 7)
 grep -q $'^PROJ-3\t1\tscan/opus/low\t11\t10\t' <<<"$out" && grep -q $'^PROJ-3\t2\tscan/opus/low\t22\t30\t' <<<"$out" ||
   fail "chunks: each log line on the chunk whose --done printed it" "$out"
+echo '{"t":1791822700,"k":"escalate","what":"chunk","model":"opus","effort":"high","sess":"abcdefabcdef"}' >> "$st/usage.jsonl"
+[ "$(XDG_STATE_HOME=$tmp/state rnd chunks 7 | tail -1)" = $'escalations\t1' ] || fail "chunks: escalations line" "$(XDG_STATE_HOME=$tmp/state rnd chunks 7 | tail -2)"
 
 # kinds: start lines joined by sha256(name)[:12]. kind-worker (17:00, build) ran in dddddd01 (a nudge, a done reply
 # the gate refused) and its successor dddddd02 (done at 17:30); dddddd00, an older session of that name, isn't it.
@@ -314,10 +316,12 @@ cat > "$a/dddddd03-1111.jsonl" <<'EOF'
 EOF
 printf '%s\n' "{\"t\":1791824400,\"k\":\"start\",\"what\":\"build\",\"model\":\"opus\",\"effort\":\"medium\",\"sess\":\"$(h kind-worker)\"}" \
   "{\"t\":1791824400,\"k\":\"start\",\"what\":\"scan\",\"model\":\"haiku\",\"effort\":\"low\",\"sess\":\"$(h kind-scan)\"}" \
-  '{"t":1791824400,"k":"start","what":"build","model":"opus","effort":"medium"}' >> "$st/usage.jsonl"
+  '{"t":1791824400,"k":"start","what":"build","model":"opus","effort":"medium"}' \
+  "{\"t\":1791825000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" \
+  "{\"t\":1791820000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" >> "$st/usage.jsonl"
 out=$(XDG_STATE_HOME=$tmp/state rnd kinds 7)
-[ "$(grep -v '^kind' <<<"$out")" = $'build\topus\tmedium\t2\t1\t10.0\t10.0\t1.00\t1\t1\t30\nscan\thaiku\tlow\t1\t1\t1.0\t1.0\t0.00\t0\t0\t-' ] ||
-  fail "kinds: join by hashed name and Supersedes:, haiku rates, done, handovers, nudges, minutes" "$out"
+[ "$(grep -v '^kind' <<<"$out")" = $'build\topus\tmedium\t2\t1\t10.0\t10.0\t1.00\t1\t1\t30\t1\nscan\thaiku\tlow\t1\t1\t1.0\t1.0\t0.00\t0\t0\t-\t0' ] ||
+  fail "kinds: join by hashed name and Supersedes:, haiku rates, done, handovers, nudges, minutes, escalations after the start" "$out"
 out=$(RATES=1,1,1,1 XDG_STATE_HOME=$tmp/state rnd kinds 7)
 grep -q $'^build\topus\tmedium\t2\t1\t2.0\t' <<<"$out" || fail "kinds: RATES prices every model alike" "$out"
 # kind-scan started again at 18:00 (review) in dddddd04, on claude-opus-4-1 ($15 for 1M input) with 1M 5-minute cache
@@ -328,9 +332,9 @@ cat > "$a/dddddd04-1111.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-12T18:00:11.000Z","requestId":"d4","message":{"model":"claude-opus-4-1-20250805","usage":{"input_tokens":1000000}}}
 {"type":"assistant","timestamp":"2026-10-12T18:00:12.000Z","requestId":"d5","message":{"model":"claude-opus-4-5-20251101","usage":{"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000}}}}
 EOF
-echo "{\"t\":1791828000,\"k\":\"start\",\"what\":\"review\",\"model\":\"opus\",\"effort\":\"xhigh\",\"sess\":\"$(h kind-scan)\"}" >> "$st/usage.jsonl"
+echo "{\"t\":1791828000,\"k\":\"start\",\"what\":\"review\",\"model\":\"opus\",\"effort\":\"xhigh\",\"sess\":\"$(h kind-scan)\",\"size\":\"L\"}" >> "$st/usage.jsonl"
 out=$(XDG_STATE_HOME=$tmp/state rnd kinds 7)
-grep -q $'^scan\thaiku\tlow\t1\t1\t1.0\t' <<<"$out" && grep -q $'^review\topus\txhigh\t1\t1\t21.25\t' <<<"$out" ||
+grep -q $'^scan\thaiku\tlow\t1\t1\t1.0\t' <<<"$out" && grep -q $'^review:L\topus\txhigh\t1\t1\t21.25\t' <<<"$out" ||
   fail "kinds: a reused name joins the later start only; older opus and 5-minute cache-write rates" "$out"
 
 # handoff: a coordinated root with one open entry (reworded once) and one resolved twice (recurring), whose history

@@ -29,9 +29,17 @@ Size by what the hardest step needs, not by the task's label. A "fix" can be `me
 - A batch takes the kind of its largest item. When one item is far larger than the rest, split it into its own task.
 - Say why in a few words where the kind is shown ("mechanical: one-file doc fix"), so the user can amend it.
 
+## Size it within the kind
+
+Add a size when the work sits clearly at one end of its kind, by expected context growth (plans.md's classes): `S`
+≤ 22K (a one-file fix), `M` ≤ 43K, `L` ≤ 65K (several files, tests to write). `build:S` runs one effort step below
+`plan.models.build`, `build:L` one above, `build:M` or a bare `build` as configured. Show it with the kind
+("build:L: three files and a new test"). Past L, split the work (plans.md). A size changes the effort only; a model
+change is the kind's or an escalation's (`session-status --handover --escalate`, after the same failure twice).
+
 ## Use it
 
-- **A session (`claude --bg`)**: run `session-status --kind <kind> <session-name>` as its own call (`<session-name>` is
+- **A session (`claude --bg`)**: run `session-status --kind <kind>[:S|M|L] <session-name>` as its own call (`<session-name>` is
   the `-n` value: letters, digits, `.`, `_`, `-`, at most 80) and paste the `--model M --effort E` it prints onto the
   start line. Exit 2 means a wrong kind or name: fix it, and don't start without the flags. It logs the start for rnd,
   so run it once per task: a handover or fresh restart of the same task reuses the flags. `session-status` is in this
@@ -42,7 +50,7 @@ Size by what the hardest step needs, not by the task's label. A "fix" can be `me
   plan.models.<kind>` prints it) as `model` when it is an alias the tool takes (`sonnet`, `opus`, `haiku`). A full
   model id: pass its family's alias. Set `effort` only when the user, a CLAUDE.md or a skill asks for that effort.
   Nothing is logged.
-- **An R&D run**: the usage log's start lines (`{"k":"start","what":KIND,"model":…,"effort":…,"sess":…}`) carry
+- **An R&D run**: the usage log's start lines (`{"k":"start","what":KIND,"model":…,"effort":…,"sess":…,"size":…}`, size only when given) carry
   `sess`, the first 12 hex characters of the session name's sha256 (the hash only keeps the name out of clear text:
   someone who can guess a name can confirm it). rnd's `kinds` report joins them to sessions that way and compares
-  cost and outcome per kind.
+  cost and outcome per kind (a sized start as `build:L`), with the escalations each start's sessions logged.

@@ -41,7 +41,7 @@ A resume re-reads the session's whole context on every turn. Before `--resume`, 
 session, read its context size (`ctx` in `--activity`, the pane's `ctx N%` on each session row). Over 200K tokens,
 for a small follow-up (a PR description, a reply), hand the task over to a fresh session: `session-status
 --handover <old-id> -- '<what next>'` (the successor runs on the model and effort the old one last ran on; pass
-`--model M --effort E` only to change them). The helper refuses those resumes (exit 4) for you and prints that command. It
+`--model M --effort E` only to change them, `--escalate` for one rung up after the same failure twice). The helper refuses those resumes (exit 4) for you and prints that command. It
 finds the old session's task key, refuses while it is mid-turn or waiting on a prompt, or when the replies folder
 has no `<KEY>.md` (ask the old session for a status report first, or write one), stops it (checked), and starts
 `claude --bg -n <its name>` from the project root, whose brief is `replies/<KEY>.md`, the what-next and a

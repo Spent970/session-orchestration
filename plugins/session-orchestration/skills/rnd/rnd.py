@@ -27,10 +27,12 @@ usage: python3 -I rnd.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
   chunks [days=7] [--session PREFIX]  one row per chunk (first prompt `Chunk: KEY/N`, successors joined through
                                   Supersedes: and summed) or per matching session: kind/model/effort, est, act growth
                                   (K), peak, cache read, out, USD, turns, compactions, handoff (none|before|after a
-                                  compaction), minutes; then a `ratio` line per kind (median act/est, last 20)
+                                  compaction), minutes; then a `ratio` line per kind (median act/est, last 20) and
+                                  an `escalations` line (chunk handovers with --escalate in the window, when any)
   kinds [days=7]                  per kind/model/effort of the usage log's start lines (session-status --kind KIND NAME),
                                   joined to sessions by hashed name and their successors: starts, joined, USD (sum,
-                                  median), share reaching `reply … done`, handovers, nudges, median minutes to done
+                                  median), share reaching `reply … done`, handovers, nudges, median minutes to done,
+                                  escalations; a sized start (--kind build:L) groups as build:L
   trial [days=28]                 the planner trial's arms side by side (tasks with a chunk session vs the rest):
                                   units, median USD and tokens per unit, peak, compactions, handoffs, /code-review
                                   findings and runs per unit, step-ins per unit
@@ -611,7 +613,7 @@ def stats():
 
 def log_lines(k):
     """The usage log's lines of kind K (lib.sh usage), up to the window's end: chunk {t, what, model, effort, est, act},
-    start {t, what, model, effort, sess}."""
+    start {t, what, model, effort, sess, size}, escalate {t, what, model, effort, sess}."""
     log = os.path.join(STATE, "usage.jsonl")
     if not os.path.exists(log):
         return []
@@ -624,7 +626,8 @@ def kinds(days=7):
     joined (a session whose name hashes to the line's sess, started from it to that name's next start, plus its
     Supersedes: successors),
     USD (sum, median per start), the share whose `reply … done` the gate let through, handovers, nudges (cross-session
-    messages in), median minutes from start to done. A start without sess (before the name was logged) is unjoined."""
+    messages in), median minutes from start to done, escalations (session-status --handover --escalate). KIND carries the
+    start's size (build:L) when it had one. A start without sess (before the name was logged) is unjoined."""
     import hashlib
     window(days)
     ss = stats()
@@ -636,7 +639,7 @@ def kinds(days=7):
     succ = {}
     for s in ss.values():
         succ.setdefault(s["sup"], []).append(s)
-    groups, starts = {}, log_lines("start")
+    groups, starts, escs = {}, log_lines("start"), log_lines("escalate")
     for i, o in enumerate(starts):
         if o["t"] < CUT:
             continue
@@ -648,10 +651,14 @@ def kinds(days=7):
             for n in succ.get(s["sid"], []):
                 if n["sid"] not in seen:
                     seen.add(n["sid"]); g.append(n)
-        groups.setdefault((o.get("what", "?"), o.get("model", "?"), o.get("effort", "?")), []).append((o["t"], g))
-    print("kind\tmodel\teffort\tstarts\tjoined\tusd\tusd_median\tdone_share\thandovers\tnudges\tminutes_to_done")
+        # its --handover --escalate lines: sess hashes one of its sessions' names, logged from this start to the next
+        hs = {o.get("sess")} | {hashlib.sha256(n.encode()).hexdigest()[:12] for s in g for n in s["names"]}
+        e = sum(1 for x in escs if x.get("sess") and x.get("sess") in hs and o["t"] <= x["t"] < nxt)
+        kind = o.get("what", "?") + (f":{o['size']}" if o.get("size") in ("S", "L") else "")   # M: as configured
+        groups.setdefault((kind, o.get("model", "?"), o.get("effort", "?")), []).append((o["t"], g, e))
+    print("kind\tmodel\teffort\tstarts\tjoined\tusd\tusd_median\tdone_share\thandovers\tnudges\tminutes_to_done\tescalations")
     for (kind, model, effort), rows in sorted(groups.items()):
-        j = [(t, g) for t, g in rows if g]
+        j = [(t, g) for t, g, _ in rows if g]
         cost = [sum(s["usd"] for s in g) for _, g in j]
         done = [min((s["done_at"] for s in g if s["done_at"]), default="") for _, g in j]
         mins = [(epoch(d) - t) / 60 for (t, _), d in zip(j, done) if d]
@@ -660,7 +667,7 @@ def kinds(days=7):
                                   f"{len(mins) / len(j):.2f}" if j else "-",
                                   sum(1 for _, g in j for s in g if s.get("handoff")),
                                   sum(s["nudges"] for _, g in j for s in g),
-                                  round(statistics.median(mins)) if mins else "-"])))
+                                  round(statistics.median(mins)) if mins else "-", sum(e for _, _, e in rows)])))
 
 
 def chunks(days=7, *opts):
@@ -717,6 +724,10 @@ def chunks(days=7, *opts):
             by.setdefault(o.get("what", "?"), []).append(o["act"] / o["est"])
     for kind, rs in sorted(by.items()):
         print(f"ratio\t{kind}\t{statistics.median(rs[-20:]):.2f}\tn={len(rs[-20:])}")
+    # chunk handovers with --escalate in the window (the chunk lines carry no session, so a count, not per chunk)
+    e = sum(1 for o in log_lines("escalate") if o["t"] >= CUT and o.get("what") == "chunk")
+    if e:
+        print(f"escalations\t{e}")
 
 
 def trial(days=28):

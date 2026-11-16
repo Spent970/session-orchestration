@@ -235,6 +235,26 @@ model_ok() {
   [[ $1 =~ $re ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]]; } &&
     { [ $# = 1 ] || [[ $2 =~ ^(low|medium|high|xhigh|max)$ ]]; }
 }
+# effort_step EFFORT N: EFFORT moved N steps (-1, 0, 1) along low medium high xhigh max, held at either end; fails on
+# any other EFFORT.
+effort_step() {
+  local l=(low medium high xhigh max) i j=
+  for i in 0 1 2 3 4; do [ "${l[i]}" = "$1" ] && j=$i; done
+  [ -n "$j" ] || return 1
+  j=$(( j + $2 )); (( j < 0 )) && j=0; (( j > 4 )) && j=4; echo "${l[j]}"
+}
+# escalate_rung MODEL EFFORT: "MODEL EFFORT" one rung up (session-status --handover --escalate): the effort first, up
+# to xhigh; then the model (haiku → sonnet → opus at the same effort, a [1m] suffix kept, a full id taking its next
+# family's alias); then opus (or any other model, fable too) xhigh → max. Fails at opus/max (the top) or on an
+# unknown effort.
+escalate_rung() {
+  local m=$1 e=$2 s=; [[ $m == *'[1m]' ]] && s='[1m]'
+  case $e in
+    low|medium|high) echo "$m $(effort_step "$e" 1)" ;;
+    xhigh|max) case $m in *haiku*) echo "sonnet$s $e" ;; *sonnet*) echo "opus$s $e" ;; *) [ "$e" = xhigh ] && echo "$m max" ;; esac ;;
+    *) return 1 ;;
+  esac
+}
 # last_model TRANSCRIPT: "MODEL EFFORT" its session last ran on (its last main-thread reply; EFFORT is empty from a
 # Claude Code that didn't record it), fable included; prints nothing when no reply names a valid one.
 last_model() {
@@ -295,17 +315,20 @@ config() {
 # est and act in K of context growth; act may be left out) or start (session-status --kind: a plain task start, NAME
 # its kind, then its model, effort and optionally the -n session name, logged as sess: the first 12 hex of its sha256,
 # so rnd can join a start to its session by hashing session names; the name isn't in clear, but someone who knows or
-# guesses a name can confirm it). NAME is a fixed word (lowercase, digits, -), never a key,
+# guesses a name can confirm it; then optionally its size S, M or L, logged as size) or escalate (session-status
+# --handover --escalate: NAME task or chunk, then the successor's model and effort and the old session's name, as
+# sess). NAME is a fixed word (lowercase, digits, -), never a key,
 # path or id, and every field is validated, so the file is shareable as is. Never fails its caller.
 usage_log() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/usage.jsonl"; }
 usage() {
   local f x=
-  [[ ${1:-} =~ ^[a-z0-9-]{1,40}$ && ${2:-path} =~ ^(press|path|chunk|start)$ ]] || return 0
-  if [ "${2:-}" = start ]; then
+  [[ ${1:-} =~ ^[a-z0-9-]{1,40}$ && ${2:-path} =~ ^(press|path|chunk|start|escalate)$ ]] || return 0
+  if [ "${2:-}" = start ] || [ "${2:-}" = escalate ]; then
     [[ ${3:-} =~ ^[a-z][a-z0-9.-]{0,39}$ && ${4:-} =~ ^(low|medium|high|xhigh|max)$ && ${5-x} =~ ^[A-Za-z0-9._-]{1,80}$ &&
-       $# -le 5 ]] || return 0
+       ${6-S} =~ ^[SML]$ && $# -le 6 && ( $2 = start || $# = 5 ) ]] || return 0
     x=",\"model\":\"$3\",\"effort\":\"$4\""
-    [ $# = 5 ] && x+=",\"sess\":\"$(sha256_of <(printf %s "$5") | cut -c1-12)\""
+    [ $# -ge 5 ] && x+=",\"sess\":\"$(sha256_of <(printf %s "$5") | cut -c1-12)\""
+    [ $# = 6 ] && x+=",\"size\":\"$6\""
   elif [ "${2:-}" = chunk ]; then
     [[ ${3:-} =~ ^[a-z][a-z0-9.-]{0,39}$ && ${4:-} =~ ^(low|medium|high|xhigh|max)$ && ${5:-} =~ ^[0-9]{1,4}$ &&
        ${6:-0} =~ ^[0-9]{1,5}$ && $# -le 6 ]] || return 0

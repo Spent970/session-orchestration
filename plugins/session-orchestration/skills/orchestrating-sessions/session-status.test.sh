@@ -714,6 +714,19 @@ grep -q '^cfg --bg --model haiku -n PROJ-9-c3b ' <<<"$c" || { echo "handover --m
 echo '{"type":"assistant","requestedModel":"claude-opus-5-5[1m]","effort":"high","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
 grep -qF 'cfg --bg --model claude-opus-5-5[1m] --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "handover lost [1m]: $c"; exit 1; }
+# --escalate: one rung above what it would get (effort first, then haiku → sonnet → opus, then max); the top rung or an
+# unknown effort is refused before anything is stopped.
+out=$(run --handover "$kid" --escalate -- 'x'); c=$(calls)
+grep -qF 'cfg --bg --model claude-opus-5-5[1m] --effort xhigh -n PROJ-9-c3b ' <<<"$c" && [[ $out == *', escalated to claude-opus-5-5[1m]/xhigh'* ]] ||
+  { echo "handover --escalate, effort: $out $c"; exit 1; }
+run --handover "$kid" --model sonnet --effort xhigh --escalate -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model opus --effort xhigh -n PROJ-9-c3b ' <<<"$c" || { echo "handover --escalate, model: $c"; exit 1; }
+run --handover "$kid" --model haiku --effort max --escalate -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model sonnet --effort max -n PROJ-9-c3b ' <<<"$c" || { echo "handover --escalate, haiku/max: $c"; exit 1; }
+for bad in '--model opus --effort max' '--model haiku'; do
+  out=$(run --handover "$kid" $bad --escalate -- 'x') && rc=0 || rc=$?
+  [ "$rc" = 2 ] && [[ $out == '--escalate: '*'not handed over'* ]] && ! calls | grep -q 'stop\|--bg' ||
+    { echo "handover --escalate $bad not refused: $rc $out"; exit 1; }; done
 # A Claude Code that records no effort: the model alone.
 echo '{"type":"assistant","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
@@ -1363,8 +1376,19 @@ echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low",
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = "{\"t\":T,\"k\":\"start\",\"what\":\"mechanical\",\"model\":\"sonnet\",\"effort\":\"medium\",\"sess\":\"96bb4fcd0a71\"}" ] &&
   ! run --kind build 'two words' 2>/dev/null && ! run --kind build a b 2>/dev/null &&
   ! run --kind chunky 2>/dev/null && ! run --kind 2>/dev/null || { echo "--kind"; tail -3 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
+# KIND:S|M|L moves the effort a step (held at low and max) and logs the size with a NAME.
+[ "$(run --kind build:L claude-plugins-fix-doc)" = '--model opus --effort high' ] &&
+  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = '{"t":T,"k":"start","what":"build","model":"opus","effort":"high","sess":"96bb4fcd0a71","size":"L"}' ] &&
+  [ "$(run --kind build:M a)" = '--model opus --effort medium' ] && [ "$(run --kind build:S a)" = '--model opus --effort low' ] &&
+  [ "$(run --kind scan:S a 2>/dev/null)" = '--model haiku --effort low' ] &&
+  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/;s/"sess":"[0-9a-f]+"/"sess":H/')" = '{"t":T,"k":"start","what":"scan","model":"haiku","effort":"low","sess":H,"size":"S"}' ] &&
+  ! run --kind build:L 2>/dev/null && ! run --kind build:X a 2>/dev/null && ! run --kind build:l 2>/dev/null || { echo "--kind with a size"; tail -2 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
+(cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state bash -c '. "$0"; usage task escalate sonnet xhigh PROJ-9' "$here/../../lib.sh")
+[ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = "{\"t\":T,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"sonnet\",\"effort\":\"xhigh\",\"sess\":\"$(printf PROJ-9 | shasum -a 256 | cut -c1-12)\"}" ] ||
+  { echo "usage escalate line"; tail -1 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
 n0=$(wc -l < "$tmp/state/session-orchestration/usage.jsonl")
-(cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state bash -c '. "$0"; usage build start opus loud; usage build start opus medium a b; usage build start opus medium "a b"; usage build start opus medium ""; usage build start /home/u medium' "$here/../../lib.sh")
+(cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state bash -c '. "$0"; usage build start opus loud; usage build start opus medium a b; usage build start opus medium "a b"; usage build start opus medium ""; usage build start /home/u medium
+  usage build start opus medium a XL; usage task escalate opus high; usage task escalate opus high a L' "$here/../../lib.sh")
 [ "$(wc -l < "$tmp/state/session-orchestration/usage.jsonl")" = "$n0" ] || { echo "usage took a malformed start line"; exit 1; }
 rm "$tmp/.config/session-orchestration/config.json"
 # Plan cells: a lone `|` row is skipped; Deps `—`/`none`/`None` and Touches `—` name nothing. --check: a window other
