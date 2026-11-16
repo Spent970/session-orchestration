@@ -579,6 +579,26 @@ test('asks group per key, one line each until opened; an open ask shows its body
   await ui.unmount()
 })
 
+test('a send question may name an attachment\'s sha256 beside the body file\'s, when it names that file by path', async ($, on) => {
+  mock.clock(on)
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  // /tmp/a.png holds "hi"; every other path the body
+  on('fs.read', async (_, e) => ({ value: { base64: e.path === '/tmp/a.png' ? 'aGk=' : 'IyMgTml0CgpVc2UgYGZvbygpYCBoZXJlLhtbMzFtCg==' } }))
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const sha = 'fb45bdda1ae27282b4844fa4afa557cbcc9621cefc02ce030fa715a27e31006c'
+  const att = '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4'
+  const send = (question: string) => $.tool.call({
+    tool: 'mcp__session-orchestration__ask_approval', key: 'PROJ-1', question, options: ['Yes, send it', 'No, PROJ-1'], body_file: '/tmp/c.md',
+  })
+  expect((await send(`send teams message /tmp/c.md to 19:x --attachments /tmp/a.png (sha256 ${att}) (sha256 ${sha})`)).deny).toBeUndefined()
+  expect((await send(`send teams message /tmp/c.md to 19:x --attachments /tmp/b.png (sha256 ${'1'.repeat(64)}) (sha256 ${sha})`)).deny).toMatch(/names sha256 1{64}, which is neither/)
+  // a hash next to another file's path, or loose in the question, names nothing the user can check
+  expect((await send(`send teams message /tmp/c.md to 19:x --attachments /tmp/b.png (sha256 ${att}) /tmp/a.png (sha256 ${sha})`)).deny).toMatch(/names sha256 8f43/)
+  expect((await send(`send teams message /tmp/c.md to 19:x /tmp/a.png ${att} (sha256 ${sha})`)).deny).toMatch(/names sha256 8f43/)
+  expect((await send(`send teams message /tmp/c.md to 19:x --attachments /tmp/a.png (sha256 ${att})`)).deny).toMatch(/must name its sha256/)
+})
+
 test('a body markdown would hide parts of is drawn as written', () => {
   expect(['[docs](https://x.example)', '[a]: https://x.example', 'hi <!-- @x -->', '<img src=x>'].every(s => HIDDEN_BY_MARKDOWN.test(s))).toBe(true)
   expect(['## Nit\n\nUse `foo()` here.', 'a < b and [x] done', 'see https://x.example'].some(s => HIDDEN_BY_MARKDOWN.test(s))).toBe(false)

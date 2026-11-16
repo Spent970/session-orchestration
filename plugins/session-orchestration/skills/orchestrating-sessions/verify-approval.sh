@@ -2,7 +2,7 @@
 # Verify a relayed approval. Prints "verified" (exit 0) or "rejected: <reason>" (exit 1). When the
 # key is only in the message the quote answers, it prints "verified, answering: <its last 300 chars>". A note
 # the user added to a question-box answer is appended as ", with the user's note: <note>". The newest match wins.
-# Usage: bash verify-approval.sh <source-sessionId> <source-cwd> <sender-name> <task-key> <<'EOF'
+# Usage: bash verify-approval.sh <source-sessionId> <source-cwd> <sender-name> <task-key> [<action>] <<'EOF'
 #        <the quote, exactly as relayed>
 #        EOF
 # The quote comes on stdin and is only ever handled as data (jq --arg), never by the shell.
@@ -11,8 +11,12 @@
 #  2. The sender (the message's from-name) is that session, running and interactive, under this session's account
 #     (config dir), or with features.accounts on any account sharing its transcript store. A session a
 #     coordinator started with `claude --bg` can't be a source, since its first prompt wasn't typed.
+#     A source that has stopped since (a relay read days later) counts when its transcript shows no bg turn, the
+#     sender's name, and a SendMessage of this whole relay (Quote, the Action given as <action>, Source): the
+#     stopped session sent it. With no <action>, a stopped source is rejected.
 #  3. In that session's transcript, one message the user typed (origin human, no pasted content)
-#     matches the quote as a whole and is at most MAX_AGE_H hours old (default 24). The task key is in
+#     matches the quote as a whole and is at most MAX_AGE_H hours old (default 24; for a stopped source, when it
+#     sent the relay). The task key is in
 #     the quote, or in the coordinator's last text before it (the message the user was answering).
 #     An answer the user gave in the coordinator's question box (AskUserQuestion: the option label they
 #     clicked, or their "Other" text) counts the same way, with the question as the message answered.
@@ -21,7 +25,7 @@
 #     The engine sets that origin from the calling plugin, so no other plugin can produce one, and a worker
 #     only writes rows into its own session.
 set -uo pipefail
-id=${1:-}; cwd=${2:-}; sender=${3:-}; key=${4:-}; q=$(cat)
+id=${1:-}; cwd=${2:-}; sender=${3:-}; key=${4:-}; action=${5:-}; q=$(cat)
 max_age_h=${MAX_AGE_H:-24}
 reject() { echo "rejected: $1"; exit 1; }
 
@@ -34,16 +38,37 @@ case "$PWD/" in "$cwd"/*) ;; *) case "$cwd/" in "$PWD"/*) ;; *) reject "source c
 . "$(dirname "$0")/../../lib.sh" || reject "lib.sh not found"
 CUR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}; CUR=${CUR%/}
 IFS=$'\037' read -r _ s_name _ _ _ s_cwd s_kind _ <<<"$(list_sessions | awk -F'\t' -v id="$id" '$1 == id' | head -1 | tr '\t' '\037')"
-[ -n "$s_name$s_cwd" ] || reject "source session isn't running"
-[ "$s_name" = "$sender" ] || reject "sender isn't the source session"
-[ "$s_kind" = interactive ] || reject "source session isn't interactive"
-[ "$s_cwd" = "$cwd" ] || reject "source cwd doesn't match the running session"
-
 f=$CUR/projects/$(printf '%s' "$cwd" | sed 's/[^A-Za-z0-9]/-/g')/$id.jsonl
-[ -f "$f" ] || reject "no transcript for the source session"
-r=$(jq -r -n --arg q "$q" --arg key "$key" --argjson maxage "$((max_age_h * 3600))" '
+ref=$(date +%s)
+if [ -n "$s_name$s_cwd" ]; then
+  [ "$s_name" = "$sender" ] || reject "sender isn't the source session"
+  [ "$s_kind" = interactive ] || reject "source session isn't interactive"
+  [ "$s_cwd" = "$cwd" ] || reject "source cwd doesn't match the running session"
+  [ -f "$f" ] || reject "no transcript for the source session"
+else
+  # Stopped since it relayed: its own transcript must show an interactive session (no bg turn) that went by the
+  # sender's name and sent this relay (SendMessage). The quote's age then counts to that send.
+  [ -f "$f" ] || reject "source session isn't running, and has no transcript"
+  [ -n "$action" ] || reject "source session isn't running: pass the relay's Action line to verify it by its transcript"
+  sent=$(jq -rn --arg rl "APPROVAL relayed from the user"$'\n'"Quote: $q"$'\n'"Action: $action"$'\n'"Source: $id $cwd" --arg n "$sender" '
+    reduce inputs as $e ({bg: false, named: false, at: null};
+      if $e.sessionKind == "bg" then .bg = true
+      elif $e.type == "agent-name" and $e.agentName == $n then .named = true
+      elif $e.type == "assistant" and any($e.message.content[]?; .type == "tool_use" and .name == "SendMessage"
+             and (.input.message? | strings | contains($rl))) then .at = $e.timestamp
+      else . end)
+    | if .bg then "bg" elif .named | not then "name" elif .at == null then "none"
+      else .at | sub("\\.[0-9]+Z$"; "Z") | fromdate end' "$f") || reject "source transcript unreadable"
+  case $sent in
+    bg) reject "source session isn't running, and was a background session" ;;
+    name) reject "source session isn't running, and its transcript never names it $sender" ;;
+    none) reject "source session isn't running, and its transcript holds no relay of this quote and action" ;;
+  esac
+  ref=$sent
+fi
+r=$(jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage "$((max_age_h * 3600))" '
   def trim: gsub("^\\s+|\\s+$"; "");
-  def names_key: test("(^|[^A-Za-z0-9-])" + ($key | gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/-])"; "\\\(.c)")) + "($|[^A-Za-z0-9])");
+  def names_key: test("(^|[^A-Za-z0-9-])" + ($key | gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/-])"; "\\\(.c)")) + "($|[^A-Za-z0-9-])");
   # A click in the coordinator pane: the prompt this plugin submits, and nothing else it might submit.
   def pane($o): $o.kind == "plugin" and $o.name == "session-orchestration";
   [foreach inputs as $e ({turn: "", asks: {}};
@@ -75,7 +100,7 @@ r=$(jq -r -n --arg q "$q" --arg key "$key" --argjson maxage "$((max_age_h * 3600
        else .cands = [] end;
      .cands[]
      | select(.text | contains("<pasted_content") | not)
-     | select((.ts | sub("\\.[0-9]+Z$"; "Z") | fromdate) >= (now - $maxage))
+     | select((.ts | sub("\\.[0-9]+Z$"; "Z") | fromdate) >= ($ref - $maxage))
      | select((.text | trim) == ($q | trim))
      | (if (.note // "") != "" then ", with the user'"'"'s note: \(.note | gsub("\\s+"; " "))" else "" end) as $note
      | if .text | names_key then "verified\($note)"

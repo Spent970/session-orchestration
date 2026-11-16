@@ -66,7 +66,7 @@ printf '#!/bin/sh\n[ "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" = "$(cat %s)" ] && ec
   "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"kind\":\"interactive\"}]'" > "$tmp/bin/claude"
 chmod +x "$tmp/bin/claude"
 
-v() { (cd "$root" && HOME=$home CLAUDE_CONFIG_DIR=${CFG:-$home/.claude-work} PATH=$tmp/bin:$PATH bash "$here/verify-approval.sh" "$cid" "$root" coord "$1" <<<"$2") || true; }
+v() { (cd "$root" && HOME=$home CLAUDE_CONFIG_DIR=${CFG:-$home/.claude-work} PATH=$tmp/bin:$PATH bash "$here/verify-approval.sh" "$cid" "$root" coord "$1" "${ACT-x (ABC-1)}" <<<"$2") || true; }
 check() { [ "$(v "$1" "$2")" = "$3" ] || { echo "FAIL $1 '$2': got '$(v "$1" "$2")', want '$3'"; exit 1; }; }
 no="rejected: no recent message typed by the user, question-box answer or pane click matches the whole quote and names"
 
@@ -92,9 +92,25 @@ CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           
 echo "$home/.claude-work" > "$tmp/coord"
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # coordinator under ~/.claude-work
 echo "$home/.claude-other" > "$tmp/coord"
-check ABC-1 yes "rejected: source session isn't running"                      # an account with its own transcript store
+stopped="rejected: source session isn't running, and"
+check ABC-1 yes "$stopped its transcript never names it coord"                 # an account with its own transcript store
+# A coordinator that stopped after relaying: its transcript names it and holds the relay it sent; the quote's age
+# counts to that send (ABC-4's answer is from 2020, relayed then).
+relay() { jq -nc --arg ts "$1" --arg q "$2" --arg src "$cid $root" '{type: "assistant", timestamp: $ts, message: {content: [{type: "tool_use", name: "SendMessage",
+  input: {to: "w", message: "APPROVAL relayed from the user\nQuote: \($q)\nAction: x (ABC-1)\nSource: \($src)"}}]}}'; }
+cp "$proj/$cid.jsonl" "$tmp/t.jsonl"
+{ echo '{"type":"agent-name","agentName":"coord"}'; relay "$now" yes; relay "$old" "Yes, deploy ABC-4"; } >> "$proj/$cid.jsonl"
+check ABC-1 yes "verified, answering: Merge ABC-1?"
+check ABC-4 "Yes, deploy ABC-4" verified
+check ABC-2 "Yes, patch the ABC-2 config and restart fe" "$stopped its transcript holds no relay of this quote and action"
+# The whole relay must match: another Action under the same quote, or none given, doesn't verify.
+ACT="merge app#2 (ABC-1)" check ABC-1 yes "$stopped its transcript holds no relay of this quote and action"
+ACT= check ABC-1 yes "rejected: source session isn't running: pass the relay's Action line to verify it by its transcript"
+echo '{"type":"user","sessionKind":"bg","message":{"content":"go"}}' >> "$proj/$cid.jsonl"
+check ABC-1 yes "$stopped was a background session"
+cp "$tmp/t.jsonl" "$proj/$cid.jsonl"
 echo "$home/.claude" > "$tmp/coord"; rm "$root/.claude/coordination.local.json"
-check ABC-1 yes "rejected: source session isn't running"                      # features.accounts off: this account only
+check ABC-1 yes "$stopped its transcript never names it coord"                 # features.accounts off: this account only
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # … where the coordinator is found
 # A command this session handed over for the same key is named with how to withdraw it; another session's or key's isn't.
 hd=$home/.cache/session-status/commands; mkdir -p "$hd"
