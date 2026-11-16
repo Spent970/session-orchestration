@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# history-git: a local git history of the project's replies folder (the CLAUDE.md section's) and its handoff files
-# (config pending.file: FILE = DIR/NAME.md, with NAME/, NAME-archive/ and NAME-archive.md beside it). A folder's repo
-# keeps its git dir outside it, STATE/session-orchestration/history/<the folder's path, other characters as ->.git
-# (core.worktree: the folder): no .git appears in the folder, so a worktree-isolated session writes there as before and
-# a handoff folder inside a project checkout isn't a nested repo. A repo set up by hand is adopted instead: the folder's
-# own or its parent's, with no remote, not the project root. Never pushed: no remote is ever added and a pre-push hook
-# refuses every push. Dumps stay out: a file over 1 MB goes into the repo's info/exclude (untracked if it was tracked).
-#   history-git commit         Stop hook: commits what changed in the cwd project's folders, a commit per folder,
-#                              message `ID8: NAMES`, made on the first run. The folders are looked up again after 10
-#                              minutes.
+# history-git: a local git history of the project's replies folder (the CLAUDE.md section's), its handoff files
+# (config pending.file: FILE = DIR/NAME.md, with NAME/, NAME-archive/ and NAME-archive.md beside it) and the folders in
+# config history.dirs. A folder's repo keeps its git dir outside it, STATE/session-orchestration/history/<the folder's
+# path, other characters as ->.git (core.worktree: the folder): no .git appears in the folder, so a worktree-isolated
+# session writes there as before and a handoff folder inside a project checkout isn't a nested repo. A repo set up by
+# hand is adopted instead, keeping its history: the folder's own or its parent's, with no remote, never the project's
+# repo or one holding it. Never pushed: no remote is ever added and a pre-push hook refuses every push. One history per
+# file: a folder inside a listed whole folder (the replies folder inside history.dirs' docs/notes) is committed only
+# to the outer one's repo, and `versions` finds a file's repo the same way (the deepest folder holding it). Dumps stay
+# out: a file over 1 MB goes into the repo's info/exclude (untracked if it was tracked).
+#   history-git commit         Stop hook: commits what changed in the cwd project's folders, one commit per repo,
+#                              message `NAME: FILES` (NAME: the session's name, else its id8; a `Session: ID` trailer),
+#                              retried while another git holds the index lock. The repos are made on the first run;
+#                              the folders are looked up again after 10 minutes.
 #   history-git versions FILE  FILE's committed versions, oldest first, as pending-diff.jq's records ({k: "v", v, t, i,
 #                              s, turn}); exit 1 when FILE has no repo or no commit.
-#   history-git run replies|handoff [GIT ARGS…]   git on that folder's repo (default: log --stat).
+#   history-git run replies|handoff [GIT ARGS…]   git on the repo holding that folder (default: log --stat).
 # Self-test: bash history-git.test.sh
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 here=$(cd "$(dirname "$0")" && pwd)
@@ -45,31 +49,88 @@ repo() {
   printf '%s\t%s\n' "$gd" "$t"
 }
 
-# targets: DIR<TAB>GLOB per folder to keep (GLOB: the names in DIR to keep, empty for all). Needs ROOT and lib.sh.
+# targets: DIR<TAB>GLOB per folder to keep (GLOB: the names in DIR to keep, empty for all), DIR physical; a folder
+# inside (or equal to) an earlier-kept whole folder left out unless a repo of its own holds it (inner_repo: kept, and
+# the outer repo leaves that repo out), and a whole folder holding the root never. Needs ROOT, lib.sh.
 targets() {
-  local r p
-  r=$(replies_path "$ROOT"); [ -n "$r" ] && [ -d "$r" ] && printf '%s\t\n' "$r"
-  p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && [ -f "$ROOT/$p" ] &&
-    printf '%s\t%s\n' "$(dirname "$ROOT/$p")" "$(basename "$p" .md)*"
-  return 0
+  local r p d glob ds=() gs=() i j keep
+  {
+    r=$(replies_path "$ROOT"); [ -n "$r" ] && printf '%s\t\n' "$r"
+    p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && [ -f "$ROOT/$p" ] &&
+      printf '%s\t%s\n' "$(dirname "$ROOT/$p")" "$(basename "$p" .md)*"
+    config history.dirs 2>/dev/null | while read -r d; do
+      d=${d/#\~/$HOME}; case $d in /*) ;; *) d=$ROOT/$d ;; esac; printf '%s\t\n' "$d"
+    done
+  } | while IFS=$'\t' read -r d glob; do
+    d=$(cd "$d" 2>/dev/null && pwd -P) || continue
+    [ -n "$glob" ] || case $ROOT/ in "$d"/*) continue ;; esac
+    printf '%s\t%s\n' "$d" "$glob"
+  done | { while IFS=$'\t' read -r d glob; do ds+=("$d"); gs+=("$glob"); done
+    for i in "${!ds[@]}"; do keep=1
+      for j in "${!ds[@]}"; do
+        [ "$i" != "$j" ] && [ -z "${gs[$j]}" ] || continue
+        # inside another whole folder; the same folder twice: the first one stays
+        case ${ds[$i]}/ in "${ds[$j]}"/?*) inner_repo "${ds[$j]}" "${ds[$i]}" || keep= ;; "${ds[$j]}"/) [ -n "${gs[$i]}" ] || [ "$j" -lt "$i" ] && keep= ;; esac
+      done
+      [ -z "$keep" ] || printf '%s\t%s\n' "${ds[$i]}" "${gs[$i]}"
+    done; }
 }
 
-# commit_one GITDIR TOP DIR GLOB [WHO]
-commit_one() {
-  local gd=$1 t=$2 d=$3 glob=$4 f rel names
-  d=$(cd "$d" && pwd -P) || return 0
-  [ -z "$(find "$gd/index.lock" -mmin +1 2>/dev/null)" ] || rm -f "$gd/index.lock"   # left by a killed git
-  # shellcheck disable=SC2086   # GLOB expands to the handoff files
-  (cd "$d" && find ${glob:-.} -name .git -prune -o -type f -size +${MAX_KB}k -print 2>/dev/null) | while read -r f; do
-    rel=$(sed 's/[][*?\\!#]/\\&/g' <<<"${d#"$t"}/${f#./}")   # escaped: a gitignore pattern
-    grep -qxF -- "$rel" "$gd/info/exclude" 2>/dev/null || { mkdir -p "$gd/info"; echo "$rel" >> "$gd/info/exclude"; }
-    (cd "$d" && g "$gd" "$t" rm -q --cached --ignore-unmatch -- "$f")
+# inner_repo OUTER DIR: a repo's top (its .git) lies between OUTER (left out) and DIR (included): the outer repo can't hold
+# DIR's files, so DIR keeps its own target.
+inner_repo() { local d=$2; while [ "$d" != "$1" ] && [ "$d" != / ]; do [ -e "$d/.git" ] && return 0; d=$(dirname "$d"); done; return 1; }
+
+# owner PATH: GITDIR<TAB>TOP of the repo keeping PATH (a file or folder), by the deepest target holding it. Needs ROOT.
+owner() {
+  local f best= d glob rel
+  if [ -d "$1" ]; then f=$(cd "$1" && pwd -P) || return 1
+  else f=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || return 1; f=$f/$(basename "$1"); fi
+  while IFS=$'\t' read -r d glob; do
+    if [ "$f" = "$d" ]; then [ -n "$glob" ] && continue
+    else case $f in "$d"/*) rel=${f#"$d"/}; [ -z "$glob" ] || [[ ${rel%%/*} == $glob ]] || continue ;; *) continue ;; esac
+    fi
+    [ ${#d} -le ${#best} ] || best=$d
+  done < <(targets)
+  [ -n "$best" ] && repo "$best"
+}
+
+# commit_repo GITDIR TOP WHO SID DIR GLOB [DIR GLOB…]: one commit of those folders' changes; 0 when done or nothing to
+# do, 1 when another git holds the index lock (the caller retries).
+commit_repo() {
+  local gd=$1 t=$2 who=$3 sid=$4 d glob base f rel names specs=() staged=() x
+  shift 4
+  # left by a killed git; an adopted repo's lock may be the user's git still open in an editor: never touched
+  case $gd in "$H"/*) [ -z "$(find "$gd/index.lock" -mmin +1 2>/dev/null)" ] || rm -f "$gd/index.lock" ;; esac
+  while [ $# -ge 2 ]; do
+    d=$1 glob=$2; shift 2; [ -d "$d" ] || continue
+    base=${d#"$t"}; base=${base#/}
+    # shellcheck disable=SC2086   # GLOB expands to the handoff files
+    (cd "$d" && find ${glob:-.} -name .git -prune -o -type f -size +${MAX_KB}k -print 2>/dev/null) | while read -r f; do
+      rel=$(sed 's/[][*?\\!#]/\\&/g' <<<"/${base:+$base/}${f#./}")   # escaped: a gitignore pattern
+      grep -qxF -- "$rel" "$gd/info/exclude" 2>/dev/null || { mkdir -p "$gd/info"; echo "$rel" >> "$gd/info/exclude"; }
+      (cd "$d" && g "$gd" "$t" rm -q --cached --ignore-unmatch -- "$f")
+    done
+    # a repo inside (kept as its own target, targets' inner_repo): left out here, never staged as a gitlink
+    [ -n "$glob" ] || (cd "$d" && find . -path ./.git -prune -o -mindepth 2 -name .git -prune -print 2>/dev/null) | while read -r f; do
+      rel=$(sed 's/[][*?\\!#]/\\&/g' <<<"/${base:+$base/}$(dirname "${f#./}")/")
+      grep -qxF -- "$rel" "$gd/info/exclude" 2>/dev/null || { mkdir -p "$gd/info"; echo "$rel" >> "$gd/info/exclude"; }
+    done
+    if [ -n "$glob" ]; then specs+=("${base:+$base/}$glob"); else specs+=("${base:-.}"); fi
   done
+  cd "$t" || return 0
   # only these paths, staged and committed: an adopted repo's other staged changes stay the user's
-  cd "$d" && g "$gd" "$t" add -A -- "${glob:-.}" 2>/dev/null || return 0
-  g "$gd" "$t" diff --cached --quiet -- "${glob:-.}" && return 0
-  names=$(g "$gd" "$t" diff --cached --name-only -- "${glob:-.}" | sed 's#.*/##' | awk '!s[$0]++' | head -6 | paste -sd' ' -)
-  g "$gd" "$t" commit -q --no-verify -m "${5:-user}: $names" -- "${glob:-.}" >/dev/null
+  for x in "${specs[@]}"; do
+    g "$gd" "$t" add -A -- "$x" 2>/dev/null || { [ -e "$gd/index.lock" ] && return 1; }   # else no such path: skipped
+    g "$gd" "$t" diff --cached --quiet -- "$x" 2>/dev/null || staged+=("$x")
+  done
+  [ ${#staged[@]} -gt 0 ] || return 0; x=
+  # sessions/<pid>.json is Claude Code's own per-process file: the session's name, as the user set it
+  [ -z "$sid" ] || x=$(grep -lF -- "\"$sid\"" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/sessions/*.json 2>/dev/null | head -1)
+  [ -z "${x:-}" ] || x=$(jq -r --arg s "$sid" 'select(.sessionId == $s) | .name // empty' "$x" 2>/dev/null)
+  [[ ${x:-} =~ ^[^:$'\n']+$ ]] && who=$x
+  names=$(g "$gd" "$t" diff --cached --name-only -- "${staged[@]}" | sed 's#.*/##' | awk '!s[$0]++' | head -6 | paste -sd' ' -)
+  g "$gd" "$t" commit -q --no-verify -m "$who: $names" ${sid:+-m "Session: $sid"} -- "${staged[@]}" >/dev/null 2>&1 && return 0
+  [ -e "$gd/index.lock" ] && return 1; return 0
 }
 
 case ${1:-} in
@@ -83,34 +144,43 @@ case ${1:-} in
         targets | while IFS=$'\t' read -r d glob; do r=$(repo "$d" init) && printf '%s\t%s\t%s\n' "$r" "$d" "$glob"; done
       ) > "$w.$$" 2>/dev/null; mv "$w.$$" "$w"
     fi
-    while IFS=$'\t' read -r gd t d glob; do
-      [ -d "$gd" ] && [ -d "$d" ] && commit_one "$gd" "$t" "$d" "$glob" "${sid:0:8}"
-    done < "$w" >/dev/null 2>&1
+    who=${sid:0:8}; who=${who:-user}; end=$((SECONDS + 6))   # the hook's timeout is 10 s: retries stop well before
+    cut -f1 "$w" | awk '!s[$0]++' | while read -r gd; do
+      [ -d "$gd" ] || continue
+      args=(); while IFS=$'\t' read -r g2 t d glob; do [ "$g2" = "$gd" ] && args+=("$d" "$glob"); done < "$w"
+      t=$(awk -F'\t' -v g="$gd" '$1 == g { print $2; exit }' "$w")
+      # another session's hook (or the user's git) holding the index lock: wait and retry, 6 s for all repos together
+      until ( commit_repo "$gd" "$t" "$who" "${sid:-}" "${args[@]}" ); do
+        [ $SECONDS -lt $end ] || break; sleep 0.$((RANDOM % 5 + 3))
+      done
+    done >/dev/null 2>&1
     exit 0 ;;
   versions)
-    . "$here/../../lib.sh" || exit 1; ROOT=$(find_root)
     [ -f "${2:-}" ] || exit 1
-    IFS=$'\t' read -r gd t < <(repo "$(dirname "$2")") && [ -n "${gd:-}" ] || exit 1
+    set -- "$1" "$(cd "$(dirname "$2")" && pwd -P)/$(basename "$2")"
+    # FILE's project and its config, whatever the cwd
+    . "$here/../../lib.sh" && cd "$(dirname "$2")" || exit 1; ROOT=$(find_root)
+    IFS=$'\t' read -r gd t < <(owner "$2") && [ -n "${gd:-}" ] || exit 1
     rel=$(cd "$(dirname "$2")" && pwd -P)/$(basename "$2"); rel=${rel#"$t"/}
     # the commits that leave FILE there, then all their versions in one cat-file, each after a `@@V` line
-    list=$(g "$gd" "$t" log --reverse --diff-filter=d --format='%H %ct %s' -- "$rel" 2>/dev/null); [ -n "$list" ] || exit 1
+    list=$(g "$gd" "$t" log --reverse --diff-filter=d --format='%H %ct %(trailers:key=Session,valueonly,separator=)%x09%s' -- "$rel" 2>/dev/null); [ -n "$list" ] || exit 1
     cut -d' ' -f1 <<<"$list" | sed "s#\$#:$rel#" | g "$gd" "$t" cat-file --batch='@@V %(objecttype)' |
-      jq -cRn --arg list "$list" '[$list | split("\n")[] | capture("^(?<h>\\S+) (?<t>\\d+) ?(?<s>.*)$")] as $c
+      jq -cRn --arg list "$list" '[$list | split("\n")[] | capture("^(?<h>\\S+) (?<t>\\d+) (?<id>[^\t]*)\t(?<s>.*)$")] as $c
         | reduce inputs as $l ({v: [], cur: null}; if $l | startswith("@@V ") then .v += [.cur // empty] | .cur = ""
             else .cur += $l + "\n" end) | (.v + [.cur]) as $v   # cat-file ends each one with a newline more
         | range(0; $v | length) as $i | {k: "v", v: $v[$i][:-1], t: ($c[$i].t | tonumber | todate | sub("Z$"; ".000Z")),
-            i: ($i + 1), s: ($c[$i].s | sub("[: ].*$"; "")), turn: ""}' ;;
+            i: ($i + 1), s: (if $c[$i].id != "" then $c[$i].id[:8] else $c[$i].s | sub("[: ].*$"; "") end), turn: ""}' ;;
   run)
     . "$here/../../lib.sh" || exit 1; ROOT=$(find_root)
     case ${2:-} in
       replies) d=$(replies_path "$ROOT") ;;
-      handoff) p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && d=$(dirname "$ROOT/$p") ;;
+      handoff) p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && d=$ROOT/$p ;;
       *) echo "usage: session-status --git-history replies|handoff [GIT ARGS…]"; exit 2 ;;
     esac
     [ -n "${d:-}" ] || { echo "no $2 folder configured for $ROOT"; exit 2; }
-    IFS=$'\t' read -r gd t < <(repo "$d") && [ -n "${gd:-}" ] ||
+    IFS=$'\t' read -r gd t < <(owner "$d") && [ -n "${gd:-}" ] ||
       { echo "$d has no history repo yet: the Stop hook makes one when a turn ends"; exit 2; }
     shift 2; [ $# -gt 0 ] || set -- log --stat
-    cd "$d" && g "$gd" "$t" "$@" ;;
+    { [ -d "$d" ] || d=$(dirname "$d"); } && cd "$d" && g "$gd" "$t" "$@" ;;   # relative paths: from the folder
   *) echo "usage: history-git commit | versions FILE | run replies|handoff [GIT ARGS…]"; exit 2 ;;
 esac
