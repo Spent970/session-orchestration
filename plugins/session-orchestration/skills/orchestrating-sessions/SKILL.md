@@ -11,7 +11,9 @@ coordinator's.
 You coordinate the user's parallel sessions: you route work, relay the user's decisions and keep the state in files;
 the sessions do the tasks. Every wake (a message, an idle notice, a watcher) re-sends your whole context, so keep it
 small: the state lives in the status command, the tracker and the handoff file. The status command is the project's
-own if its `CLAUDE.md` names one, else `session-status` next to this file, run from the project root. The project's
+own if its `CLAUDE.md` (in your context already) names one, else `session-status` next to this file by its full path,
+run from the project root; never a guessed path or an `a || b` fallback chain (named only in the project's
+coordinator doc: read that first). The project's
 `CLAUDE.md` section names the files (the "Replies folder", "Project memory" and handoff-file lines). The other files
 here are read when their event comes up: the index at the end.
 
@@ -21,9 +23,9 @@ Every coordinator session, before anything else; the user shouldn't have to ask.
 
 1. One batch: ToolSearch `mcp__session-orchestration__open_pane` (that schema only: load any other tool's when you
    first call it); the status command with `--start`, as Bash `run_in_background: true` (the slowest step, so it
-   runs while you read); and one Read each of the project's coordinator doc if its `CLAUDE.md` names one, the memory
-   index and its coordinator topic file. Read files with Read, not a `cat` bundle: the Bash tool truncates long
-   output.
+   runs while you read; which command: above); and one Read each of the project's coordinator doc if its `CLAUDE.md`
+   names one, the memory index and its coordinator topic file. Read files with Read, not a `cat` bundle: the Bash
+   tool truncates long output.
 2. Call `open_pane`. If it says the folder isn't set up, follow the `setting-up-coordination` skill (it ends with
    `open_pane` again), then run `--start` again.
 3. When `--start` finishes (its completion notice; don't poll it), read its output: the status, the handoff file,
@@ -33,12 +35,16 @@ Every coordinator session, before anything else; the user shouldn't have to ask.
    - act on each unread coordinator inbox entry it lists, then mark it read (`session-status --inbox --read N`);
    - an `## Ended while the background service was off` section gets one ask ([resuming.md](resuming.md), After a
      restart);
-   - recheck each ask `open_pane` listed as queued over a day ago (the PR or ticket may have moved): cancel what no
-     longer applies and tell the user which still do ([approvals.md](approvals.md), Asking);
+   - recheck each ask `open_pane` listed as queued over a day ago, one by one: look the thing up (the PR merged or
+     rebased, the comment posted, the ticket moved), cancel what no longer applies and tell the user
+     which still do and why. Never "still apply as far as I can tell": an ask you couldn't check, say so and what
+     blocked it ([approvals.md](approvals.md), Asking);
    - read a reply whole only when its header line or its `last section` needs you. Where the two disagree, read it whole
      and take the later of the two (dates, the `Done:` line) as the state: a worker may have added a section without updating
      the top, or finished without removing an old section.
-4. Summarize what needs the user, including the handoff entries still open. Then arm the watcher (Watching). A
+4. Queue each open decision not on the pane yet with `ask_approval`, one per decision ([approvals.md](approvals.md),
+   Asking; never a numbered list in chat), then summarize what needs the user, including the handoff entries still
+   open. Then arm the watcher (Watching). A
    successor (first prompt `You succeed "NAME"`) then does the successor's step ([handover.md](handover.md)).
 
 ## Which sessions

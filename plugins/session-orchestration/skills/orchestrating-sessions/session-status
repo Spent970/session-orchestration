@@ -348,7 +348,8 @@ fi
 #                                 the old one's terminal (close_tty: its tab, or only its split beside others)
 #   --name-check NAME             `free|held next|other [HOLDER_ID]`: whether a live session other than the caller holds
 #                                 NAME, and whether the caller is NAME-next (open_pane and name_session ask it)
-# A successor's --await exits early on an unread inbox entry (it prints them): act on them, mark them read, re-arm.
+# A successor's --await exits early (exit 3, first line NOT DONE) on an unread inbox entry (it prints them): act on
+# them, mark them read, re-arm.
 # Each --await polls every SESSION_STATUS_AWAIT_S (10) seconds and gives up after --timeout SECS (3600), exit 1.
 HO_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/session-status/handover
 # ho_live: list_sessions into $all, its live ones (not failed, stopped or done) into $live; fails when an account's listing did.
@@ -446,8 +447,9 @@ if [ "${1:-}" = --await ]; then
   while :; do
     if [ -z "$live" ]; then :   # this poll's listing failed: nothing is known, wait for the next
     elif [ "$what" != ready ] && [ "$what" != renamed ] && u=$(inbox_unread) && [ -n "$u" ]; then
-      echo "unread in the inbox ($(inbox_file)): act on each, mark it read (\`$SELF --inbox --read N\`), then arm \`$SELF --await $what\` again:"
-      echo "$u"; exit 0
+      # exit 3 and a first line saying so: a successor took an exit-0 inbox wake for the step being done
+      echo "NOT DONE: --await $what woke on the inbox, not on its step. Act on each entry, mark it read (\`$SELF --inbox --read N\`), then arm \`$SELF --await $what\` again (Bash, run_in_background):"
+      echo "$u"; exit 3
     else case $what in
       ready) s=$(cat "$HO_DIR/$n.ready" 2>/dev/null)
         if [ -n "$s" ] && [ "$(ho_field 1 "$s" 2)" = "$n-next" ]; then
@@ -741,7 +743,14 @@ if [ "${1:-}" = --changes ]; then
   evl+=$(awk -F'\t' '$1 == "failed" { print "  * " $2 " (not forwarded: " $3 ")" }' <<<"$fwc")
   evl=$(grep . <<<"$evl"); ev=; [ -z "$evl" ] || ev=$'PR events (send each owner the nudge, SKILL.md):\n'$evl
   sent=$(awk -F'\t' '$1 == "ok" { print "  * " $2 " (" $3 ")" }' <<<"$fwc")
-  { if [ -f "$last" ]; then
+  # A baseline another session wrote (a predecessor's, hours old) would wake this coordinator on rows and reports it
+  # read at its --start: this run only records its own baseline, a peek too, so --watch's next poll diffs against it.
+  # PR events keep their own state: a peek leaves them for that next poll, a committing run shows them.
+  # shortcut: a change between --start's sweep and this first run joins the baseline unreported; fine while the watcher is armed at Start's end.
+  me=${CLAUDE_CODE_SESSION_ID:-} stale=
+  [ -n "$me" ] && [ -f "$last" ] && [ "$(cat "$last.by" 2>/dev/null)" != "$me" ] && stale=1
+  { if [ -n "$stale" ]; then { [ -n "${SESSION_STATUS_PEEK:-}" ] || echo "$ev"; } | grep . || echo "no changes"
+  elif [ -f "$last" ]; then
     # A notice going away (read, answered) isn't news: removed notice lines don't count. Nor does a session
     # merely starting work: a row whose only change is its session entering `working` is dropped, both
     # halves. Nor is a working session's worktree changing its dirty/unpushed counts, nor a row flipping between
@@ -786,7 +795,7 @@ if [ "${1:-}" = --changes ]; then
     [ -n "${SESSION_STATUS_PEEK:-}" ] || [ -z "$fwc" ] || locked_drop "$fw" "$fwc"
   fi
   rm -f "$last.out.$$"
-  [ -n "${SESSION_STATUS_PEEK:-}" ] || echo "$new" > "$last"; exit
+  [ -n "${SESSION_STATUS_PEEK:-}" ] && [ -z "$stale" ] || { echo "$new" > "$last"; printf '%s\n' "$me" > "$last.by"; }; exit
 fi
 
 ADAPTER=$(adapter_path "$ROOT")   # local, else the committed one once trusted (lib.sh)

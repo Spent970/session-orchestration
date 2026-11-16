@@ -803,9 +803,18 @@ async function loadAsks($: EngineInterface, setUp?: boolean) {
   await syncStatus($)
 }
 // The queued asks, one line each, for open_pane's result: what a new coordinator inherits.
-export const queuedText = (as: Ask[], now: number) => as.length
-  ? ` Queued in the pane (${as.length}): ${as.map(a => `${a.key} (id ${a.id}${isOld(a, now) ? `, queued ${ago(now - a.at)}` : ''}) ${shortShas(oneLine(a.question))}`).join('; ')}.`
-  : ''
+export const queuedText = (as: Ask[], now: number) => {
+  if (!as.length) return ''
+  let old = 0
+  const lines = as.map(a => {
+    const o = isOld(a, now)
+    if (o) old++
+    return `${a.key} (id ${a.id}${o ? `, queued ${ago(now - a.at)}` : ''}) ${shortShas(oneLine(a.question))}`
+  })
+  // A coordinator summarized OLD asks as "still apply as far as I can tell": the result names the check itself.
+  const recheck = old ? ` ${old} queued over a day ago: before you summarize, look each one up (PR merged or rebased, comment posted, ticket moved), cancel_approval what no longer applies and tell the user which still do.` : ''
+  return ` Queued in the pane (${as.length}): ${lines.join('; ')}.${recheck}`
+}
 
 // features.notify (features/notify.md): minutes an ask waits unseen before one local macOS notification, 0 = off;
 // initCheck reads it. The text is a count only: nothing about the ask, and nothing leaves the machine.

@@ -813,7 +813,7 @@ test('queued asks live in a store per project root: a new coordinator finds them
   expect((await ask('PROJ-3', 'merge app#3')).result).toMatch(/^Re-queued PROJ-3 \(id 8\): it replaces/)
   expect((await ask('PROJ-1', 'merge app#1')).result).toMatch(/^Re-queued PROJ-1 \(id 7\): it replaces/)
   expect(stored()).toEqual(['6 merge app#5', '7 merge app#1', '8 merge app#3'])
-  expect(queuedText(parseAsks(store ?? '') ?? [], t0)).toBe(' Queued in the pane (3): PROJ-5 (id 6) merge app#5; PROJ-1 (id 7, queued 30h ago) merge app#1; PROJ-3 (id 8) merge app#3.')
+  expect(queuedText(parseAsks(store ?? '') ?? [], t0)).toBe(' Queued in the pane (3): PROJ-5 (id 6) merge app#5; PROJ-1 (id 7, queued 30h ago) merge app#1; PROJ-3 (id 8) merge app#3. 1 queued over a day ago: before you summarize, look each one up (PR merged or rebased, comment posted, ticket moved), cancel_approval what no longer applies and tell the user which still do.')
 
   // Another coordinator queues one meanwhile: this pane has it within a minute.
   store = JSON.stringify([...JSON.parse(store ?? '[]'), { id: '9', key: 'PROJ-4', question: 'merge app#4', options: ['Yes', 'No'], at: t0 }])

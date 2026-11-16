@@ -31,7 +31,10 @@ Your name is `NAME-next`. Run Start as usual (`open_pane` keeps your name while 
    idle and done forwarding; when it runs in the background, the tab it was moved out of (or a `claude attach` to it).
    Tell the user what was left open, if anything.
 
-- Any `--await` also wakes you on an unread coordinator inbox entry: act on each, mark it read (`session-status
-  --inbox --read N`), and arm the same `--await` again.
+- Any `--await` also wakes you on an unread coordinator inbox entry (exit 3, first line `NOT DONE`): the step isn't
+  done. Act on each entry, mark it read (`session-status --inbox --read N`), and arm the same `--await` again.
+- The note's blockers (a login out, a session stuck, a PR failing) are claims from when it was written: check each
+  against `--start`'s output (a login: whether its source's notices line still starts `(failed)`; a session: its
+  row) before you tell the user, and drop the ones that cleared.
 - A live session other than the one you succeed holds `NAME` (`open_pane` says so): stop and ask the user.
 - An `--await` that times out: check the other coordinator (`--activity`), then re-arm or finish by hand.
