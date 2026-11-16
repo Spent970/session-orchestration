@@ -359,6 +359,31 @@ test('a notice can be dismissed; a leftover\'s command copied', async ($, on) =>
   await ui.unmount()
 })
 
+test('a full sweep gets 7 minutes; one that fails keeps the last good rows under its failure line', async ($, on) => {
+  mock.clock(on)
+  let fail = false
+  const caps: (number | undefined)[] = []
+  on('process.run', async (_, e) => {
+    const arg = e.argv[2]
+    if (arg === undefined) {
+      caps.push(e.init?.timeoutMs)
+      if (fail) throw new Error('aborted: still running after 600000ms')
+    }
+    const stdout = arg === '--pending' ? PENDING : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : STATUS
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  await ui.press({ key: 'refresh' })
+  fail = true
+  await ui.press({ key: 'refresh' })
+  expect(caps.at(-1)).toBe(420_000)
+  expect(await ui.find({ type: 'Text', text: /failed: .*\(sweep at .*; the rows below are from / })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'task-PROJ-4679' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a stale prompt is listed apart, not counted on you, with Stop', async ($, on) => {
   mock.clock(on)
   const stale = '\n\nStale prompts:\n  "probe" (claude attach 91d21a06) — blocked: Bash `curl x` · unanswered 7h; stop: claude stop 91d21a06'

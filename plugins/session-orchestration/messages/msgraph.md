@@ -15,7 +15,7 @@ teams DM  <sender>: <text> — read, unanswered: … the same, read, yesterday o
 teams @   <chat> · <sender>: <text>              unread @mention of you, chats and channels, yesterday and today
 teams ?   <chat> · <sender>: <text>              a question to your team in a watched chat (rules A, B, C)
 mail      <sender>: <subject>                    unread inbox mail from the last week that needs action
-(failed) teams: msgraph auth_error error         a call failed; the lines above it are the last good run's
+(failed) teams: msgraph auth_error error         a call failed (one the CLI marks retryable failed twice); the lines above it are the last good run's
 ```
 
 `auth_error` means the CLI's login lapsed: the user signs in again. A line can end in `[PROJ-12,PROJ-40]`: the

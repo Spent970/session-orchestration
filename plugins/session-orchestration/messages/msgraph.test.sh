@@ -111,6 +111,12 @@ dismiss 'mail Acc: Invoice ' && ! dismiss 'mail      Nobody: x' && [ "$(run)" = 
   dismiss 'mail      Lee: Question on PROJ-7 [PROJ-7] — asks about PROJ-7' && touch "$tmp/cache/triage/mail-a4" &&
   [ "$(run)" = "$(grep -v 'Acc: Invoice\|Lee: Question' <<<"$want")" ] && [ -f "$tmp/cache/dismissed/mail-a2" ] ||
   { echo "dismiss failed: $(run)"; exit 1; }
+# A retryable error (a Graph 5xx) is tried once more: the run still answers in full.
+mv "$tmp/bin/graph" "$tmp/graph.ok"
+printf '#!/bin/sh\n[ "$1" = mail ] && [ ! -f %s ] && touch %s && echo %s >&2 && exit 1\nexec %s "$@"\n' "$F/flap" "$F/flap" \
+  "'{\"error\":{\"type\":\"server_error\",\"retryable\":true}}'" "$tmp/graph.ok" > "$tmp/bin/graph"; chmod +x "$tmp/bin/graph"
+[ "$(MSGRAPH_RETRY_PAUSE=0 run)" = "$(grep -v 'Acc: Invoice\|Lee: Question' <<<"$want")" ] && [ -f "$F/flap" ] ||
+  { echo "retry: $(run)"; exit 1; }
 # A failed Graph call: exit 1 and one reason line.
 rm "$tmp/cache/people.json"; printf '#!/bin/sh\necho %s >&2; exit 1\n' "'{\"error\":{\"type\":\"auth_error\"}}'" > "$tmp/bin/graph"
 out=$(run) && { echo "a failure exited 0"; exit 1; }
