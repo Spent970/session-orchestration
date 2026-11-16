@@ -1074,6 +1074,11 @@ out=$(init "$a" --write --review-brief --rnd-brief) && [ "$out" = "$(printf 'Wro
 cp "$a/CLAUDE.local.md" "$tmp/cl.bak" && sed -i.x 's#^- Replies folder (\(.*\)): `.*`\.$#- Replies folder (\1): `.claude/orchestration/replies/`.#' "$a/CLAUDE.local.md"
 init "$a" --check | grep -q '^replies folder .claude/orchestration/replies/ is inside the git checkout ' && mv "$tmp/cl.bak" "$a/CLAUDE.local.md" && rm -f "$a/CLAUDE.local.md.x" &&
   ! init "$a" --check | grep -q 'inside the git checkout' || { echo "replies-in-checkout warning failed"; exit 1; }
+# A project Stop hook that git-commits a folder: --check offers history.dirs instead.
+mkdir -p "$a/.claude/hooks" && printf '#!/bin/bash\ncd docs && git add -A && git commit -qm x\n' > "$a/.claude/hooks/commit.sh" &&
+  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/commit.sh"}]}]}}' > "$a/.claude/settings.local.json" &&
+  init "$a" --check | grep -q '^project Stop hook commits a folder (.*commit.sh): run setup' && rm -r "$a/.claude/hooks" "$a/.claude/settings.local.json" &&
+  ! init "$a" --check | grep -q 'Stop hook commits' || { echo "commit-hook detection failed"; exit 1; }
 # No claude CLI on PATH (Claude Code Desktop alone): --check and the proposal name the install, and the status says
 # so instead of "try again". PATH: this bash, jq and git, then the system's (where no claude is).
 mkdir -p "$tmp/noclaude" && ln -sf "$BASH" "$tmp/noclaude/bash" && ln -sf "$(command -v jq)" "$tmp/noclaude/jq" && ln -sf "$(command -v git)" "$tmp/noclaude/git"

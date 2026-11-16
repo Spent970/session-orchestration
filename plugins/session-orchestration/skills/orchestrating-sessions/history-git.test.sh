@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Self-check for history-git: the Stop hook's repo (git dir outside the folder, pre-push refusing, a file over 1 MB
 # left out), a commit per changed turn and none otherwise, `versions` feeding pending's --scan and history LABEL, `run`,
-# and adopting a repo set up by hand. Run: bash history-git.test.sh
+# adopting a repo set up by hand, config history.dirs (adopting, one repo per file when folders nest, a folder holding
+# the root refused), one commit per repo named after the session, and waiting out another git's index lock. Run: bash history-git.test.sh
 set -euo pipefail; unset XDG_CONFIG_HOME XDG_STATE_HOME CLAUDE_CODE_SESSION_ID GIT_DIR GIT_WORK_TREE
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; trap 'echo "failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -63,4 +64,42 @@ mkdir -p "$tmp/mono"; git -C "$tmp/mono" init -q; root=$(mkroot mono/sub r)   # 
 echo '{"pending": {"file": "pending.md"}}' > "$root/.claude/coordination.local.json"
 printf '# Pending\n\n- 2026-11-01 M-1: m\n' > "$root/pending.md"; stop "$root"
 [ -z "$(git -C "$tmp/mono" log --oneline 2>/dev/null)" ] && [ -d "$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root").git" ] || fail "a repo above the root was adopted"
+
+# history.dirs: a hand-made remote-less repo holding the replies folder and the handoff file is adopted, keeping its
+# history; both are committed only there, in one commit named after the session; a plain listed folder gets an outside
+# repo; "." (the root) is refused
+root=$(mkroot dirs docs/claude/replies); D=$root/docs/claude; mkdir -p "$root/extra"
+echo '{"pending": {"file": "docs/claude/pending.md"}, "history": {"dirs": ["docs/claude", "extra", "."]}}' > "$root/.claude/coordination.local.json"
+git -C "$D" init -q; echo old > "$D/old.md"; git -C "$D" add old.md; git -C "$D" -c user.name=u -c user.email=u@x commit -qm "by hand"
+mkdir -p "$tmp/cfg/sessions"; echo '{"sessionId":"eeeeffff-1111","name":"my task"}' > "$tmp/cfg/sessions/1.json"
+printf '# Pending\n\n- 2026-11-01 D-1: d\n' > "$D/pending.md"; echo r > "$D/replies/D-1.md"; echo n > "$D/notes.md"; echo x > "$root/extra/x.md"
+stop "$root" eeeeffff
+[ "$(git -C "$D" log --format=%s | tr '\n' '|')" = "my task: notes.md pending.md D-1.md|by hand|" ] || fail "adopted repo's log: $(git -C "$D" log --format=%s)"
+[ "$(git -C "$D" log -1 --format='%(trailers:key=Session,valueonly,separator=)')" = eeeeffff-1111 ] || fail "no Session trailer"
+for d in "$D/replies" "$D" "$root"; do [ ! -d "$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$d").git" ] || fail "a second repo for $d"; done
+GX=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root/extra").git
+[ "$(git --git-dir="$GX" ls-files)" = x.md ] && [ ! -e "$root/extra/.git" ] || fail "listed plain folder: $(git --git-dir="$GX" ls-files 2>&1)"
+[ "$(cd "$root" && bash "$here/history-git" run replies log --format=%s | wc -l | tr -d ' ')" = 2 ] || fail "run replies: not the adopted repo"
+v=$(cd / && bash "$here/history-git" versions "$D/pending.md")   # any cwd: FILE's project
+[ "$(jq -r .s <<<"$v")" = eeeeffff ] || fail "versions via the outer repo: $v"
+
+# another git holding the index lock: the hook waits it out
+echo r2 > "$D/replies/D-2.md"; touch "$D/.git/index.lock"
+stop "$root" eeeeffff & sleep 1; rm -f "$D/.git/index.lock"; wait
+[ "$(git -C "$D" log -1 --format=%s)" = "my task: D-2.md" ] || fail "lock not waited out: $(git -C "$D" log -1 --format=%s)"
+
+# a hand-made repo inside a listed folder keeps its own history: not a gitlink in the outer one
+root=$(mkroot nest docs/claude/replies); D=$root/docs/claude
+echo '{"history": {"dirs": ["docs"]}}' > "$root/.claude/coordination.local.json"
+git -C "$D" init -q; echo top > "$root/docs/top.md"; echo r > "$D/replies/N-1.md"
+stop "$root" eeeeffff
+GD=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root/docs").git
+[ "$(git --git-dir="$GD" ls-files)" = top.md ] && grep -qx /claude/ "$GD/info/exclude" || fail "inner repo as a gitlink: $(git --git-dir="$GD" ls-files -s)"
+[ "$(git -C "$D" log --format=%s)" = "my task: N-1.md" ] || fail "inner repo not committed: $(git -C "$D" log --format=%s 2>&1)"
+# a symlinked replies folder: run still finds its repo
+ln -s "$D/replies" "$tmp/rlink"; printf -- '- Replies folder: `%s`\n' "$tmp/rlink" > "$root/CLAUDE.md"
+[ "$(cd "$root" && bash "$here/history-git" run replies log --format=%s)" = "my task: N-1.md" ] || fail "run through a symlink"
+# a history.dirs that isn't a list warns
+echo '{"history": {"dirs": "docs"}}' > "$root/.claude/coordination.local.json"
+(cd "$root" && . "$here/../../lib.sh" && config history.dirs 2>&1) | grep -q 'history.dirs.* is not valid' || fail "no warning for a bad history.dirs"
 echo "history-git.test: ok"

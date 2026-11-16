@@ -194,6 +194,15 @@ if [ "$mode" = check ]; then
                 rp=${replies/#\~/$HOME}; case $rp in /*) ;; *) rp=$root/$rp ;; esac
                 gt=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) && gt=$(cd "$gt" && pwd -P) && case $rp in "$gt"/*)
                   echo "replies folder $replies is inside the git checkout $gt: a worktree-isolated session can't write there. Move it out, e.g. to ${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/replies/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root")/, and change the Replies folder line" ;; esac
+                # a hand-made Stop hook that git-commits a folder: history-git does that (config history.dirs)
+                for f in "$root"/.claude/settings.json "$root"/.claude/settings.local.json; do
+                  jq -r '.hooks.Stop[]?.hooks[]?.command? // empty' "$f" 2>/dev/null
+                done | while read -r c; do
+                  grep -qE 'git[^|;&]* commit' <<<"$c" && { echo "project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; continue; }
+                  x=$(sed -e "s#\${CLAUDE_PROJECT_DIR}#$root#g; s#\$CLAUDE_PROJECT_DIR#$root#g" -e 's/["'\'']//g' <<<"$c")
+                  set -f; for w in $x; do case $w in /*) ;; '~'/*) w=$HOME/${w#'~/'} ;; *) w=$root/$w ;; esac   # relative: from the root, as Claude runs it
+                    [ -f "$w" ] && grep -qE 'git[^|;&]* commit' "$w" && { echo "project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; break; }; done
+                done
                 exit 0 ;;
     parent) echo "covered by a parent: $parent ($(slug "$(basename "$parent")")-coordinator) covers this folder"; exit 3 ;;
     partial) m="the CLAUDE.md section naming a replies folder"; [ -n "$adapter" ] || m="the adapter (.claude/session-status-adapter)"

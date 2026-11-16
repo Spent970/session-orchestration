@@ -30,7 +30,9 @@ by a parent. Configured adds:
 - `replies folder … is inside the git checkout …` when the Replies folder line points into the repo: a task session
   isolated in a worktree can't write there. Setup puts a git repo's replies folder in
   `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/replies/<root, as Claude names its projects folder>/`;
-  move an older one there and change the line.
+  move an older one there and change the line;
+- `project Stop hook commits a folder (COMMAND): …` when a Stop hook in the project's `.claude/settings*.json` runs a
+  script that git-commits (a hand-made auto-history). See Propose's **Hand-made history hook**.
 
 ## Propose, then write
 
@@ -56,6 +58,12 @@ by a parent. Configured adds:
   file with its sha256 and the `--trust=REL@SHA` arguments. Show the user each file whole and ask in the same round;
   pass the `--trust` arguments only on their yes. `--trust` refuses a file that changed since it was shown. A trusted
   committed adapter is used instead of writing a local one; declined, a local adapter is written as usual.
+- **Hand-made history hook** (the `--check` line above): read the script, find the folder it commits, and ask the
+  user in one plain-text round whether the plugin's history hook takes it over: the folder goes into `history.dirs`
+  (Config), the hook entry leaves `.claude/settings*.json`, and the script goes if nothing else runs it. Its repo, at
+  the top of the folder with no remote, is adopted with its history; one commit per repo per turn, the session's
+  name in the message, as such a hook does. Change nothing before their yes; a folder with a remote isn't adopted
+  (its history would start over in an outside repo): say so and leave the hook.
 - **Optional briefs**, on the user's request (`--init` lists the missing ones, also once set up): `--write
   --review-brief` writes `<orch>/review-brief.md`; name it in each PR reviewer's first prompt (`Review
   <repo>#<id> (<KEY>). Brief: <path>`). `--write --rnd-brief` writes `.claude/rnd-brief.md`, which the `rnd` skill
@@ -113,7 +121,8 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `feedback.mode` | `auto` \| `pr` \| `fork-pr` \| `issue` \| `local`: how plugin feedback cases are sent (`../orchestrating-sessions/feedback.md`) | `auto`: `pr` with `feedback.repo_dir` set, else `fork-pr` when `gh` is signed in, else `issue`; setup doesn't write it |
 | `feedback.repo_dir` | a clone of the plugin repo you can push to (`~` expanded); its coordinator is the plugin coordinator, which owns every plugin feedback case (`features/plugin-coordinator.md`) | unset; person key; setup doesn't write it |
 | `feedback.project_dir` | where this project's own feedback cases go (`feedback add --project`; `~` expanded, relative to the root; keep it out of git). A project key: never in the person-wide config.json | unset: `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<root, encoded>`; setup doesn't write it |
-| `pending.file` | the coordinator's handoff file, relative to the root (e.g. `docs/pending.md`): turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`) | unset; setup doesn't write it |
+| `pending.file` | the coordinator's handoff file, relative to the root (e.g. `docs/pending.md`): turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`) | unset; setup doesn't write it |
+| `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`) | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
 | `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `rnd.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
 | `plan.enabled` | `true` \| `false`: `session-status --plan` splits a design into chunks | `true`; setup doesn't write it |
 | `plan.max_parallel` | integer ≥ 1: chunks `session-status --plan` lets run at once | `3`; setup doesn't write it |
