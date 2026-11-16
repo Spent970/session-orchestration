@@ -14,10 +14,12 @@ split to the right of the front window. Neither shows on an interactive session.
 `session-status --open view|split …`, which a session can run itself to hand the user a running view.
 
 **Coordinator handover.** `session-status --successor` opens the successor coordinator in a new tab titled
-`<name>-next`. The old coordinator's tab is retitled `<name>-prev-K` when it renames itself (a fixed title: what the
-program sets no longer shows), and the successor closes it once the old one is idle: the whole tab when it holds that
-terminal alone, else only that split, with no confirmation. A tab it can't find (the old one ran in another terminal
-app) is left, and the successor says so.
+`<name>-next` without switching the user's screen (from the release after quiet handover): Ghostty brings itself to
+the front on any new tab, so the frontmost app and Ghostty's selected tab are recorded first and given back once the
+tab is open (`open -a`, so no Automation prompt for that app). The old coordinator's tab is retitled `<name>-prev-K`
+when it renames itself (a fixed title: what the program sets no longer shows), and the successor closes it once the
+old one is idle: the whole tab when it holds that terminal alone, else only that split, with no confirmation. A tab it
+can't find (the old one ran in another terminal app) is left, and the successor says so.
 
 **Quirks.**
 - Ghostty not running: nothing opens, the pane copies the command and says so.

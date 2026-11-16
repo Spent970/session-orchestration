@@ -411,7 +411,8 @@ that line from later runs; exit 1 when no current line is LINE. The plugin ships
 
 **Terminals** define two functions, the contract `session-status --open view|split ARGS… -- CMD…` calls:
 - `open_view [--account DIR] TITLE DIR CMD…`: run CMD in a new tab or window titled TITLE, in DIR, under that
-  Claude account (`CLAUDE_CONFIG_DIR`; absent or `~/.claude` is the default account);
+  Claude account (`CLAUDE_CONFIG_DIR`; absent or `~/.claude` is the default account). With `TERMINAL_QUIET=1` set
+  (`--successor`), keep the user's frontmost app and tab: open it behind them, or give them focus back;
 - `open_split [--account DIR] DIR CMD…`: run CMD in a split beside the current view.
 
 Return 0 when it opened; 2 when nothing opened, with the reason on stderr (the pane copies CMD); anything else is an

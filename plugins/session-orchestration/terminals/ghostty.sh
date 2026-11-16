@@ -5,7 +5,8 @@
 # --account: the pane's CLAUDE_CONFIG_DIR, so the shell left when CMD exits stays in that account (~/.claude: unset,
 # as claude then reads ~/.claude.json). A DIR that's gone (a removed worktree) opens in $HOME.
 # Prints: [reused ]window <id> tab <id> terminal <id>. Returns 0 opened, 2 Ghostty not running (the pane copies CMD),
-# 3 AppleScript error (message on stderr).
+# 3 AppleScript error (message on stderr). TERMINAL_QUIET=1 (a shell variable, not exported, so the opened shell
+# never inherits it): the user keeps their frontmost app and Ghostty's selected tab (a coordinator's handover).
 # grep without -q: -q stops at the match, ps then dies of SIGPIPE, and under the caller's pipefail (session-status)
 # the check failed 14 times in 20 (2026-11-06)
 _ghostty_running() { ps -axo ucomm= | grep '^ghostty *$' >/dev/null; }
@@ -21,14 +22,24 @@ _ghostty() {
   # ps, not pgrep: pgrep missed the running Ghostty from a background session (2026-10-19)
   command -v osascript >/dev/null || { echo "no osascript: the ghostty terminal is macOS only" >&2; return 2; }
   _ghostty_running || { echo "Ghostty is not running" >&2; return 2; }
-  out=$(osascript -e "$_ghostty_script" "$mode" "$dir" "$title" "$account" "$reuse" "$*" 2>&1) ||
+  out=$(osascript -e "$_ghostty_script" "$mode" "$dir" "$title" "$account" "$reuse" "$*" "${TERMINAL_QUIET:-0}" 2>&1) ||
     { echo "AppleScript error: $(head -1 <<<"$out")" >&2; return 3; }
   echo "$out"
 }
 
 read -r -d '' _ghostty_script <<'APPLESCRIPT' || true
 on run argv
-	set {mode, dir, title, account, reuse, cmd} to argv
+	set {mode, dir, title, account, reuse, cmd, quiet} to argv
+	-- quiet: Ghostty activates itself on every new tab or window (its dictionary has no way not to), so record the
+	-- frontmost app and Ghostty's front window and selected tab, and give them back once the tab is open. Both steps
+	-- in try: focus is cosmetic, a failure there must not report a started successor as not started.
+	set prev to {"", "", ""}
+	if quiet is "1" then
+		try
+			set item 1 of prev to POSIX path of (path to frontmost application)
+			tell application "Ghostty" to set prev to {item 1 of prev, id of front window, id of selected tab of front window}
+		end try
+	end if
 	tell application "Ghostty"
 		if reuse is "1" and title is not "" then
 			repeat with w in windows
@@ -36,6 +47,7 @@ on run argv
 					if (name of t) is title then
 						select tab t
 						activate window w
+						my restore(prev)
 						return "reused window " & (id of w) & " tab " & (id of t) & " terminal " & (id of focused terminal of t)
 					end if
 				end repeat
@@ -65,9 +77,29 @@ on run argv
 		end if
 		set term to focused terminal of t
 		if title is not "" then perform action ("set_tab_title:" & title) on term
+		my restore(prev)
 		return "window " & (id of w) & " tab " & (id of t) & " terminal " & (id of term)
 	end tell
 end run
+
+on restore(prev)
+	set {app_, wid, tid} to prev
+	try
+		if wid is not "" then
+			tell application "Ghostty"
+				repeat with w in windows
+					if (id of w) is wid then
+						repeat with t in tabs of w
+							if (id of t) is tid then select tab t
+						end repeat
+					end if
+				end repeat
+			end tell
+		end if
+		-- open -a, not tell … to activate: an Apple Event to the user's app would ask them for Automation consent
+		if app_ is not "" then do shell script "open -a " & quoted form of app_
+	end try
+end restore
 APPLESCRIPT
 
 # title_tty TTY TITLE: the tab holding the terminal on TTY (ttys005) gets TITLE as its name override (a title the

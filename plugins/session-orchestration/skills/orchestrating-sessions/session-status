@@ -415,7 +415,9 @@ if [ "${1:-}" = --successor ]; then
   # a coordinator that was a successor itself may still have the NAME-next tab title (--await name's retitle didn't
   # take, or never ran): retitle the caller's own tab first, or open_view below selects it and starts nothing
   own=; ho_retitle "$id" "$n" || own=" It may be this session's own tab, left from its start as a successor (its retitle to \"$n\" failed): then retitle that tab \"$n\" by hand instead of closing it."
-  out=$(open_view --account "$acct" "$n-next" "$ROOT" "$cmd"); rc=$?; q=$(printf %q "$ROOT")
+  # TERMINAL_QUIET: the tab opens behind the app and tab the user is on (each handover pulled them to it); set in the
+  # subshell, not as a prefix: a prefix exports it, and a module that spawns the terminal would hand it to the successor
+  out=$(TERMINAL_QUIET=1; open_view --account "$acct" "$n-next" "$ROOT" "$cmd"); rc=$?; q=$(printf %q "$ROOT")
   # open_view selects an open tab with the title instead: a successor that exited left it, and nothing was started
   [ "$rc" != 0 ] || [ "${out#reused}" = "$out" ] ||
     { echo "a tab titled \"$n-next\" is open already ($out), so nothing started: close it (a successor that exited?), then run this again.$own"; exit 3; }
