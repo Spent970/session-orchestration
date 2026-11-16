@@ -255,8 +255,10 @@ The script lists each PR, event and head SHA once.
   status, as far as the project's adapter gives them) and the check the report's `Done:` line names. Neither shows
   it: ask the session, and report the task as not done yet.
 - **The same failure twice: escalate, don't nudge again.** When a session reports the same failure after you've
-  already sent it back with feedback once, tell the user what fails and what was tried, and stop re-sending it. Each
-  round trip wakes both contexts. A repeated ask for an approval isn't a failure: it's still the user's to answer.
+  already sent it back with feedback once, hand its task to a stronger successor: `session-status --handover <id>
+  --escalate -- '<what fails, what was tried>'` (one rung up: effort, then model). A third time, or when `--escalate`
+  refuses (no rung left, a review session, no `<KEY>.md` or chunk handoff to start from), tell the user what fails
+  and what was tried, and stop re-sending it. Each round trip wakes both contexts. A repeated ask for an approval isn't a failure: it's still the user's to answer.
 - **Check a session's wording against the project docs before repeating it** to the user.
 - **After a plugin update** (`claude plugin update`, the plugin repo's release flow), call `reload_plugins`
   (ToolSearch: `mcp__session-orchestration__reload_plugins`): `/reload-plugins` runs in your session when the turn

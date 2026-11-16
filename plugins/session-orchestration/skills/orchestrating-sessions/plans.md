@@ -10,6 +10,8 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    The est is growth in context, kept within `handoff.at.chunk` − ~60K; a chunk with more than 3 separate pieces is split.
    Size classes: S ≤ 22K, M ≤ 43K, L ≤ 65K. Multiply a `build` chunk's first guess by 1.35 (measured: build chunks
    grew 1.35× their est, n=8); other kinds stay at 1.0 until `rnd.py chunks` has enough samples to say otherwise.
+   The 1.35 is a median of two groups (five chunks at 1.0–1.4×, three at ~2.5×), so it under-sizes the second: a
+   chunk past 2× its est at a handoff counts as a failure for SKILL.md's "same failure twice" rule (step 5).
 2. **Write the plan** as a table under `## Plan` in `<replies>/PROJ-123.md`, and run `session-status --plan FILE --check`.
    Write one brief per chunk, `<replies>/PROJ-123-cN.md`, from `--plan FILE --brief N`, plus a shared
    `PROJ-123-chunk-rules.md` (paths, setup, interface, checks, landing by fast-forward). Keep plans in the replies folder.
@@ -18,7 +20,8 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    starts get a plan and even ones run as before, with `plan: off` in the brief (`rnd.py trial` compares the two).
 4. **Models** by kind, from `plan.models` (`default` in the table); never `fable`.
 5. **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'`,
-   which takes the chunk's model and effort from its plan row; a chunk with `## cN: done` gets none. **A `handoff ready: PROJ-123` message** (a task): `session-status
+   which takes the chunk's model and effort from its plan row; a chunk with `## cN: done` gets none. A chunk that
+   handed off past 2× its est, or failed the same way twice: add `--escalate` (one rung up from the row's). **A `handoff ready: PROJ-123` message** (a task): `session-status
    --handover <id> -- '<next step>'`, the next step from `## Handoff` in its replies file. Message and attach the
    successor's plain name; a `-prev-K` name is a finished predecessor.
 6. **Recalibrate** with `rnd.py chunks` (its ratio line, act against est) and size the next ests by it.
