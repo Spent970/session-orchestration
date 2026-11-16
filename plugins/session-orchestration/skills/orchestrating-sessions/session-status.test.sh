@@ -842,19 +842,28 @@ as "$x" --await name --timeout 1 >/dev/null && { echo "--await name while the ol
 as "$o" --await ready | grep -q '^ready: "p-coordinator-next" (0b0b0b0b) has finished its Start. Now: rename yourself' || { echo "--await ready"; exit 1; }
 # A message meanwhile: the reply tool's backstop (--inbox-add) wakes the successor's wait; --start and --changes show it.
 [ "$(printf 'PROJ-1 · done\n# not a heading' | as "$z" --inbox-add "$o")" = "$root/replies/coordinator-inbox.md #1" ] &&
-  printf 'second' | as "$z" --inbox-add --from 'w (12345678), forwarded' >/dev/null && out=$(as "$x" --await name --timeout 5) &&
-  grep -q '^unread in the inbox' <<<"$out" && grep -qx '## 1 · unread · [0-9-]* [0-9:]* · from "p-coordinator" (0a0a0a0a)' <<<"$out" &&
+  printf 'second' | as "$z" --inbox-add --from 'w (12345678), forwarded' >/dev/null && { out=$(as "$x" --await name --timeout 5); [ $? = 3 ]; } &&
+  grep -q '^NOT DONE: --await name woke on the inbox' <<<"$out" && grep -qx '## 1 · unread · [0-9-]* [0-9:]* · from "p-coordinator" (0a0a0a0a)' <<<"$out" &&
   grep -qx ' # not a heading' <<<"$out" && grep -qx '## 2 · unread · .* · from w (12345678), forwarded' <<<"$out" &&
   [ "$(run --start | grep -c '^## Coordinator inbox, unread')" = 1 ] && run --changes >/dev/null &&
   printf 'third' | as "$z" --inbox-add >/dev/null && run --changes | grep -q '^now:   \* 3 · unread · .* · from unknown$' &&
   as "$x" --inbox --read 1 2 >/dev/null && [ "$(as "$x" --inbox | grep -c '^## ')" = 1 ] && as "$x" --inbox --read all >/dev/null &&
   [ -z "$(as "$x" --inbox)" ] && [ "$(run --changes)" = "no changes" ] && ! run --start | grep -q 'Coordinator inbox' ||
   { echo "the coordinator inbox: $out"; exit 1; }
+# A --changes baseline another session wrote (a predecessor's): this session's first run, a peek too, records its own
+# silently; the next diffs against it, and so on while no other session writes one.
+as "$x" --changes >/dev/null && printf 'fourth' | as "$z" --inbox-add >/dev/null &&
+  out=$(SESSION_STATUS_PEEK=1 CLAUDE_CODE_SESSION_ID=$z run --changes) && [ "$out" = "no changes" ] &&
+  printf 'fifth' | as "$z" --inbox-add >/dev/null && out=$(as "$z" --changes) && [ "$(grep -c '^now:   \* ' <<<"$out")" = 1 ] &&
+  grep -q '^now:   \* .* · from unknown$' <<<"$out" && printf 'sixth' | as "$z" --inbox-add >/dev/null &&
+  out=$(as "$z" --changes) && [ "$(grep -c '^now:   \* ' <<<"$out")" = 1 ] &&
+  as "$x" --inbox --read all >/dev/null && [ "$(as "$x" --changes)" = "no changes" ] ||
+  { echo "--changes against another session's baseline: $out"; exit 1; }
 # Adds racing a --read: under the lock none is lost and none shares a number.
 ib=$root/replies/coordinator-inbox.md
 for i in 1 2 3 4 5 6 7 8; do printf 'race %s' "$i" | as "$z" --inbox-add >/dev/null 2>>"$tmp/lockerr" & done
 as "$x" --inbox --read all >/dev/null 2>>"$tmp/lockerr" & wait
-[ "$(grep -c '^## ' "$ib")" = 11 ] && [ "$(grep '^## ' "$ib" | cut -d' ' -f2 | sort -u | wc -l | tr -d ' ')" = 11 ] && [ ! -s "$tmp/lockerr" ] ||
+[ "$(grep -c '^## ' "$ib")" = 14 ] && [ "$(grep '^## ' "$ib" | cut -d' ' -f2 | sort -u | wc -l | tr -d ' ')" = 14 ] && [ ! -s "$tmp/lockerr" ] ||
   { echo "inbox adds racing a --read"; cat "$ib" "$tmp/lockerr"; exit 1; }
 # A held lock is waited for (the holder's last line comes before the add), and a killed holder frees it; an older
 # version's lock directory is ignored. hold SECS: holds the lock, touches $ib.held once it has it, then writes "held".
@@ -862,11 +871,11 @@ hold() { rm -f "$ib.held"; exec perl -MFcntl=:flock -e 'open(my $l, ">>", "$ARGV
   open(my $t, ">", "$ARGV[0].held") or die; close $t; sleep $ARGV[1]; open(my $f, ">>", $ARGV[0]) or die; print $f "held\n"' "$ib" "$1"; }
 held() { for _ in $(seq 100); do [ -e "$ib.held" ] && return; sleep 0.1; done; echo "the test's lock holder never took the lock"; exit 1; }
 mkdir "$ib.lock"; (hold 1) & held
-printf 'after a held lock' | as "$z" --inbox-add >/dev/null && wait && [ "$(grep -c '^## ' "$ib")" = 12 ] &&
+printf 'after a held lock' | as "$z" --inbox-add >/dev/null && wait && [ "$(grep -c '^## ' "$ib")" = 15 ] &&
   [ "$(grep -n -e '^held$' -e 'after a held lock' "$ib" | cut -d: -f2 | tr '\n' ' ')" = "held after a held lock " ] ||
   { echo "inbox add while the lock is held"; cat "$ib"; exit 1; }
 (hold 30) & h=$!; held; kill "$h"; wait "$h" 2>/dev/null || :; s=$SECONDS
-printf 'after a killed holder' | as "$z" --inbox-add >/dev/null && [ "$(grep -c '^## ' "$ib")" = 13 ] && [ $((SECONDS - s)) -lt 20 ] ||
+printf 'after a killed holder' | as "$z" --inbox-add >/dev/null && [ "$(grep -c '^## ' "$ib")" = 16 ] && [ $((SECONDS - s)) -lt 20 ] ||
   { echo "inbox add after a killed holder"; exit 1; }
 rmdir "$ib.lock"; rm -f "$ib.held"
 as "$x" --inbox --read all >/dev/null
