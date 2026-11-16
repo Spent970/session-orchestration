@@ -108,6 +108,8 @@ Never apply without the user's yes for that batch.
 
    Each outgoing `gh pr create` or `gh issue create` goes to the user as one approval: name every body file with its
    sha256 (`shasum -a 256 FILE`), and pass the command to `hand_command` (or ask in plain text when mods are off).
+   The exception: when `session-status --config approvals.pr_create` prints `true`, the `pr` mode's `gh pr create`
+   runs without an ask (an issue and a fork PR still ask).
    An apply session that the plugin coordinator started works in that coordinator's folder, so it asks the way
    worker.md's Approvals says, and a relayed approval verifies for it. Run nothing outward-facing before that yes.
 5. `feedback mark FILE sent <url>` for each case sent.
@@ -117,3 +119,5 @@ Config (person keys): `feedback.mode` (`auto` default, or `pr`, `fork-pr`, `issu
 `${XDG_CONFIG_HOME:-~/.config}/session-orchestration/config.json`; a project's `.claude/coordination.local.json`
 outranks that file. `feedback.project_dir` (Project cases) is per project: set it in that project's
 `.claude/coordination.local.json`, since an absolute path set for every project would put all their cases in one store.
+`approvals.pr_create` (`true` by default in the plugin coordinator's project, `false` elsewhere) lets a session open
+its own PR there without an ask; set it to `false` in that project's `.claude/coordination.local.json` to ask again.

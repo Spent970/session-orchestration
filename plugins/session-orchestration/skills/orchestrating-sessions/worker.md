@@ -73,8 +73,9 @@ prints, then the next.
 
 Who approves an action is set by the project: its `CLAUDE.md`, plus the config key `approvals.delegate`
 (`session-status --config approvals.delegate`, run from the project). Three kinds:
-- *Allowed outright:* actions the project lets a session take without asking (e.g. a conflict rebase). The session
-  checks that rule's conditions itself.
+- *Allowed outright:* actions the project lets a session take without asking (e.g. a conflict rebase, or opening
+  your task's PR when `session-status --config approvals.pr_create` prints `true`). The session checks that rule's
+  conditions itself.
 - *Delegated:* if `approvals.delegate` is `true`, a coordinator's message approving an action counts as the user's
   approval, except for what the project's `CLAUDE.md` reserves.
 - *Reserved:* merging, force-pushing, deleting, deploying and the like, when the project doesn't delegate them, plus

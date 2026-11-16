@@ -42,4 +42,10 @@ ln -s "$root" "$tmp/link"; check "$(w "$tmp/link/src/a.ts")" deny 'through a sym
 printf -- '- Never edit memory by hand: `scripts/x.sh`.\n' > "$root/CLAUDE.local.md"
 check "$(w "$root/scripts/x.sh")" deny 'a line that only mentions memory'
 check "$(g w1 Write "{\"file_path\":\"$root/src/a.ts\"}")" allow 'a task session writing'
+check "$(w "$root/CLAUDE.local.md")" allow 'CLAUDE.local.md outside a git repo'
+git -C "$root" init -q
+check "$(w "$root/CLAUDE.local.md")" allow 'an untracked CLAUDE.local.md'
+check "$(w "$root/src/CLAUDE.local.md")" deny 'an untracked CLAUDE.local.md below the root'
+git -C "$root" add CLAUDE.local.md
+check "$(w "$root/CLAUDE.local.md")" deny 'a tracked CLAUDE.local.md'
 echo ok

@@ -3,7 +3,8 @@
 # - Bash starting with `cd`: refused (the Bash tool keeps it, and `claude --bg` then starts outside the project).
 #   Only the prefix: a `cd` later in a chain isn't parsed out of the shell text.
 # - Edit/Write/MultiEdit/NotebookEdit of a file inside the project root: allowed only in .claude/ (not its settings*.json
-#   or hooks/), the replies folder, the handoff file (pending.file) and the project memory CLAUDE.md names (the file and its memory/ folder); never in
+#   or hooks/), the replies folder, the handoff file (pending.file), the project memory CLAUDE.md names (the file and its memory/ folder)
+#   and the root's CLAUDE.local.md while git doesn't track it (a worktree session can't reach it); never in
 #   a task's worktree (.worktrees/, .claude/worktrees/). The path is resolved first (`..`, symlinks).
 #   Outside the root (scratch, ~/.claude) is not the rule's business.
 # Any other session pays one bash start and a file test.
@@ -40,5 +41,7 @@ if ! under "$path" "$root/.claude/worktrees" && ! under "$path" "$root/.worktree
   # the project memory: CLAUDE.md's "Project memory: `PATH`" (project-memory's setup line)
   m=$(abs "$(sed -nE 's/^[^`]*[Pp]roject memory[^`]*`([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1)")
   [ -n "$m" ] && { [ "$path" = "$m" ] || under "$path" "$(dirname "$m")/memory"; } && exit 0
+  # an untracked CLAUDE.local.md: no worktree has it, so no session can make the edit
+  [ "$path" = "$root/CLAUDE.local.md" ] && ! git ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 && exit 0
 fi
 deny "Coordinator rule: the only files you change are the memory files, the handoff file and your handover (SKILL.md, Rules). ${path#"$root"/} is a session's to change, however small: give it to the session that owns it, or start one."

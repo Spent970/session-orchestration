@@ -111,6 +111,8 @@
 #        session-status --diff KEY|ID…  that folder's changes since its merge-base with origin/HEAD, committed or
 #                       not: `DIR · vs BASE`, the --stat lines and untracked `?? FILE`s, a blank line, the patch
 #        session-status --compact ID   an idle background session runs /compact (stopped, resumed with it)
+#        session-status --stop ID      stops a live session in any listed account and waits until its process ends
+#                       (the pane's Stop); exit 3 mid-turn or being compacted, 2 not listed, 1 the listing or stop failed
 #        session-status --send-when-idle [--here] ID TEXT   wait until it isn't busy, then deliver TEXT without forking
 #                       it; --here: a session under another account is moved to yours (same id and name), so you can
 #                       SendMessage it next
@@ -839,7 +841,7 @@ TMP=$(mktemp -d); NPID=; trap '[ -z "$NPID" ] || killtree "$NPID"; rm -rf "$TMP"
 
 KEYRE=$(key_re "$ADAPTER")
 ACT=; SEND=; COMPACT=; HANDOVER=; PEEK=; WHERE=; ALLP=; YDAY=
-case "${1:-}" in --activity) ACT=1; shift ;; --send-when-idle) SEND=1; shift ;; --compact) COMPACT=1; shift ;; --handover) HANDOVER=1; shift ;;
+case "${1:-}" in --activity) ACT=1; shift ;; --send-when-idle) SEND=1; shift ;; --compact|--stop) COMPACT=$1; shift ;; --handover) HANDOVER=1; shift ;;
   --peek) PEEK=1; shift ;; --dir|--diff) WHERE=$1; shift ;; --yesterday) YDAY=1; shift ;; esac
 [ -n "$ACT" ] && [ "${1:-}" = --all-projects ] && { ALLP=1; shift; }
 if [ -z "$ACT$SEND$COMPACT$HANDOVER$PEEK" ]; then
@@ -1139,6 +1141,15 @@ if [ -n "$COMPACT" ]; then
   row=$(find_session "${1:-}") || { echo "couldn't list the sessions; try again"; exit 1; }
   [ -n "$row" ] || { echo "no session ${1:-} in any account"; exit 2; }
   read_row id name st pre started cwd kind status pid
+  # --stop ID: the pane's Stop (a stale prompt, a superseded session), in whichever account lists it.
+  if [ "$COMPACT" = --stop ]; then
+    # a --compact between its stop and its resume would undo this stop
+    [ ! -d ~/.cache/session-status/compact-"$id" ] || { echo "\"$name\" (${id:0:8}) is being compacted: try again in a minute"; exit 3; }
+    [ -n "$pid" ] || { echo "\"$name\" (${id:0:8}) isn't running"; exit 0; }
+    [ "$status" != busy ] || { echo "\"$name\" (${id:0:8}) is mid-turn: not stopping it"; exit 3; }
+    stop_session "$pre" "$id" || { echo "couldn't stop \"$name\" (${id:0:8})"; exit 1; }
+    echo "stopped \"$name\" (${id:0:8})"; exit 0
+  fi
   # One --compact per session, whoever runs it: a second would find it stopped and resume it beside the first,
   # starting a copy. ponytail: a lock left by a killed run expires after 10 minutes.
   lock=~/.cache/session-status/compact-$id; mkdir -p ~/.cache/session-status
@@ -1331,8 +1342,10 @@ if [ -n "$HANDOVER" ]; then
     text="Work on $key: continue from $rdir/$key.md. ${next%.}. Supersedes: $id (transcript $f; read only the parts you need, never whole).${hist:+ The history of its handoff entry, if you need it: $hist (on demand, not up front).}"
   fi
   # The caller's account, not the old one's: that one may be at its weekly limit, and only the caller's sessions can
-  # message the coordinator (features/accounts.md). Unless the caller's is past 90% and the old one's is under it.
-  acct=claude wu=$(weekly_use); cp=$(head -1 <<<"$wu" | cut -f2)
+  # message the coordinator (features/accounts.md). Unless features.accounts_weekly_switch is on, the caller's is past
+  # 90% and the old one's is under it.
+  acct=claude wu= cp=
+  [ "$(config features.accounts_weekly_switch 2>/dev/null)" != true ] || { wu=$(weekly_use); cp=$(head -1 <<<"$wu" | cut -f2); }
   if [ -n "$cp" ] && [ "$cp" -ge 90 ]; then
     op=$(awk -F'\t' -v d="$(pre_dir "$pre")" '$1 == d { print $2 }' <<<"$wu"); [ -z "$op" ] || [ "$op" -ge 90 ] ||
       { [[ $model == *fable* ]] && fable_no "$(pre_dir "$pre")"; } || acct=$pre   # never fable where it isn't
@@ -1523,7 +1536,9 @@ landed() {  # CWD STARTED
     git -C "$top" merge-base --is-ancestor HEAD "$base" 2>/dev/null && [ "$(git -C "$top" log -1 --format=%ct)" -ge "${2:-0}" ]
 }
 # Whether a blocked session (Claude Code's state once a turn ends, and on a prompt) waits on the user; first match:
-#   on BLOCKED     an open prompt (blocked_of) newer than SESSION_STATUS_STALE_HOURS (6)
+#   stale BLOCKED  an open prompt (blocked_of, or status waiting unrecorded: `blocked: a prompt`, aged by its
+#                  transcript) over an hour old whose worktree's work landed (landed): moot
+#   on BLOCKED     an open prompt newer than SESSION_STATUS_STALE_HOURS (6)
 #   stale BLOCKED  an older one, unanswered: an abandoned probe or a forgotten ask; listed apart, stop or answer it
 #   out busy       mid-turn (a session limit leaves it so)
 #   out superseded a newer session took its task over
@@ -1538,11 +1553,17 @@ verdict() {  # ID
   [ -f "$c" ] || {
     IFS=$'\037' read -r st started cwd status < <(awk -F'\t' -v id="$1" '$1==id {print $3 "\037" $5 "\037" $6 "\037" $8}' "$TMP/agents.all")
     b=$(blocked_of "$1" "$status"); f=$(transcript_of "$1")
-    if [ -n "$b" ]; then
-      t=$(jq -r '.time // empty' ~/.cache/session-status/blocked/"$1".json 2>/dev/null)
-      [ -n "$t" ] || t=$(mtime ~/.cache/session-status/blocked/"$1".json)
-      if [ "$t" -ge $((NOW - STALE_S)) ]; then printf 'on\t%s' "$b"; else printf 'stale\t%s · unanswered %s' "$b" "$(fmt_age $((NOW - t)))"; fi
-    elif [ "$status" = waiting ]; then printf 'on\t'   # a prompt hooks/blocked.sh didn't record
+    if [ -n "$b" ] || [ "$status" = waiting ]; then
+      if [ -n "$b" ]; then
+        t=$(jq -r '.time // empty' ~/.cache/session-status/blocked/"$1".json 2>/dev/null)
+        [ -n "$t" ] || t=$(mtime ~/.cache/session-status/blocked/"$1".json)
+      else   # a prompt hooks/blocked.sh didn't record: the transcript isn't written while it waits
+        b='blocked: a prompt'; t=$( { [ -n "$f" ] && mtime "$f"; } || echo "$NOW")
+      fi
+      # Its work landed by another route: the prompt is moot. Not in its first hour: that may be a post-merge step.
+      if [ -n "$cwd" ] && [ "$t" -lt $((NOW - 3600)) ] && landed "$cwd" "$started"; then printf 'stale\t%s · its work landed' "$b"
+      elif [ "$t" -ge $((NOW - STALE_S)) ]; then printf 'on\t%s' "$b"
+      else printf 'stale\t%s · unanswered %s' "$b" "$(fmt_age $((NOW - t)))"; fi
     elif [ "$status" = busy ]; then printf 'out\tbusy'
     elif grep -qxF "$1" "$TMP/superseded.ids"; then printf 'out\tsuperseded'
     elif grep -qxF "$1" "$TMP/reviewers"; then printf 'out\treview'

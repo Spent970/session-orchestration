@@ -1,6 +1,6 @@
 ---
 name: setting-up-coordination
-description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, terminal, features.accounts, features.review_inbox, features.notify).
+description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, approvals.pr_create, terminal, features.accounts, features.accounts_weekly_switch, features.review_inbox, features.notify).
 ---
 
 # Setting up coordination
@@ -13,7 +13,7 @@ coordinator has nothing to read. `open_pane` checks (`session-status --init --ch
 
 `session-status --init --check`, from the folder: one line, exit 0 configured, 1 unconfigured or partial, 3 covered
 by a parent. Configured adds:
-- `active: tracker=… host=… delegate=on|off terminal=… messages=… features=…|none`: the config in effect, then an
+- `active: tracker=… host=… delegate=on|off pr_create=on|off terminal=… messages=… features=…|none`: the config in effect, then an
   indented line per doc of the terminal, the messages module and each feature that's on: `  <name>: <start step> Read
   <doc> when <events>`, from the doc's `> **Start**:` and `> **Read when**:` lines (`  <name>: read <doc> now` when
   it has none). `session-status --start` shows them to the coordinator. With review_inbox on, `  review_inbox url:
@@ -92,8 +92,8 @@ Two JSON files, each the nearest one up from the cwd within the project (a folde
 walk, so a subproject never reads its parent's), merged key by key (the person's file wins); a session in a worktree
 below reads the project's:
 - `.claude/coordination/coordination.json`, the repo's: `tracker`, `host`, `key_pattern`, `features.review_inbox`;
-- `.claude/coordination.local.json`, the person's: `approvals.delegate`, `terminal`, `messages` and its module's block
-  (e.g. `msgraph`), `features.accounts`, `features.notify`, `trusted`, `team`, `feedback` (ignored in the repo file: a
+- `.claude/coordination.local.json`, the person's: `approvals.*`, `terminal`, `messages` and its module's block
+  (e.g. `msgraph`), `features.accounts`, `features.accounts_weekly_switch`, `features.notify`, `trusted`, `team`, `feedback` (ignored in the repo file: a
   committed file never delegates or trusts for anyone, and the terminal, messages, accounts, notifications and feedback
   are the person's own);
 - below both, `${XDG_CONFIG_HOME:-~/.config}/session-orchestration/config.json`, the person's for every project:
@@ -113,9 +113,11 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `host` | `github` \| `bitbucket` \| `forgejo` \| `none` | from the `origin` remote |
 | `key_pattern` | an extended regex matching a task key | not written by setup (your override); unset: the adapter's `key-pattern`, else `[A-Z][A-Z0-9]+-[0-9]+` |
 | `approvals.delegate` | `true` \| `false` | `false` |
+| `approvals.pr_create` | `true` \| `false`: a session opens its own task's PR (`gh pr create`) without an ask; issues and fork PRs still ask (`../orchestrating-sessions/worker.md`, Approvals) | `true` in the plugin coordinator's project (`feedback.repo_dir`'s), else `false`; person-only; setup doesn't write it |
 | `terminal` | a terminal module's name: `plain` (the pane copies commands), one the plugin ships (`terminals/<name>.md` beside its module), or your own (status-reference.md, Modules) | `plain`; setup proposes a shipped module when it runs in that terminal (in tmux: `plain`, with a note) |
 | `messages` | `none`, `msgraph` (Teams and Outlook; its config block and routing in `messages/msgraph.md`) or your own messages module (status-reference.md, Modules) | `none`; setup doesn't write it: set it by hand per the module's doc |
 | `features.accounts` | `true` \| `false`: ask every Claude account sharing this one's transcripts (`features/accounts.md`) | `false`; setup writes `true` when it finds a second account |
+| `features.accounts_weekly_switch` | `true` \| `false`: with `features.accounts` on, a coordinator past 90% of its account's weekly limit hands over to a coordinator under an account below it (`features/accounts.md`, Weekly limits); off, the weekly use is information only | `false`; person-only; setup doesn't write it |
 | `features.review_inbox` | `true` \| `false`: PR findings go to the review inbox page (`features/review-inbox.md`); Bitbucket or Forgejo, GitHub is a TODO | `false`; setup writes `true` when the project's docs name an inbox URL and the host is Bitbucket or Forgejo |
 | `features.notify` | integer minutes, `0` = off: an ask left unseen on the pane that long shows one local macOS notification with a count only (`features/notify.md`) | `0`; person-only; setup doesn't write it |
 | `feedback.mode` | `auto` \| `pr` \| `fork-pr` \| `issue` \| `local`: how plugin feedback cases are sent (`../orchestrating-sessions/feedback.md`) | `auto`: `pr` with `feedback.repo_dir` set, else `fork-pr` when `gh` is signed in, else `issue`; setup doesn't write it |

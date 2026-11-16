@@ -58,10 +58,12 @@ session under another account.
 
 An account at its weekly limit freezes every session on it until the window resets, days later. Each session records
 its account's 7-day use as it goes (the plugin's `session.measure` hook, into `usage/` in the stamp folder), and
-`session-status --init --check` (so `--start`) prints `accounts weekly use:` per account. When yours is past 90% and
-another is under it, it adds `accounts weekly limit:` "`<yours>` is past 90% of its weekly limit (resets …), `<other>`
-is under it: hand over to a coordinator under `<other>`", and `--watch` wakes you with it under `Weekly limit:`, once.
-Then:
+`session-status --init --check` (so `--start`) prints `accounts weekly use:` per account. That is information only
+unless the person key `features.accounts_weekly_switch` is `true` (default `false`): with it off, nothing wakes you,
+you don't hand over, and new sessions start under your account as usual. With it on, when yours is past 90% and
+another is under it, `--init --check` adds `accounts weekly limit:` "`<yours>` is past 90% of its weekly limit
+(resets …), `<other>` is under it: hand over to a coordinator under `<other>`", and `--watch` wakes you with it under
+`Weekly limit:`, once. Then:
 - Start no new task session: it would run under your account.
 - Write your handover (the coordinator skill's handover.md), saying the move is why, and hand over with
   `session-status --successor --account <other>`: it starts the next coordinator under that account and the handover
@@ -69,8 +71,8 @@ Then:
   its `CLAUDE_CONFIG_DIR`; `env -u CLAUDE_CONFIG_DIR` for `~/.claude`). The two coordinators can't message each other
   across accounts: the handover steps use files and the coordinator inbox instead.
 - The next coordinator moves the workers it still needs to its account (`--send-when-idle --here`, above); one left
-  where it is freezes at the limit. A `--handover` successor starts under the caller's account, unless that one is
-  past 90% and the old session's is under it.
+  where it is freezes at the limit. A `--handover` successor starts under the caller's account, unless (with the
+  key on) that one is past 90% and the old session's is under it.
 
 No reading for an account (none of its sessions has measured since its window reset) says `no reading` and never counts
 as headroom: a session started there takes one on its first turn.

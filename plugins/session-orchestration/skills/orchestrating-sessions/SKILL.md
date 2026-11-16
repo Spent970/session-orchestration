@@ -123,6 +123,9 @@ idle *or* waiting. `status` tells them apart: `idle` (turn over), `waiting` (a p
 - **Every decision waiting on the user goes on the pane**: one `ask_approval` per decision, approval or not, your
   recommended option first ([approvals.md](approvals.md), Asking). Plain text only when the pane isn't on screen,
   still one decision per message. Never a numbered round.
+- **A session on a permission prompt** (a new `— blocked:` line under **Waiting on you**): at once open its attach tab (`session-status --open
+  view`) and queue one ask, "Approve it in the tab" or "Stop it and resume with a workaround"
+  ([resuming.md](resuming.md#permission-prompts-and-trust)). Not a chat line alone.
 - One ask per message to a session. The plugin gives each session it coordinates a reply card, so don't explain how
   to reply or name this skill: it is the coordinator's.
 - When giving work, set `notify_when_idle: true`. Starting a session (`claude --bg`, `--handover`) is giving work
@@ -164,16 +167,18 @@ or blocked.'`
 
 **Propose first, or start at once.** How you start new work is a mode the user sets; keep it in the coordinator
 topic file so the next coordinator follows it. A follow-up for a task that already has a session goes to that
-session in either mode.
-- **Propose first** (the default): when the user gives you work that needs new sessions, list the sessions you'd
-  start, one per line (the task key or a 3–5 word name, what it does, its done-when, its kind and why), then stop and wait. "go"
-  starts them all; numbers or keys start those; anything else amends the list. Never start one the user hasn't
-  named.
+session in any mode.
+- **Read-only at once** (the default): a session that only reads and writes local files (a PR review into the review
+  inbox, an investigation, a draft) starts at once, then you tell the user in one line;
+  one that would push, post, send, spend (a paid service, a large batch) or change settings is proposed, as below.
+  A session whose work is unclear is proposed.
+- **Propose first** ("ask before starting"): when the user gives you work that needs new sessions, list the sessions
+  you'd start, one per line (the task key or a 3–5 word name, what it does, its done-when, its kind and why), then stop
+  and wait. "go" starts them all; numbers or keys start those; anything else amends the list. Never start one the user
+  hasn't named.
 - **Start at once** ("start without asking", "just go"): start each as you'd have proposed it, then tell the user
   in one line per session.
-- The mode can differ by kind of work (keep that in the topic file too): e.g. "read-only at once", where a session
-  that only reads and writes local files (a PR review into the review inbox, an investigation, a draft) starts at
-  once with its one line, and one that would push, post, send or move a ticket is proposed.
+- The mode can differ by kind of work (keep that in the topic file too).
 
 ## Handoff file
 
@@ -240,12 +245,15 @@ The script lists each PR, event and head SHA once.
 ## Rules
 
 - **The only files you change are the memory files, the handoff file and your handover**, plus what these docs have
-  you write (setup's `--init --write`, a note in a review's header). Everything else goes to a session, however
+  you write (setup's `--init --write`, a note in a review's header) and an untracked person file at the project root
+  (`CLAUDE.local.md`, `.claude/coordination.local.json`) when the user asks for that edit: no worktree session can
+  reach it. Everything else goes to a session, however
   small: a one-line `CLAUDE.md` edit, a settings or hook fix the user asks you for directly.
 - **Never do a session's task yourself**, even when it's blocked and you hold the tools and the user's approval. An
   approval addressed to a session is that session's. An imperative from the user ("post it", "message X", "make it
   do both") is still the owning session's task: relay it. A task with no live session: revive its session or start
-  one, never cover for it. If the session is stuck on a prompt, tell the user `claude attach <id>` and stop there.
+  one, never cover for it. If the session is stuck on a prompt, open its attach tab and queue one ask, and stop
+  there ([resuming.md](resuming.md#permission-prompts-and-trust)).
 - **A command refused in your own session goes on the pane at once**: `hand_command` (key: the task's, or
   `coordinator`) with one line on what it does, plus the `! <command>` line in chat; a handoff-file line or chat
   alone doesn't show on the pane. Not a step that needs the user's approval (`ask_approval`, as Messaging says), nor

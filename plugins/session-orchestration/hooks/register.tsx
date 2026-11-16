@@ -2033,7 +2033,7 @@ export const register: Register = on => {
           ...(w.blocked ? [detail(accent, '│', <Text wrap="wrap">{w.blocked}</Text>)] : []),
           detail(accent, '│', <Text dimColor wrap="truncate-end">{w.command}</Text>),
           bar(accent, ...sessActs(w.command, w.name, wa, true).all,
-            unanswered ? act('s', 'Stop', copy(/; stop: (.+)$/.exec(w.blocked)?.[1] ?? stopOf(w.command))) : compactAct(wa, w.id),
+            unanswered ? act('s', 'Stop', stopNow(w.id)) : compactAct(wa, w.id),
             ...viewActs(id, w.id, [...(key ? [key] : []), w.id]),
             act('k', 'Ask', ask(`the session "${w.name}" that waits on me`))),
           ...peekView(id, accent),
@@ -2063,7 +2063,7 @@ export const register: Register = on => {
           ...(o.review ? [link(accent, linkFor(b?.urls ?? '', 'ticket', { key: o.review }), o.review)].filter((l): l is RenderElement => !!l) : []),
           // Superseded: its task moved on, so Stop (no need to ask, resuming.md) rather than Compact.
           bar(accent, ...sessActs(o.command, o.name, oa).all,
-            o.superseded ? act('s', 'Stop', copy(stopOf(o.command))) : compactAct(oa, o.id),
+            o.superseded ? act('s', 'Stop', stopNow(o.id)) : compactAct(oa, o.id),
             ...viewActs(id, o.id, [o.id]),
             act('k', 'Ask', ask(`the session "${o.name}"`))),
           ...peekView(id, accent),
@@ -2107,6 +2107,13 @@ export const register: Register = on => {
     const archive = (label: string, why: string) => async () => {
       const out = await runStatus($, ['--pending-done', label, '--', `stale: ${why}`], { cwd: acts?.root })
       $.ui.toast(oneLine(out) || `Archived ${label}`)
+      await update($, selected, () => null)
+      await refresh($)
+    }
+    // A press stops the session (session-status --stop, in whichever account lists it), then a sweep shows it gone.
+    const stopNow = (sid: string) => async () => {
+      const out = await runStatus($, ['--stop', sid], { cwd: acts?.root })
+      $.ui.toast(oneLine(out) || `Couldn't stop ${sid.slice(0, 8)}`)
       await update($, selected, () => null)
       await refresh($)
     }

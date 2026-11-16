@@ -258,7 +258,7 @@ function sweep(on: On, status = STATUS) {
   on('process.run', async (_, e) => {
     runs.push(e.argv.slice(2))
     const arg = e.argv[2]
-    const stdout = arg === '--dismiss' ? '' : arg === '--pending' ? PENDING : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : arg === 'PROJ-4679' ? ROW_4679 : status
+    const stdout = arg === '--dismiss' ? '' : arg === '--stop' ? `stopped "probe" (${e.argv[3]})` : arg === '--pending' ? PENDING : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : arg === 'PROJ-4679' ? ROW_4679 : status
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.open', async () => ({ value: { isPlaced: true } }))
@@ -387,11 +387,15 @@ test('a full sweep gets 7 minutes; one that fails keeps the last good rows under
 test('a stale prompt is listed apart, not counted on you, with Stop', async ($, on) => {
   mock.clock(on)
   const stale = '\n\nStale prompts:\n  "probe" (claude attach 91d21a06) — blocked: Bash `curl x` · unanswered 7h; stop: claude stop 91d21a06'
-  sweep(on, `${STATUS}${stale}`)
-  const copied: string[] = []
+  const runs = sweep(on, `${STATUS}${stale}`)
+  const copied: string[] = [], toasts: string[] = []
   on('ui.copy', async (_, e) => {
     copied.push(e.text)
     return { value: { isCopied: true } }
+  })
+  on('ui.toast', async (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
   })
   await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
@@ -400,8 +404,14 @@ test('a stale prompt is listed apart, not counted on you, with Stop', async ($, 
   expect((await ui.find({ type: 'Button', key: 'sec-Waiting on you' }))?.text).toMatch(/WAITING ON YOU 1 /)
   expect((await ui.find({ type: 'Button', key: 'wait-91d21a06:lead' }))?.text).toBe(' STALE        ')
   await ui.press({ key: 'wait-91d21a06' })
+  const before = runs.length
   await ui.press({ key: 'act-s' })
-  expect(copied).toEqual(['claude stop 91d21a06'])
+  // it stops the session itself, then sweeps again
+  const stop = runs.findIndex((r, i) => i >= before && r[0] === '--stop')
+  expect(runs[stop]).toEqual(['--stop', '91d21a06'])
+  expect(runs.length).toBeGreaterThan(stop + 1)
+  expect(toasts).toEqual(['stopped "probe" (91d21a06)'])
+  expect(copied).toEqual([])
   await ui.unmount()
 })
 

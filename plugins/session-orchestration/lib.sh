@@ -7,7 +7,8 @@
 #   .claude/coordination/coordination.json   repo keys: tracker, host, key_pattern, features.review_inbox
 #                                            (excluded from git until shared mode commits it; read from the team
 #                                            repo's when the person file names one, see shared_dir)
-#   .claude/coordination.local.json          person keys: approvals.delegate, features.accounts, features.notify, terminal, messages
+#   .claude/coordination.local.json          person keys: approvals.delegate, approvals.pr_create, features.accounts,
+#                                            features.accounts_weekly_switch, features.notify, terminal, messages
 #                                            (and its module's block, e.g. msgraph), trusted, team, feedback.mode,
 #                                            feedback.repo_dir, feedback.project_dir, telemetry, handoff.*, compact.window (always excluded;
 #                                            the repo file can't set them)
@@ -66,7 +67,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.notify) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -195,8 +196,12 @@ detect_host() {
 #   key_pattern         an ERE matching a task key                    default empty (session-status's own)
 #   approvals.delegate  true | false: a coordinator's message counts as the user's approval, except what the
 #                       project's CLAUDE.md reserves                    default false
+#   approvals.pr_create true | false: a session opens its own task's PR (gh pr create) without an ask (person only)
+#                       default true in the plugin coordinator's project (plugin_root), else false
 #   features.accounts   true | false: ask every Claude account sharing this transcript store (features/accounts.*)
 #                                                                       default false
+#   features.accounts_weekly_switch  true | false: past 90% of the weekly limit, the coordinator hands over to an
+#                       account under it (features/accounts.md, Weekly limits; person only)   default false
 #   features.review_inbox  true | false: PR findings go to the review inbox page (features/review-inbox.md);
 #                       Bitbucket or Forgejo (TODO: GitHub support)     default false
 #   features.notify     integer minutes, 0 = off: one local macOS notification when an ask has waited unseen this
@@ -301,17 +306,17 @@ last_model() {
 config() {
   local key=${1:-} v ok=
   case $key in
-    tracker|host|key_pattern|approvals.delegate|features.accounts|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
+    tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate features.accounts features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
     tracker) case $v in none|github|jira) ok=1 ;; esac ;;
     host) case $v in github|bitbucket|forgejo|none) ok=1 ;; esac ;;
     key_pattern) { grep -qE -- "$v" </dev/null; [ $? -le 1 ]; } 2>/dev/null && ok=1 ;;
-    approvals.delegate|features.accounts|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
+    approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
     features.review_inbox) case $v in false) ok=1 ;;
       true) case $(config host 2>/dev/null) in bitbucket|forgejo) ok=1 ;; esac; [ -n "$ok" ] ||
               { echo "warning: features.review_inbox needs host=bitbucket or forgejo (GitHub support is a TODO): off" >&2; echo false; return 0; } ;;
@@ -334,7 +339,9 @@ config() {
   local kind=; [ "$key" = terminal ] && kind=terminals; [ "$key" = messages ] && kind=messages
   [ -z "$v" ] || echo "warning: config $key=$v is not valid${kind:+ (no $kind/$v.sh found)}: using the default" >&2
   case $key in
-    tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;; approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
+    tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;;
+    approvals.pr_create) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && echo true || echo false ;;
+    approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts) ;; telemetry) echo off ;;
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
     plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;
@@ -515,6 +522,7 @@ weekly_use() {
 # it holds, so --changes reports it once.
 weekly_warn() {
   local d p r cur= cp= cr= best=
+  [ "$(config features.accounts_weekly_switch 2>/dev/null)" = true ] || return 0
   while IFS=$'\t' read -r d p r; do
     if [ -z "$cur" ]; then cur=$d cp=$p cr=$r
     elif [ -z "$best" ] && [ -n "$p" ] && [ "$p" -lt 90 ]; then best=$d
