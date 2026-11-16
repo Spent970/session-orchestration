@@ -241,7 +241,8 @@ calls: a half-edited script breaks every session that runs it.
 
 File a case the moment you tell the user (or the coordinator) about friction, not afterwards: you worked around this
 plugin, took an extra round trip, misreported because of a script's output or a file, or the user had to step in;
-also when its script failed on a case it should handle or its docs contradict each other. `feedback add` (next to
+also when its script failed on a case it should handle or its docs contradict each other, and for any mistake of
+your own (a refused or retried command, guessed CLI usage, a skipped rule, misread output), filed at once, unasked. `feedback add` (next to
 `session-status`; [feedback.md](feedback.md) has the format, in the plugin's terms only), or `feedback seen FILE`
 when it lists the same case open. Friction from the project itself (its hosts, sign-ins, docs, scripts) goes in the
 project's store with `feedback add --project`, in its own terms. Don't fix the plugin from your task; carry on with
