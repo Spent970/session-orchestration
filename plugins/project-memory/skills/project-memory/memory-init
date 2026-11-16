@@ -46,12 +46,13 @@ tpl=$(<"$here/templates/memory-topic.md")
 for ((i = 0; i < ${#topics[@]}; i += 3)); do
   f=$dir/memory/${topics[i]}; new=; [ -e "$f" ] || new=1
   s=${tpl//"{{topic_title}}"/${topics[i+1]}}; printf '%s\n' "${s//"{{topic_trigger}}"/${topics[i+2]}}" | put "$f"
-  # An existing index: a new topic gets its row after the table's last row (else at the end), so sessions read it.
+  # An existing index: a new topic gets its row after the table's last row (else a table at the end), so sessions read it.
   [ -n "$had_idx" ] && [ -n "$new" ] && ! grep -qF "\`${topics[i]}\`" "$dir/memory.md" || continue
   echo "$dir/memory.md (row: ${topics[i]})"; [ -z "$dry" ] || continue
   r=$(row $i); tmp=$dir/memory.md.$$
   R=$r awk '{ l[NR] = $0; if ($0 ~ /^\|/) last = NR }   # (ENVIRON, not -v: -v would read \ escapes in the row)
-    END { r = ENVIRON["R"]; for (i = 1; i <= NR; i++) { print l[i]; if (i == last) print r }; if (!last) print r }' \
+    END { r = ENVIRON["R"]; for (i = 1; i <= NR; i++) { print l[i]; if (i == last) print r }
+          if (!last) { print ""; print "| Topic file (`memory/`) | Read when |"; print "|---|---|"; print r } }' \
     "$dir/memory.md" > "$tmp" &&
     mv "$tmp" "$dir/memory.md" || { rm -f "$tmp"; die "can't add the row to $dir/memory.md"; }
 done

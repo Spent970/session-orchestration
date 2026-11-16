@@ -23,6 +23,8 @@
 #        cases mark FILE sent URL | fixed WHAT | dropped
 #        cases [--store DIR] store   the store's path
 #        cases root                  the project root the default store is named after
+#        cases tasks                 the project's deferred-task folder (defer-task): the state dir's
+#                                    projects/<root, encoded>/tasks, beside session-orchestration's files for it
 set -uo pipefail
 TODAY=$(date +%F)
 die() { echo "$*" >&2; exit 2; }
@@ -126,5 +128,6 @@ mark)
   S="- status: $s" awk '/^- status: / && !d { print ENVIRON["S"]; d = 1; next } { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f" ;;
 store) echo "$STORE" ;;
 root) root ;;
+tasks) echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(root | sed 's/[^A-Za-z0-9]/-/g')/tasks" ;;
 *) sed -n '/^# Usage:/,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2 ;;
 esac

@@ -39,6 +39,8 @@ o=$("$C" --store "$T/s2" --origin 'plugin: 1.2.3' add refactorings 'Split it' --
 mkdir -p "$T/ws/.claude" "$T/ws/repo" && echo '{}' > "$T/ws/.claude/coordination.local.json"
 [ "$(cd "$T/ws/repo" && "$C" store)" = "$XDG_STATE_HOME/session-orchestration/feedback-projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$T/ws")" ] ||
   fail "coordinated root: $(cd "$T/ws/repo" && "$C" store)"
+[ "$(cd "$T/ws/repo" && "$C" tasks)" = "$XDG_STATE_HOME/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$T/ws")/tasks" ] ||
+  fail "tasks: $(cd "$T/ws/repo" && "$C" tasks)"
 # ... also from a worktree outside it (the main checkout's set-up folder); root names it.
 (cd "$T/ws/repo" && git init -q && git commit -q --allow-empty -m x && git worktree add -q "$T/wt2" 2>/dev/null) || fail "worktree 2 setup"
 [ "$(cd "$T/wt2" && "$C" root)" = "$T/ws" ] || fail "worktree of a set-up repo: $(cd "$T/wt2" && "$C" root)"
@@ -63,6 +65,11 @@ w=$("$M" docs/mem --topic ci.md 'build & ship' 'touching CI \ & deploys'); [ "$w
 [ "$(grep -A1 -F '| `misc.md` |' docs/mem/memory.md | tail -1)" = '| `ci.md` | Touching CI \ & deploys |' ] &&
   grep -qxF '# Memory: build & ship' docs/mem/memory/ci.md && [ -z "$("$M" docs/mem --topic ci.md a b)" ] &&
   [ "$(grep -c 'ci\.md' docs/mem/memory.md)" = 1 ] || fail "new topic row: $(cat docs/mem/memory.md docs/mem/memory/ci.md)"
+# A flat index (no table, an older setup's): the new rows go under a table header of their own at its end.
+mkdir -p flat && printf '# Memory\n\n- 2026-01-01 X: a flat entry\n' > flat/memory.md
+"$M" flat >/dev/null && [ "$(tail -4 flat/memory.md)" = "$(printf '\n| Topic file (`memory/`) | Read when |\n|---|---|\n| `misc.md` | Nothing above fits |')" ] &&
+  "$M" flat --topic ci.md ci 'touching CI' >/dev/null && [ "$(tail -1 flat/memory.md)" = '| `ci.md` | Touching CI |' ] &&
+  [ "$(grep -c '^| Topic file' flat/memory.md)" = 1 ] && grep -qxF -- '- 2026-01-01 X: a flat entry' flat/memory.md || fail "flat index: $(cat flat/memory.md)"
 "$M" r/mem --root /w/x >/dev/null && grep -qF 'projects/-w-x*/' r/mem/memory.md || fail "--root"
 "$M" docs/mem --topic misc.md a b 2>/dev/null; [ $? = 2 ] || fail "misc.md as a --topic"
 "$M" docs/mem --topic ../x.md a b 2>/dev/null; [ $? = 2 ] || fail "a path as a --topic"

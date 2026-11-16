@@ -86,5 +86,6 @@ into fixes.
 
 ## Deferred tasks
 
-An out-of-scope bug, feature or refactor you notice goes to `.claude/tasks/` ([defer-task](../defer-task/SKILL.md));
+An out-of-scope bug, feature or refactor you notice goes to the tasks folder `cases tasks` prints
+([defer-task](../defer-task/SKILL.md));
 the graduate pass sweeps them too.
