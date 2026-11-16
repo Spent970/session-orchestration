@@ -12,8 +12,9 @@ the project root, after confirming the session owns the task (`session-status --
 | Session is closed and not listed in `claude agents --json` | `claude --bg --resume <session-id> '<task>'` (single quotes). **Check the list first.** Resuming a session that still runs starts a duplicate under a new id |
 | Session is retired (still listed, but a send fails "not reachable") | `session-status --send-when-idle <id> '<text>'` ([below](#follow-ups-for-later); never a relayed approval in the text), or by hand ([Reviving](#reviving-a-retired-session)) |
 | Sessions ended while the background service was off (a reboot) or crashed | `session-status --resume-ended ID…`, after the one ask ([below](#after-a-restart)) |
-| The user must answer a prompt or approve a plan | Tell them: `claude attach <id>` |
+| The user must answer a prompt or approve a plan | Open its attach tab and queue one ask ([below](#permission-prompts-and-trust)) |
 | Finished session | `claude stop <id>` (the user's go first; a session replaced through `--handover` is stopped without asking, below) |
+| Session under **Stale prompts** | `session-status --stop <id>` ([below](#stale-prompts)) |
 | Task session too big to resume (over 200K, exit 4) | `session-status --handover <id> -- '<what next>'` (below) |
 
 If the user's default mode is plan, add `--permission-mode default` on `--resume` too.
@@ -49,7 +50,8 @@ has no `<KEY>.md` (ask the old session for a status report first, or write one),
 show the old one as `superseded by <new>`, never as the owner or a leftover.
 
 **Standing rule from the user (2026-10-16):** a session replaced through `--handover` is stopped without asking: its
-state is in `replies/<KEY>.md`, and a stopped session can be resumed. Every other stop still needs the user's go.
+state is in `replies/<KEY>.md`, and a stopped session can be resumed. Every other stop still needs the user's go,
+except a stale prompt's under `approvals.delegate` ([below](#stale-prompts)).
 
 Only when the old context is really needed: `claude --bg --resume <id> --autocompact 200000 '<note>'`. A
 SendMessage to a live session is fine: nothing is re-read from cold.
@@ -96,11 +98,23 @@ it once that turn ends. If the user attaches instead, they exit it themselves.
 
 A background session can't answer its own permission prompts or approve its own plan. It shows `state: blocked`
 until the user attaches. Waiting on you says what it waits on (`— blocked: Bash \`…\``), so you can name the exact
-action to the user. Don't leave it waiting for an attach: offer the user both in one line, attach, or let you stop
-it and resume it with a note to avoid the command that prompted (`claude stop`, then `claude --bg --resume <id>
-'<note>'`); the stop needs their go, as every stop does. Fix a recurring refusal with an allow rule or setting
+action to the user. On a new `— blocked:` line under **Waiting on you**, at once:
+1. Open its attach tab: `session-status --open view [--account DIR] "<name> attach" <root> -- claude attach <id8>`
+   (`--account DIR` when its attach command starts `CLAUDE_CONFIG_DIR=DIR`, as the pane's Attach in tab builds it).
+   Exit 2: nothing opened; give the user the `claude attach` command instead.
+2. Queue one `ask_approval` naming the session and the exact action, options "Approve it in the tab" and "Stop it
+   and resume with a workaround" ([approvals.md](approvals.md#asking)). On the second, stop it (`session-status
+   --stop <id>`) and resume it with a note to avoid the command that prompted (`claude --bg --resume <id>
+   '<note>'`); that answer is the user's go for the stop. Fix a recurring refusal with an allow rule or setting
 (through a session). If a task will need the user's approval, say so up front. Auto-mode denials go to
 `~/.cache/session-status/denied.jsonl` (time, session, tool, input, reason) for later review.
+
+### Stale prompts
+
+A prompt unanswered 6 hours, or one whose work landed by another route (`· its work landed`), moves from Waiting on
+you to **Stale prompts** ([status-reference.md](status-reference.md#footers-in-detail)): nobody will answer it.
+With `approvals.delegate` on, stop it without asking (`session-status --stop <id>`) and say so in one line. Otherwise
+the pane's Stop on its row is the user's one click: it stops the session and refreshes the pane.
 
 If `claude --bg` fails with "Workspace not trusted", that directory isn't trusted yet: ask the user to run `claude`
 there once and accept the trust prompt, then retry.

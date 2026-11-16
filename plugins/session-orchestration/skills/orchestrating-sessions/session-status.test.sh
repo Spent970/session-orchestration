@@ -496,6 +496,17 @@ for st in busy waiting; do setacct cfg "$(sess "$rid" rev $st 1)"
   rc=0; out=$(run --compact "$rid") || rc=$?; [ $rc = 3 ] && ! calls | grep -q 'stop\|--bg' || { echo "compact $st not refused: $out"; exit 1; }; done
 setacct cfg "$(sess "$rid" rev idle 1 interactive)"
 [ "$(run --compact "$rid"; echo $?)" = "$(printf '"rev" is interactive: run /compact in its terminal\n3')" ] || { echo "compact interactive failed"; exit 1; }
+# --stop (the pane's Stop): a live session is stopped, even on a prompt; a stopped one is left; unlisted: exit 2.
+setacct cfg "$(sess "$rid" rev waiting 1)"; calls >/dev/null
+[ "$(run --stop "${rid:0:8}")" = 'stopped "rev" (22222222)' ] && [ "$(calls | grep -v ' agents ')" = 'cfg stop 22222222' ] &&
+  [ "$(run --stop "$rid")" = '"rev" (22222222) isn'\''t running' ] && ! calls | grep -q ' stop ' &&
+  [ "$(run --stop 99999999 >/dev/null; echo $?)" = 2 ] || { echo "--stop failed"; calls; exit 1; }
+# Mid-turn, or while a --compact holds its lock (it would resume it): refused (exit 3), untouched.
+setacct cfg "$(sess "$rid" rev busy 1)"
+[ "$(run --stop "$rid" >/dev/null; echo $?)" = 3 ] && ! calls | grep -q ' stop ' || { echo "--stop busy not refused"; exit 1; }
+setacct cfg "$(sess "$rid" rev idle 1)"; mkdir -p "$tmp/.cache/session-status/compact-$rid"
+[ "$(run --stop "$rid" >/dev/null; echo $?)" = 3 ] && ! calls | grep -q ' stop ' || { echo "--stop compacting not refused"; exit 1; }
+rmdir "$tmp/.cache/session-status/compact-$rid"
 # Send when idle: busy → waits; then live here → SendMessage (nothing run); live in the other account → stop and
 # resume with the text; retired → woken by a resume; unlisted → resumed from its transcript.
 setacct cfg "$(sess "$rid" rev busy 1)"; calls >/dev/null
@@ -547,11 +558,16 @@ echo brief > "$root/replies/ABC-41-c1.md"; [ "$(run --changes)" = "no changes" ]
 echo report > "$root/replies/ABC-41.md"; out=$(run --changes)
 rm "$root/replies/ABC-41.md" "$root/replies/ABC-41-c1.md" "$root/.claude/coordination.local.json"; run --changes >/dev/null
 grep -q '^now:   \* report written: ABC-41.md (' <<<"$out" || { echo "a report didn't wake --changes: $out"; exit 1; }
-# Weekly limit (accounts on): this account past 90% while the other is under it wakes --changes once, and goes
-# quietly; --init --check (so --start) names each account's use. A reading whose window has reset is none.
+# Weekly limit (accounts and accounts_weekly_switch on): this account past 90% while the other is under it wakes
+# --changes once, and goes quietly; --init --check (so --start) names each account's use. A reading whose window has
+# reset is none. With the switch off (the default) the use is shown and nothing wakes.
 echo '{"features":{"accounts":true}}' > "$root/.claude/coordination.local.json"; run --changes >/dev/null
 u=$tmp/.cache/session-status/usage; mkdir -p "$u"; later=$(( $(date +%s) + 86400 ))
 printf '92.5\t%s\n' "$later" > "$u/cfg"; printf '40\t%s\n' "$later" > "$u/.claude-work"
+c=$(run --init --check)
+[ "$(run --changes)" = "no changes" ] && grep -q '^  accounts weekly use: ~/cfg 92% ' <<<"$c" && ! grep -q 'accounts weekly limit' <<<"$c" ||
+  { echo "weekly limit, switch off: $c"; exit 1; }
+echo '{"features":{"accounts":true,"accounts_weekly_switch":true}}' > "$root/.claude/coordination.local.json"
 out=$(run --changes); c=$(run --init --check)
 grep -q '^now:   \* ~/cfg is past 90% of its weekly limit (resets [0-9-]* [0-9:]*), ~/.claude-work is under it: hand over to a coordinator under ~/.claude-work ' <<<"$out" &&
   [ "$(run --changes)" = "no changes" ] && grep -q '^  accounts weekly use: ~/cfg 92% (resets [0-9-]* [0-9:]*), ~/.claude-work 40% (resets ' <<<"$c" &&
@@ -641,11 +657,17 @@ echo '{"features":{"accounts":true}}' > "$root/.claude/coordination.local.json"
 setacct cfg ""; setacct .claude-work "$(sess "$oid" "ABC-43-x" busy 1 | sed 's/"state":"blocked"/"state":"done"/')"; calls >/dev/null
 out=$(run --handover "$oid" -- 'Do Y.') && [ "$(calls | grep -v ' agents ' | cut -d' ' -f1-4)" = "$(printf '.claude-work stop bbbbbbbb\ncfg --bg -n ABC-43-x')" ] ||
   { echo "handover from the other account: $out"; calls; exit 1; }
-# Unless this account is past 90% of its weekly limit and the old one's is under it: the successor stays there.
+# Unless this account is past 90% of its weekly limit, the old one's is under it and accounts_weekly_switch is on:
+# the successor stays there. With the switch off it still starts here.
 oid2=cccccccc-2222-3333-4444-555555555555; u=$tmp/.cache/session-status/usage; mkdir -p "$u"; later=$(( $(date +%s) + 86400 ))
 printf '95\t%s\n' "$later" > "$u/cfg"; printf '40\t%s\n' "$later" > "$u/.claude-work"
 echo '{"type":"user","message":{"content":"Work on ABC-44"}}' > "$proj/$oid2.jsonl"; echo report > "$root/replies/ABC-44.md"
 setacct .claude-work "$(sess "$oid2" "ABC-44-x" idle 1)"; calls >/dev/null
+out=$(run --handover "$oid2" -- 'Do Z.') && [ "$(calls | grep -v ' agents ' | cut -d' ' -f1-4)" = "$(printf '.claude-work stop cccccccc\ncfg --bg -n ABC-44-x')" ] ||
+  { echo "handover, this account full, switch off: $out"; calls; exit 1; }
+echo '{"features":{"accounts":true,"accounts_weekly_switch":true}}' > "$root/.claude/coordination.local.json"
+echo '{"type":"user","message":{"content":"Work on ABC-44"}}' > "$proj/$oid2.jsonl"
+setacct cfg ""; setacct .claude-work "$(sess "$oid2" "ABC-44-x" idle 1)"; calls >/dev/null
 out=$(run --handover "$oid2" -- 'Do Z.') && [ "$(calls | grep -v ' agents ' | cut -d' ' -f1-4)" = "$(printf '.claude-work stop cccccccc\n.claude-work --bg -n ABC-44-x')" ] ||
   { echo "handover, this account full: $out"; calls; exit 1; }
 rm -r "$u" "$proj/$oid2.jsonl" "$root/replies/ABC-44.md"
@@ -1079,10 +1101,20 @@ s2=b4000004-2222-3333-4444-555555555555 m1=b5000005-2222-3333-4444-555555555555
 echo "{\"time\":$ago7,\"tool\":\"Bash\",\"input\":\"rm x\"}" > "$tmp/.cache/session-status/blocked/$s2.json"
 { hu x 'Session task: ABC-88. Go'; txt 'Session task: ABC-89 too. Shall I go on?'; } > "$proj/$m1.jsonl"
 printf '#!/bin/sh\ncase $1 in tasks) printf "ABC-87\\t-\\t\\tr#6 OPEN CONFLICT  \\nABC-88\\t-\\t\\tr#5 OPEN no-human-approval  \\nABC-89\\t-\\t\\t\\n" ;; *) exit 2 ;; esac\n' > "$root/.claude/session-status-adapter"
-setacct cfg "$(sess "$u1" unrecorded waiting 1),$(sess "$g1" long '' 1),$(sess "$c1" code idle 1),$(sess "$s2" stale-conflict waiting 1),$(sess "$m1" two-rows idle 1)"
+# Stale, not on you: an unrecorded prompt whose transcript hasn't moved in hours (u2), and a prompt whose work landed
+# by another route (l2, 2h on a prompt in the merged wt3). One there for under an hour (l3) may be a post-merge step:
+# still on you.
+u2=b6000006-2222-3333-4444-555555555555 l2=b7000007-2222-3333-4444-555555555555 l3=b8000008-2222-3333-4444-555555555555
+{ hu x 'Work on ABC-93'; } > "$proj/$u2.jsonl"; touch -t 202001010000 "$proj/$u2.jsonl"; { hu x 'Work on ABC-94'; } > "$proj/$l2.jsonl"
+{ hu x 'Work on ABC-95'; } > "$proj/$l3.jsonl"
+echo "{\"time\":$(( $(date +%s) - 7200 )),\"tool\":\"Bash\",\"input\":\"npm test\"}" > "$tmp/.cache/session-status/blocked/$l2.json"
+echo "{\"time\":$(date +%s),\"tool\":\"Bash\",\"input\":\"npm run release\"}" > "$tmp/.cache/session-status/blocked/$l3.json"
+setacct cfg "$(sess "$u1" unrecorded waiting 1),$(sess "$g1" long '' 1),$(sess "$c1" code idle 1),$(sess "$s2" stale-conflict waiting 1),$(sess "$m1" two-rows idle 1),$(sess "$u2" old-prompt waiting 1),$(sess "$l2" moot waiting 1 | sed "s#$root\"#$root/wt3\"#"),$(sess "$l3" post-merge waiting 1 | sed "s#$root\"#$root/wt3\"#")"
 out=$(run)
-[ "$(sed -n '/^Waiting on you:/,/^$/p' <<<"$out" | grep .)" = "$(printf 'Waiting on you:\n  "unrecorded" (claude attach b1000001)\n  "long" (claude attach b2000002)\n  "two-rows" (claude attach b5000005)')" ] &&
+[ "$(sed -n '/^Waiting on you:/,/^$/p' <<<"$out" | grep .)" = "$(printf 'Waiting on you:\n  "unrecorded" (claude attach b1000001) — blocked: a prompt\n  "long" (claude attach b2000002)\n  "two-rows" (claude attach b5000005)\n  "post-merge" (claude attach b8000008) — blocked: Bash `npm run release`')" ] &&
   grep -q '^  "stale-conflict" (claude attach b4000004) — blocked: Bash `rm x` · unanswered 7h; stop: ' <<<"$out" &&
+  grep -q '^  "old-prompt" (claude attach b6000006) — blocked: a prompt · unanswered [0-9]*d; stop: claude stop b6000006$' <<<"$out" &&
+  grep -qxF '  "moot" (claude attach b7000007) — blocked: Bash `npm test` · its work landed; stop: claude stop b7000007' <<<"$out" &&
   grep -q '^ABC-87 .*sess:"stale-conflict" stale$' <<<"$out" && grep -q '^  "code" idle ' <<<"$out" || { echo "review fixes failed: $out"; exit 1; }
 
 # --init (session-init): (a) a GitHub repo with ACME keys and a tracked CLAUDE.md, proposed then written; (b) a
@@ -1098,7 +1130,7 @@ git -C "$a" add CLAUDE.md && gc "$a" -m 'ACME-1: init' && gc "$a" --allow-empty 
 out=$(init "$a") && grep -q '^1\. Task keys: ACME-123 (in 66% ' <<<"$out" && grep -q "^2\. Code host: git@github.com:acme/app.git (github, one repo), gh installed → GitHub adapter: " <<<"$out" &&
   grep -q '^3\. Files: CLAUDE.local.md, .claude/session-status-adapter, ' <<<"$out" || { echo "init (a) failed: $out"; exit 1; }
 init "$a" --check >/dev/null && { echo "init (a) --check exited 0 before --write"; exit 1; }
-out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s (acme-coordinator)\nactive: tracker=jira host=github delegate=off terminal=plain messages=none features=none' "$a")" ] && [ -z "$(git -C "$a" status --short)" ] &&
+out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s (acme-coordinator)\nactive: tracker=jira host=github delegate=off pr_create=off terminal=plain messages=none features=none' "$a")" ] && [ -z "$(git -C "$a" status --short)" ] &&
   grep -q '^- Replies folder (status reports, plans, review reports): `/[^`]*/session-orchestration/replies/[^`]*-init-acme/`\.$' "$a/CLAUDE.local.md" &&
   grep -qF '`approvals.delegate` in' "$a/CLAUDE.local.md" && [ "$(jq -c . "$a/.claude/coordination.local.json")" = '{"features":{"accounts":false},"approvals":{"delegate":false}}' ] &&
   [ "$(jq -c . "$a/.claude/coordination/coordination.json")" = '{"tracker":"jira","host":"github","features":{"review_inbox":false}}' ] && [ "$(cd "$a" && .claude/session-status-adapter urls)" = 'pr https://github.com/acme/{repo}/pull/{id}' ] &&
@@ -1157,7 +1189,7 @@ grep -x 'warning: config tracker=trello is not valid: using the default' <<<"$(i
 mv "$tmp/cfg.json" "$a/.claude/coordination/coordination.json"
 rc=0; cfg "$a" nope 2>/dev/null || rc=$?; [ $rc = 2 ] || { echo "config: an unknown key didn't exit 2"; exit 1; }
 init "$a" --write --delegate >/dev/null && [ "$(cfg "$a/sub" approvals.delegate)" = true ] &&
-  grep -x 'active: .* delegate=on terminal=plain messages=none features=none' <<<"$(init "$a" --check)" >/dev/null || { echo "init --delegate: $(init "$a" --check)"; exit 1; }
+  grep -x 'active: .* delegate=on pr_create=off terminal=plain messages=none features=none' <<<"$(init "$a" --check)" >/dev/null || { echo "init --delegate: $(init "$a" --check)"; exit 1; }
 # messages: a module that exists is active with its doc; one that doesn't falls back to none with a warning. The
 # repo file can't set it.
 cp "$a/.claude/coordination.local.json" "$tmp/person.json"
@@ -1244,10 +1276,16 @@ echo '{"features":{"notify":5}}' > "$b/.claude/coordination/coordination.json"
 [ "$(cfg "$b" features.notify)" = 0 ] || { echo "config: the repo file set features.notify"; exit 1; }
 # plugin coordinator: on in the root feedback.repo_dir names, with its doc line; off in any other root.
 echo "{\"feedback\":{\"repo_dir\":\"$a\"}}" > "$a/.claude/coordination.local.json"
-c=$(init "$a" --check); grep -x 'active: .* features=.*plugin_coordinator' <<<"$c" >/dev/null &&
+c=$(init "$a" --check); grep -x 'active: .* pr_create=on .* features=.*plugin_coordinator' <<<"$c" >/dev/null &&
   grep -x "  plugin_coordinator: run \`feedback list --plugin\`.* Read $(cd "$here/../.." && pwd)/features/plugin-coordinator.md when .*" <<<"$c" >/dev/null &&
-  echo "{\"feedback\":{\"repo_dir\":\"$b\"}}" > "$a/.claude/coordination.local.json" && ! grep -q plugin_coordinator <<<"$(init "$a" --check)" ||
+  echo "{\"feedback\":{\"repo_dir\":\"$b\"}}" > "$a/.claude/coordination.local.json" && c=$(init "$a" --check) &&
+  ! grep -q plugin_coordinator <<<"$c" && grep -q ' pr_create=off ' <<<"$c" ||
   { echo "check plugin coordinator: $c"; exit 1; }
+# approvals.pr_create: the person's file sets it, the repo file can't.
+echo '{"approvals":{"pr_create":true}}' > "$a/.claude/coordination.local.json"
+echo '{"approvals":{"pr_create":true}}' > "$b/.claude/coordination/coordination.json"
+[ "$(cfg "$a" approvals.pr_create)" = true ] && [ "$(cfg "$b" approvals.pr_create)" = false ] ||
+  { echo "config approvals.pr_create: $(cfg "$a" approvals.pr_create) $(cfg "$b" approvals.pr_create)"; exit 1; }
 # terminal: Ghostty found by TERM_PROGRAM is proposed, named by --check until recorded, then active with its doc; tmux
 # is noted and plain.
 echo '{"features":{"accounts":true}}' > "$a/.claude/coordination.local.json"
