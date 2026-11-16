@@ -41,8 +41,12 @@ messages_notices() {
     npx\ *) bin=$(npx -y -p "${cli##* }" -c 'command -v msgraph' 2>/dev/null) || { echo "teams: npx can't fetch ${cli##* }"; return 1; } ;;
     *) bin=$cli ;;
   esac
-  # graph OUTFILE ARGS…: stdout to OUTFILE; errors (JSON on stderr) to $T/err, and the call to $T/failed.
-  msgraph_call() { local out=$1; shift; $bin "$@" > "$out" 2>>"$T/err" || echo "$*" >> "$T/failed"; }
+  # graph OUTFILE ARGS…: stdout to OUTFILE; errors (JSON on stderr) to $T/err, and the call to $T/failed. An error
+  # the CLI marks retryable (a Graph 5xx, a throttle) gets one more try after a pause: one blip fails no check.
+  msgraph_call() { local out=$1 e; shift; e=$(mktemp "$T/e.XXXXXX")
+    $bin "$@" > "$out" 2>"$e" ||
+      { grep -q '"retryable":true' "$e" && sleep "${MSGRAPH_RETRY_PAUSE:-1}" && $bin "$@" > "$out" 2>"$e"; } ||
+      { cat "$e" >> "$T/err"; echo "$*" >> "$T/failed"; }; }
   msgraph_failed() { [ -s "$T/failed" ] || return 1
     echo "teams: msgraph $(grep -o '"type":"[a-z_]*"' "$T/err" | head -1 | cut -d'"' -f4) error"; }
 

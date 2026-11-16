@@ -644,7 +644,8 @@ fi
 # --changes: print only lines that differ from the previous --changes run (for --watch). Idle/busy and
 # "closed Nh" ages are stripped first, since they change on every run, and so are a `(PRs as of HH:MM)` marker (the
 # adapter adds and drops it as lookups fail and recover) and a `(maybe …)` guess (not an
-# owner). One state file per arg list.
+# owner). A `(failed) SOURCE: why` notice compares as `(failed) SOURCE`: its wording (server, usage error) flaps while
+# it stays failed, and nothing is to do about that; an auth failure as `(failed) SOURCE: sign-in`, the user's to fix. One state file per arg list.
 # ponytail: a manual --changes run with the watcher's args consumes the change the watcher would report.
 if [ "${1:-}" = --changes ]; then
   shift; last=~/.cache/session-status/$ENC${*:+-$(printf '%s' "$*" | cksum | cut -d' ' -f1)}.last; mkdir -p ~/.cache/session-status
@@ -655,7 +656,7 @@ if [ "${1:-}" = --changes ]; then
   # Resolved needs nothing, so its section isn't compared (kept aside in $last.resolved): an item moving there
   # from Leftovers wakes no one, nor does it going away.
   : > "$last.resolved"
-  new=$(SESSION_STATUS_PRS_OUT=$last.prs.$$ SESSION_STATUS_NO_FEEDBACK=1 SESSION_STATUS_STRICT=1 "$SELF" "$@" | sed -E '/^  \* /!s/ \(PRs as of [0-9]{1,2}:[0-9]{2}\)//; /^  \* /!s/" (idle|busy)/"/; /^  \* /!s/ closed [0-9]+h/ closed/; /^  \* /!s/ \(maybe [0-9a-f]+: [0-9]+ mentions\)//' |
+  new=$(SESSION_STATUS_PRS_OUT=$last.prs.$$ SESSION_STATUS_NO_FEEDBACK=1 SESSION_STATUS_STRICT=1 "$SELF" "$@" | sed -E '/^  \* /!s/ \(PRs as of [0-9]{1,2}:[0-9]{2}\)//; /^  \* /!s/" (idle|busy)/"/; /^  \* /!s/ closed [0-9]+h/ closed/; /^  \* /!s/ \(maybe [0-9a-f]+: [0-9]+ mentions\)//; /^  \* \(failed\) .*auth/!s/^(  \* \(failed\) [^:]*):.*/\1/; s/^(  \* \(failed\) [^:]*):.*auth.*/\1: sign-in/' |
     awk -v r="$RESOLVED:" -v out="$last.resolved" '/^fix:/ {next} $0 == "Other sessions:" || $0 == "Stale prompts:" {drop = 1; next} drop && /^  / {next} {drop = 0} $0 == r {skip = 1; next} skip && /^  / {print > out; next} {skip = 0; print}') ||
     { echo "$new"; exit 1; }
   # A worker under another account can't SendMessage this coordinator (features/accounts.md): its report reaches only
@@ -914,16 +915,22 @@ activity_fields() {
 }
 # Reads a tab-separated session line into the named variables, empty fields kept (IFS=tab would collapse them).
 read_row() { IFS=$'\037' read -r "$@" <<<"$(tr '\t' '\037' <<<"$row")"; }
-# The read row's session is mid-turn: busy (with no status: state working). Busy with state done and no transcript
-# write for a minute is a stale flag (the turn ended; a session limit can leave it busy), not mid-turn.
+# The read row's session is mid-turn: busy (with no status: state working). Busy with state done is a stale flag (the
+# turn ended; a session limit can leave it busy), not mid-turn, once its last message ended the turn, or once its
+# transcript is a minute quiet. Not by quiet alone: a message to it and a /rename write there between turns.
 mid_turn() {
   if [ "$status" = busy ]; then
     [ "$st" = done ] || return 0
-    local f; f=$(transcript_of "$id"); [ -n "$f" ] || return 0
+    local f l; f=$(transcript_of "$id"); [ -n "$f" ] || return 0
+    # The last message, past a slash command's own reminder (a /rename's isMeta line), which starts no turn.
+    l=$(tail -n 50 "$f" | jq -rs '[.[] | select(.type == "user" or .type == "assistant" or .subtype == "local_command")]
+      | reduce .[] as $e ({c: false, l: ""}; if $e.subtype == "local_command" then .c = true
+          elif $e.type == "user" and $e.isMeta and .c then . else {c: false, l: "\($e.type) \($e.message.stop_reason // "")"} end) | .l' 2>/dev/null)
+    [ "$l" = 'assistant end_turn' ] && return 1
     [ $(( $(date +%s) - $(mtime "$f") )) -lt 60 ] && return 0
     # A quiet transcript is also a long tool call: mid-turn while the last message is a tool call awaiting its result
     # (a session-limit stop, an interrupt or end_turn is not).
-    [ "$(tail -n 50 "$f" | jq -r 'select(.type == "user" or .type == "assistant") | "\(.type) \(.message.stop_reason // "")"' 2>/dev/null | tail -1)" = 'assistant tool_use' ]
+    [ "$l" = 'assistant tool_use' ]
   else [ -z "$status" ] && [ "$st" = working ]; fi
 }
 

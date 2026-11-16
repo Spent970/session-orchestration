@@ -72,7 +72,8 @@ sent() { sed '$d' "$tmp/t.keep" > "$proj/$sid.jsonl"; run | grep -c 'Waiting on 
   [ "$(sent mcp__session-orchestration__reply '{"text":"ABC-12 · b · done\n! plugin-release b","done":true}')" = "$(printf '0\n1')" ] || { echo "an ask in a reply failed"; exit 1; }
 mv "$tmp/t.keep" "$proj/$sid.jsonl"
 
-# Notices: a new one is a change, one going away isn't; a failure keeps the last good ones; exit 2 = unsupported.
+# Notices: a new one is a change, one going away isn't; a failure keeps the last good ones, and its wording changing
+# isn't a change; exit 2 = unsupported.
 mkdir -p "$root/.claude"; cat > "$root/.claude/session-status-adapter" <<EOF
 #!/bin/sh
 case \$1 in
@@ -85,6 +86,9 @@ chmod +x "$root/.claude/session-status-adapter"; : > "$tmp/notices"; echo 0 > "$
 run --changes >/dev/null; echo "DM from Ann: hi" > "$tmp/notices"
 [ "$(run --changes)" = "now:   * DM from Ann: hi" ] && [ "$(run ABC-12 | grep -c Notices)" = 0 ] &&
   echo "no login" > "$tmp/notices" && echo 1 > "$tmp/rc" && [ "$(run --changes)" = "now:   * (failed) no login" ] && [ "$(run | grep -c 'Ann: hi')" = 1 ] &&
+  echo "teams: msgraph server_error error" > "$tmp/notices" && [ "$(run --changes)" = "now:   * (failed) teams" ] &&
+  echo "teams: msgraph unknown_error error" > "$tmp/notices" && [ "$(run --changes)" = "no changes" ] &&
+  echo "teams: msgraph auth_error error" > "$tmp/notices" && [ "$(run --changes)" = "now:   * (failed) teams: sign-in" ] &&
   : > "$tmp/notices" && echo 0 > "$tmp/rc" && [ "$(run --changes)" = "no changes" ] &&
   echo junk > "$tmp/notices" && echo 2 > "$tmp/rc" && [ "$(run | grep -c Notices)" = 0 ] || { echo "notices failed"; exit 1; }
 # A reader that stops early (`| head -1`) ends the run: the EXIT trap's killtree (a notices source ran) once read the
@@ -622,7 +626,9 @@ out=$(run --handover "$hid" 'Do X.') && rc=0 || rc=$?
 echo '{"type":"assistant","message":{"stop_reason":"tool_use"}}' >> "$proj/$hid.jsonl"
 touch -t 202001010000 "$proj/$hid.jsonl"; out=$(run --handover "$hid" 'Do X.') && rc=0 || rc=$?
 [ "$rc" = 3 ] && grep -q mid-turn <<<"$out" && ! calls | grep -q 'stop\|--bg' || { echo "busy, done, a turn not ended not refused: $out"; exit 1; }
-setacct cfg "$(sess "$hid" "fix it" idle 1)"
+# A last message that ended the turn: handed over at once, though a /rename's reminder or a message wrote there since.
+printf '%s\n' '{"type":"user","message":{"content":"x"}}' '{"type":"assistant","message":{"stop_reason":"end_turn"}}' \
+  '{"type":"system","subtype":"local_command"}' '{"type":"user","isMeta":true,"message":{"content":"renamed"}}' '{"type":"queue-operation"}' >> "$proj/$hid.jsonl"
 [ "$(run --handover "${hid:0:8}" -- 'Do X.')" = 'handed ABC-40 over: "fix it" (88888888) stopped, superseded by "ABC-40-fix-it" (abcdef12)' ] &&
   [ "$(calls | grep -v ' agents ')" = "$(printf 'cfg stop 88888888\ncfg --bg -n ABC-40-fix-it Work on ABC-40: continue from replies/ABC-40.md. Do X. Supersedes: %s (transcript %s; read only the parts you need, never whole).' "$hid" "$proj/$hid.jsonl")" ] ||
   { echo "handover failed"; calls; exit 1; }

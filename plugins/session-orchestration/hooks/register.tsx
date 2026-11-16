@@ -933,7 +933,7 @@ async function doneGaps($: EngineInterface, done: string, key: unknown, text: st
   return gaps
 }
 
-async function runStatus($: EngineInterface, args: string[], init: { cwd?: string, env?: Record<string, string> } = {}) {
+async function runStatus($: EngineInterface, args: string[], init: { cwd?: string, env?: Record<string, string>, timeoutMs?: number } = {}) {
   const script = `${$.plugin.root}/skills/orchestrating-sessions/session-status`
   try {
     // The plugin-feedback footer is the coordinator's to read, once a day: the pane's sweeps mustn't use it up.
@@ -995,11 +995,13 @@ async function paneActionFor($: EngineInterface, command: string) {
 
 // One sweep at a time: a Refresh press or a tick during one joins it.
 let inFlight: Promise<void> | undefined
+let lastGood: Board | undefined
 function refresh($: EngineInterface) {
   inFlight ??= (async () => {
     await update($, refreshing, () => true)
     const [status, pending, urls, acts, term] = await Promise.all([
-      runStatus($, []), runStatus($, ['--pending']), runStatus($, ['--urls']), loadActions($),
+      // A full sweep waits on the tracker, messages and accounts: ~5 min on a slow network; under the 10-min tick.
+      runStatus($, [], { timeoutMs: 420_000 }), runStatus($, ['--pending']), runStatus($, ['--urls']), loadActions($),
       runStatus($, ['--config', 'terminal']), refreshActivity($),
     ])
     await update($, actions, () => acts)
@@ -1007,7 +1009,11 @@ function refresh($: EngineInterface) {
     await update($, terminal, () => /^[A-Za-z0-9_-]+$/.test(term) ? term : 'plain')
     const agents = await runStatus($, ['--agents']) // what the sweep just saw
     const at = new Date(await $.clock.now()).toTimeString().slice(0, 5)
-    await update($, board, (): Board => ({ status, pending, urls, agents, at }))
+    // A failed sweep (a timeout, say) keeps the last good rows under its failure line, not the line alone.
+    const fresh: Board = { status, pending, urls, agents, at }
+    if (!status.startsWith('failed: ')) lastGood = fresh
+    await update($, board, (): Board => lastGood === fresh || !lastGood ? fresh
+      : { ...fresh, status: `${status} (sweep at ${at}; the rows below are from ${lastGood.at})\n${lastGood.status}` })
     await loadHanded($).catch(() => undefined) // again, now with the sessions this sweep saw
     await syncStatus($)
   })().finally(() => {
@@ -1063,7 +1069,17 @@ export function handedProblem(key: unknown, command: unknown, what: unknown): st
   if ([key, command, what].some(x => clean(x) !== x || /[\t\n\u061c\u200b-\u200f\u2028\u2029\ufeff]/.test(x))) return 'key, command and what are one line each, with no control, bidi or zero-width characters'
   if (command.length > COMMAND_MAX) return `command is at most ${COMMAND_MAX} characters`
   if (what.length > 200) return 'what is at most 200 characters'
+  if (interactive(command)) return 'an interactive command (claude attach, a bare or resumed claude, an editor, pager or tmux) would hang Run inside a tool call: hand the user the `! ` line in your report instead'
 }
+// A full-screen or interactive program: Run makes a Bash tool call, which has no terminal for it.
+// shortcut: the common TUIs by name only, add one when a handed command hangs Run.
+// claude is interactive unless printing (-p), starting in the background (--bg) or running a batch subcommand.
+export const interactive = (command: string) => command.split(/&&|\|\||;|\|/).some(seg => {
+  const c = seg.trim().replace(/^(?:env\s+)?(?:\w+=\S*\s+)*/, '').replace(/^\S*\//, '')
+  return /^(?:vim?|nvim|nano|emacs|less|more|top|htop|tmux|screen)(?:\s|$)/.test(c) ||
+    (/^claude(?:\s|$)/.test(c) && !/\s(?:-p|--print|--bg|--background|-v|--version|-h|--help)(?:[\s=]|$)/.test(c) &&
+      !/^claude\s+(?:plugin|mcp|agents|stop|update|config|doctor|install|logs|ps|kill)(?:\s|$)/.test(c))
+})
 // A handed-over command's file, checked as hand_command checks its input (the file is anyone's to write).
 export function parseHanded(text: string): Handed | undefined {
   let o: Record<string, unknown>
@@ -1410,7 +1426,7 @@ export const register: Register = on => {
     })
     await $.tool.register({
       name: 'hand_command',
-      description: 'Any session: hand the user a command to run themselves (one you would otherwise give as `! <command>`: a classifier-refused CLI call, a release or deploy command, a settings or hook change). It shows in the coordinator pane under the task key with your session id and `what`, where the user runs it with one press (or copies it). Still put the `! <command>` line in your report: without a pane the user runs it by hand. The command is one line, run exactly as written in the coordinator\'s folder and account, so make it independent of your cwd (absolute paths). Don\'t wait on it: the coordinator tells you the outcome. Handing the same command again replaces it. Not for a step you could take yourself once approved (a post or merge a relayed approval covers): ask for that approval instead, unless no relay can verify for you (your cwd is outside the coordinator\'s own folder). A command the pane already offers as an action button is refused: report that you wait on that button.',
+      description: 'Any session: hand the user a command to run themselves (one you would otherwise give as `! <command>`: a classifier-refused CLI call, a release or deploy command, a settings or hook change). It shows in the coordinator pane under the task key with your session id and `what`, where the user runs it with one press (or copies it). Still put the `! <command>` line in your report: without a pane the user runs it by hand. The command is one line, run exactly as written in the coordinator\'s folder and account, so make it independent of your cwd (absolute paths). Don\'t wait on it: the coordinator tells you the outcome. Handing the same command again replaces it. Not for a step you could take yourself once approved (a post or merge a relayed approval covers): ask for that approval instead, unless no relay can verify for you (your cwd is outside the coordinator\'s own folder). A command the pane already offers as an action button is refused: report that you wait on that button. So is an interactive one (claude attach, a bare or resumed claude, an editor or pager): it has no terminal in a tool call.',
       inputSchema: HAND_SCHEMA,
     })
     await $.tool.register({
