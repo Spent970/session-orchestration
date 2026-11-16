@@ -99,6 +99,14 @@ GD=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root/docs").git
 # a symlinked replies folder: run still finds its repo
 ln -s "$D/replies" "$tmp/rlink"; printf -- '- Replies folder: `%s`\n' "$tmp/rlink" > "$root/CLAUDE.md"
 [ "$(cd "$root" && bash "$here/history-git" run replies log --format=%s)" = "my task: N-1.md" ] || fail "run through a symlink"
+# the project's state folder: one outside repo holds it whole, the replies folder in it no second one
+root=$(mkroot state x); S=$tmp/.local/state/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root")
+mkdir -p "$S/replies"; S=$(cd "$S" && pwd -P); echo '{}' > "$root/.claude/coordination.local.json"
+printf -- '- Replies folder: `%s/replies/`\n' "$S" > "$root/CLAUDE.md"; echo r > "$S/replies/S-1.md"; echo m > "$S/memory.md"; echo p > "$S/pending.md"
+stop "$root"
+GS=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$S").git
+[ "$(git --git-dir="$GS" ls-files 2>&1 | paste -sd' ' -)" = "memory.md pending.md replies/S-1.md" ] && [ ! -d "$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$S/replies").git" ] ||
+  fail "state folder: $(git --git-dir="$GS" ls-files 2>&1)"
 # a history.dirs that isn't a list warns
 echo '{"history": {"dirs": "docs"}}' > "$root/.claude/coordination.local.json"
 (cd "$root" && . "$here/../../lib.sh" && config history.dirs 2>&1) | grep -q 'history.dirs.* is not valid' || fail "no warning for a bad history.dirs"

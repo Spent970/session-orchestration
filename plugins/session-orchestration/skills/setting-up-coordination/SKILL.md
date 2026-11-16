@@ -27,10 +27,17 @@ by a parent. Configured adds:
 - a warning per config value that isn't valid (the default is used), per terminal or feature module that doesn't
   load (see status-reference.md, Modules), and, when `CLAUDE.md` still delegates approvals
   in words with no `approvals.delegate` key, `delegation found in CLAUDE.md: run setup to move it`;
-- `replies folder … is inside the git checkout …` when the Replies folder line points into the repo: a task session
-  isolated in a worktree can't write there. Setup puts a git repo's replies folder in
-  `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/replies/<root, as Claude names its projects folder>/`;
-  move an older one there and change the line;
+- `coordinator files outside <P>: run session-status --init --write --move` when the replies folder, the memory or
+  the handoff file isn't in the project's state folder P,
+  `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/projects/<root, as Claude names its projects folder>/`
+  (a task session isolated in a worktree can't write into a checkout). Setup puts every new file there: `replies/`,
+  `memory.md` and `memory/`, `pending.md`, the briefs. Run the command as printed, in this folder (no `cd`): it
+  moves an older setup's replies, memory, handoff (with `<name>/`, `<name>-archive*` beside it), briefs and
+  `.claude/tasks/` into P, rewrites their lines in `CLAUDE.local.md` (or an untracked `CLAUDE.md`) and `pending.file`
+  (into `.claude/coordination.local.json`), then runs the plain `--write`. It moves only from inside the root or the
+  old state replies folder, never what git tracks there (a remote-less nested repo's files do move), and nothing at
+  all when a target exists in P or the committed `CLAUDE.md` holds such a line (it names them). A second run says
+  `nothing to move`. `--link` adds a `.coordinator` symlink to P in the root, kept out of git;
 - `project Stop hook commits a folder (COMMAND): …` when a Stop hook in the project's `.claude/settings*.json` runs a
   script that git-commits (a hand-made auto-history). See Propose's **Hand-made history hook**.
 
@@ -65,9 +72,10 @@ by a parent. Configured adds:
   name in the message, as such a hook does. Change nothing before their yes; a folder with a remote isn't adopted
   (its history would start over in an outside repo): say so and leave the hook.
 - **Optional briefs**, on the user's request (`--init` lists the missing ones, also once set up): `--write
-  --review-brief` writes `<orch>/review-brief.md`; name it in each PR reviewer's first prompt (`Review
-  <repo>#<id> (<KEY>). Brief: <path>`). `--write --retro-brief` writes `.claude/retro-brief.md` (`--rnd-brief` still works, and --write renames an old `rnd-brief.md`), which the `retro` skill
-  reads.
+  --review-brief` writes `review-brief.md` beside the handoff file (P for a new setup); name it in each PR reviewer's
+  first prompt (`Review <repo>#<id> (<KEY>). Brief: <path>`). `--write --retro-brief` writes `retro-brief.md` beside
+  the memory file (older setups: `.claude/retro-brief.md`; `--rnd-brief` still works, and --write renames an old
+  `rnd-brief.md`), which the `retro` skill reads.
 
 ## Shared mode
 
@@ -125,7 +133,7 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `feedback.mode` | `auto` \| `pr` \| `fork-pr` \| `issue` \| `local`: how plugin feedback cases are sent (`../orchestrating-sessions/feedback.md`) | `auto`: `pr` with `feedback.repo_dir` set, else `fork-pr` when `gh` is signed in, else `issue`; setup doesn't write it |
 | `feedback.repo_dir` | a clone of the plugin repo you can push to (`~` expanded); its coordinator is the plugin coordinator, which owns every plugin feedback case (`features/plugin-coordinator.md`) | unset; person key; setup doesn't write it |
 | `feedback.project_dir` | where this project's own feedback cases go (`feedback add --project`; `~` expanded, relative to the root; keep it out of git). A project key: never in the person-wide config.json | unset: `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<root, encoded>`; setup doesn't write it |
-| `pending.file` | the coordinator's handoff file, relative to the root (e.g. `docs/pending.md`): turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`) | unset; setup doesn't write it |
+| `pending.file` | the coordinator's handoff file, `*.md`: relative to the root (e.g. `docs/pending.md`), `~/…` or absolute: turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`) | unset; setup doesn't write it |
 | `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`) | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
 | `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `retro.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
 | `plan.enabled` | `true` \| `false`: `session-status --plan` splits a design into chunks | `true`; setup doesn't write it |

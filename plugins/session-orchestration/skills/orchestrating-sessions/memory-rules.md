@@ -21,7 +21,7 @@ or act on a retro's approved proposals.
 
 ## Project memory
 
-The project's `CLAUDE.md` may name a project memory file, e.g. `Project memory: docs/claude/orchestration/memory.md`,
+The project's `CLAUDE.md` may name a project memory file, e.g. ``Project memory: `~/.local/state/session-orchestration/projects/-home-u-app/memory.md` ``,
 as it names the replies folder. It holds what one task learned that another needs: decisions the user made,
 pitfalls, conventions found the hard way. Any session appends to it and every new session reads it
 ([worker.md](worker.md), Project memory).
@@ -42,7 +42,7 @@ and swaps the index in with one `mv`, so no worker's append is lost.
   and still true, or cited by several sessions. The index states the project's thresholds and who runs it (e.g. the
   weekly retro proposes, a followups session applies). It edits a doc, so it's a session's job, not yours: the
   session runs project-memory's `graduate` skill (`/graduate`), which also resolves open project cases and
-  `.claude/tasks/` files.
+  deferred task files (in the folder `cases tasks` prints).
 - **A retro only measures and proposes** (the `retro` skill). When the user approves some of its proposals, start a
   fresh followups session for them (`claude --bg -n rnd-<N>-followups`, N the run's number; brief: that run's report
   in the replies folder plus the approved numbers, reporting in `replies/rnd-<N>-followups.md`). Never resume the

@@ -62,7 +62,8 @@ under its task with the session, its age, what it does and the full command (fil
 `~/.cache/session-status/commands/`, dropped after 3 days). It lists the commands of the sessions the status command
 shows you (wherever they work, e.g. a plugin session in another repo's worktree, which the card says) and of folders
 under the project root; **all projects** shows every one. A command this project's pane has listed stays this
-project's after its session ends, so a coordinator handover keeps it. A command runs in your folder, not its session's. **Run**
+project's after its session ends, so a coordinator handover keeps it. A command runs in your folder, not its session's, so
+`hand_command` refuses one starting with `cd` or `pushd`: the session gives absolute paths instead. **Run**
 makes the Bash call in your session with the press as the user's consent, so your hooks, rules, classifier and
 permission prompt still decide; **Copy** and **Dismiss** do what they say. Never run one yourself unasked: it is the
 user's button, like an action. A command its session withdrew (it did the action itself, on a relayed approval:

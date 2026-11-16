@@ -10,8 +10,9 @@ into finished work, checks whether the last run's proposals landed, and ranks th
 Efficiency is **per unit of work**, not weekly spend: the user spends saved tokens on more work, so a
 weekly total stays flat.
 
-This file is the default brief. A project adds to it in `.claude/retro-brief.md` (its units' CLI
-commands, its own checks); where the two disagree, the project's brief wins. Started by `retro-weekly`
+This file is the default brief. A project adds to it in `retro-brief.md` beside its project memory file (its units'
+CLI commands, its own checks; a setup from before the state folder: `.claude/retro-brief.md`); where the two
+disagree, the project's brief wins. Started by `retro-weekly`
 (cron) or by hand as `/retro`: same steps either way. It's opt-in: nothing runs until someone invokes it or
 schedules it.
 
@@ -50,9 +51,9 @@ schedules it.
 ## Steps
 
 1. Read the project's `CLAUDE.md`, its project memory if it names one (retro or R&D entries there override the
-   yardstick below; with an index, read the topic files whose trigger is retro or R&D), `.claude/retro-brief.md` (or the old `rnd-brief.md` when that is missing)
-   if present, and the highest-numbered `<R>/rnd-run-<N>.md`
-   with its "Next run" section. This run is `N+1` (1 if none).
+   yardstick below; with an index, read the topic files whose trigger is retro or R&D), the project's `retro-brief.md`
+   (beside the memory file, else `.claude/retro-brief.md`; the old `rnd-brief.md` when that is missing) if present,
+   and the highest-numbered `<R>/rnd-run-<N>.md` with its "Next run" section. This run is `N+1` (1 if none).
 2. Run `retro.py` over 7 days into `<R>/rnd/run-<N+1>/`. Look at three raw rows of each TSV before
    tallying it.
    - `sessions 7 > sessions.tsv`, `events 7 > events.tsv`, `events 30 > events30.tsv`,

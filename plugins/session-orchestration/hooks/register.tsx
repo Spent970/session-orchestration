@@ -1071,6 +1071,7 @@ export function handedProblem(key: unknown, command: unknown, what: unknown): st
   if (typeof what !== 'string' || !what.trim()) return 'what says in one line what the command does'
   if ([key, command, what].some(x => clean(x) !== x || /[\t\n\u061c\u200b-\u200f\u2028\u2029\ufeff]/.test(x))) return 'key, command and what are one line each, with no control, bidi or zero-width characters'
   if (command.length > COMMAND_MAX) return `command is at most ${COMMAND_MAX} characters`
+  if (/^\s*(cd|pushd)(\s|$)/.test(command)) return "command runs in the coordinator's folder already: drop the cd and use absolute paths"
   if (what.length > 200) return 'what is at most 200 characters'
   if (interactive(command)) return 'an interactive command (claude attach, a bare or resumed claude, an editor, pager or tmux) would hang Run inside a tool call: hand the user the `! ` line in your report instead'
 }

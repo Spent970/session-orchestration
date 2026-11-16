@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pending: the coordinator handoff file's per-entry history and archive. The file is config pending.file (relative
-# to the project root), FILE = DIR/NAME.md. Beside it: NAME/SLUG.md (an entry's detail, optional, kept small) and
+# pending: the coordinator handoff file's per-entry history and archive. The file is config pending.file (lib.sh
+# pending_path), FILE = DIR/NAME.md. Beside it: NAME/SLUG.md (an entry's detail, optional, kept small) and
 # NAME/SLUG.history.md (append-only: `- YYYY-MM-DD HH:MM (ID8) LINE` per wording, `… resolved: REASON` when it
 # leaves); resolved entries' two files in NAME-archive/, one line each in the index NAME-archive.md:
 #   - ADDED → YYYY-MM-DD HH:MM TEXT · reason: REASON → NAME-archive/SLUG.history.md
@@ -35,7 +35,7 @@ if [ "${1:-}" = hook ]; then
   mkdir -p "$C"; w=$C/pending-where-$(sum "$PWD")
   # Where this cwd's FILE is, looked up again after 10 minutes. ponytail: a config change shows within 10 minutes.
   if [ -z "$(find "$w" -mmin -10 2>/dev/null)" ]; then
-    (. "$here/../../lib.sh" && f=$(config pending.file 2>/dev/null) && echo "${f:+$(find_root)/$f}") > "$w.$$" 2>/dev/null; mv "$w.$$" "$w"
+    (. "$here/../../lib.sh" && pending_path) > "$w.$$" 2>/dev/null; mv "$w.$$" "$w"
   fi
   read -r P < "$w" 2>/dev/null; [ -n "${P:-}" ] && [ -f "$P" ] || exit 0
   s=$C/pending-snap-$(sum "$P")
@@ -45,10 +45,9 @@ fi
 . "$here/../../lib.sh" || exit 1
 ROOT=$(find_root)
 if [ -z "${P:-}" ]; then
-  rel=$(config pending.file 2>/dev/null)
-  [ -n "$rel" ] || { echo "no handoff file: set pending.file in the coordination config (setting-up-coordination, Config)" >&2; exit 2; }
-  P=$ROOT/$rel
-  [ -f "$P" ] || { echo "pending.file $rel: no such file" >&2; exit 2; }
+  P=$(pending_path "$ROOT")
+  [ -n "$P" ] || { echo "no handoff file: set pending.file in the coordination config (setting-up-coordination, Config)" >&2; exit 2; }
+  [ -f "$P" ] || { echo "pending.file $P: no such file" >&2; exit 2; }
   s=$C/pending-snap-$(sum "$P")
 fi
 rel=${P#"$ROOT"/}

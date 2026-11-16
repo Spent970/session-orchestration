@@ -130,6 +130,14 @@ replies_path() {
   r=$(cd "$root" && sed -nE 's/.*[Rr]eplies folder[^`]*`([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1)
   r=${r%/}; r=${r/#\~/$HOME}; case $r in ''|/*) echo "$r" ;; *) echo "$root/$r" ;; esac
 }
+# proj_dir [ROOT]: ROOT's own folder in the state dir (replies/, memory.md, the handoff file, the briefs, tasks/), outside
+# every checkout so a worktree-isolated session writes there; ROOT's physical path, other characters as -.
+proj_dir() { local r=${1:-${ROOT:-$(find_root)}}; echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$r")"; }
+# pending_path [ROOT]: config pending.file, absolute (relative: to ROOT); empty when unset.
+pending_path() {
+  local p; p=$(config pending.file 2>/dev/null) && [ -n "$p" ] || return 0
+  case $p in /*) echo "$p" ;; *) echo "${1:-${ROOT:-$(find_root)}}/$p" ;; esac
+}
 # plugin_root: the project root of config feedback.repo_dir, whose coordinator is the plugin coordinator
 # (features/plugin-coordinator.md); fails when the key is unset.
 plugin_root() { local d; d=$(config feedback.repo_dir 2>/dev/null) && [ -n "$d" ] && (cd "$d" 2>/dev/null && find_root); }
@@ -224,7 +232,7 @@ detect_host() {
 #   feedback.project_dir  this project's feedback cases (feedback --project; ~ expanded, relative: to the project
 #                       root; keep it out of git)     default empty: the state dir's feedback-projects/<root>
 #   telemetry           local | off: pane presses to the local usage log (usage below)     default off
-#   pending.file        the coordinator's handoff file, relative to the project root, *.md: its entries' history
+#   pending.file        the coordinator's handoff file, *.md, relative to the project root, ~ or absolute (pending_path): its entries' history
 #                       and archive (skills/orchestrating-sessions/pending)              default empty (none)
 #   history.dirs        JSON list of folders (relative to the root, ~ or absolute) the Stop hook keeps a local git
 #                       history of, besides the replies folder and handoff files (skills/orchestrating-sessions/history-git)
@@ -333,7 +341,7 @@ config() {
     start.*) case $v in read_only|propose|at_once) ok=1 ;; esac ;;
     feedback.mode) case $v in auto|pr|fork-pr|issue|local) ok=1 ;; esac ;;
     telemetry) case $v in local|off) ok=1 ;; esac ;;
-    pending.file) [[ $v == *.md && $v != /* && $v != *..* ]] && ok=1 ;;
+    pending.file) [[ $v == '~'/* ]] && v=$HOME/${v#'~/'}; [[ $v == *.md && $v != '~'* && $v != *..* ]] && ok=1 ;;
     # a JSON list of folders, printed one per line
     history.dirs|fable.accounts) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
     plan.max_parallel) [[ $v =~ ^[1-9][0-9]{0,2}$ ]] && ok=1 ;;
