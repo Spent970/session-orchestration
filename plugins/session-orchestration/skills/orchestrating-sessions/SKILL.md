@@ -88,6 +88,9 @@ Waking a session makes it re-read its whole context, often hundreds of thousands
 2. Message a session only to give it work, or for something only it knows. `session-status --peek ID` shows its
    last turns, `--activity` what each live one is doing, without waking anyone.
 3. Never `claude -p --resume` an old session just to ask for status.
+4. **Routing reads go to a scan session.** A lookup to route something (a message thread, a tracker comment, new PR
+   comments) is read by a scan-kind session (`session-status --kind scan`), which reports one line: belongs to task
+   X / needs a reply / nothing. Read it yourself only when the answer is one short field.
 
 **Who owns a task:** the session whose first prompt starts with it ("Work on PROJ-123", `PROJ-123:`), else one that
 wrote a `Session task: <KEY>` line; a first prompt beats a marker. A session that works on a task without owning it
@@ -197,6 +200,9 @@ to it; you prune it.
 - **Friction is feedback, not memory.** A step you missed or worked around because of this plugin (its docs,
   scripts, tools) goes to `feedback add`, and one the project caused to `feedback add --project`
   ([feedback.md](feedback.md)), never a memory line. Memory holds project facts and the user's preferences.
+- **A lesson the user gives you** that comes from a missing plugin step is filed with `feedback add`, and from a
+  missing project-script step with `feedback add --project`, in addition to any memory line. When it's unclear which
+  of plugin feedback, project feedback or memory it is, queue one `ask_approval` with those three before writing.
 - When the user tells you to remember something for the project, or a preference about how you coordinate (e.g. the
   mode above), append it to the coordinator topic file (a flat file: append there).
 - Prune in passing: delete an entry that is wrong, superseded, about a task state that has since resolved, or

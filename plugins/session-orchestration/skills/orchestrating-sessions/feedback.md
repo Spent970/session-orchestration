@@ -6,7 +6,9 @@ moment you tell the user (or the coordinator) about it, not afterwards and not o
 - you took an extra round trip (to the user, a session, a tool) the plugin should have saved;
 - you misreported because of its output or a file it keeps (a stale line passed on as current);
 - the user had to step in (press, run or say something the flow should have covered);
-- a script failed on a case it should handle, a doc contradicts itself, or a step is missing.
+- a script failed on a case it should handle, a doc contradicts itself, or a step is missing;
+- any mistake of your own: a refused or retried command, a guessed CLI usage, a skipped rule, misread output. File it
+  at once, unasked, not only when the user points it out.
 
 Plugin cases are per person, from every project, in `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback/`.
 Nothing leaves the machine until the person approves the exact batch. Friction whose cause is the project (its
