@@ -147,8 +147,8 @@ what it unblocks>. Done when: <the end state of the whole job and the check that
 or blocked.'`
 - `--model`/`--effort`: size the task into a `plan.models` kind with the `choosing-model-effort` skill, run
   `session-status --kind <kind> <session-name>` first (the `-n` value), as its own call, and paste the `--model M --effort E` it prints
-  (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for rnd. Never `fable` unless
-  the user names it: then set it by hand. A handover or fresh restart of that task takes the same flags without running `--kind` again, so the task logs
+  (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for rnd. `fable` only as `--kind` prints it
+  (config `fable.accounts`, `choosing-model-effort`) or when the user names it: then set it by hand. A handover or fresh restart of that task takes the same flags without running `--kind` again, so the task logs
   one start.
 - The first prompt names the task. `-n` names the session by its ticket (e.g. `PROJ-1234-fix-settler`: no spaces).
   With the key not known yet, leave it out, and the session names itself with `name_session` once it finds it.

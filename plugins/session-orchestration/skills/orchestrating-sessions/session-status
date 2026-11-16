@@ -408,8 +408,10 @@ if [ "${1:-}" = --successor ]; then
   [[ $n =~ ^[A-Za-z0-9._-]+$ ]] || { echo "\"$n\" has characters a shell would read (a /rename?): not handed over; rename it with name_session first"; exit 2; }
   # SESSION_STATUS_CLAUDE: the claude command, for a dev build's successor (`claude --plugin-dir DIR`)
   # the model and effort this coordinator runs on (fable too: the user chose it), else config plan.models.coordinator
+  # for the account the successor starts under (fable only where fable.accounts lists it)
   read -r sm se < <(last_model "$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id".jsonl 2>/dev/null | head -1)")
-  [ -n "${sm:-}" ] || { cm=$(config plan.models.coordinator 2>/dev/null); sm=${cm%%/*}; se=${cm#*/}; }   # never config's effort on another model
+  [[ ${sm:-} != *fable* ]] || ! fable_no "$acct" || sm=   # no fable there (or its Fable limit is hit): config's
+  [ -n "${sm:-}" ] || { cm=$(FABLE_ACCT=$acct config plan.models.coordinator 2>/dev/null); sm=${cm%%/*}; se=${cm#*/}; }   # never config's effort on another model
   cmd="${SESSION_STATUS_CLAUDE:-claude} --model $(printf %q "$sm")${se:+ --effort $se} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
   case $acct in "$HOME/.claude") pre='env -u CLAUDE_CONFIG_DIR ' ;; *) pre="CLAUDE_CONFIG_DIR=$(tilde "$acct") " ;; esac
   load_terminal
@@ -1249,7 +1251,7 @@ if [ -n "$HANDOVER" ]; then
   [ -z "$self" ] || [ -n "$want" ] || { echo "--self: CLAUDE_CODE_SESSION_ID is unset (run it from the session handing itself over)"; exit 2; }
   [ "${#want}" -ge 8 ] && [ -n "$next" ] && [ $# = 1 ] ||
     { echo "usage: session-status --handover ID|--self [--model M] [--effort E] [--escalate] [--] 'WHAT NEXT' (ID: 8+ characters)"; exit 2; }
-  [ -z "$model" ] || model_ok "$model" || { echo "--model $model: not a model name like opus (never fable; leave --model out to keep the old session's)"; exit 2; }
+  [ -z "$model" ] || model_ok "$model" || { echo "--model $model: not a model name like opus (fable only under an account config fable.accounts lists, and not while its Fable limit is reached; leave --model out to keep the old session's)"; exit 2; }
   [ -z "$effort" ] || model_ok opus "$effort" || { echo "--effort $effort: one of low medium high xhigh max"; exit 2; }
   row=$(find_session "$want") || { echo "couldn't list the sessions; try again"; exit 1; }
   [ -n "$row" ] || { echo "no session $want in any account"; exit 2; }
@@ -1332,7 +1334,13 @@ if [ -n "$HANDOVER" ]; then
   # message the coordinator (features/accounts.md). Unless the caller's is past 90% and the old one's is under it.
   acct=claude wu=$(weekly_use); cp=$(head -1 <<<"$wu" | cut -f2)
   if [ -n "$cp" ] && [ "$cp" -ge 90 ]; then
-    op=$(awk -F'\t' -v d="$(pre_dir "$pre")" '$1 == d { print $2 }' <<<"$wu"); [ -z "$op" ] || [ "$op" -ge 90 ] || acct=$pre
+    op=$(awk -F'\t' -v d="$(pre_dir "$pre")" '$1 == d { print $2 }' <<<"$wu"); [ -z "$op" ] || [ "$op" -ge 90 ] ||
+      { [[ $model == *fable* ]] && fable_no "$(pre_dir "$pre")"; } || acct=$pre   # never fable where it isn't
+  fi
+  # fable where the account it starts under has none (or hit its Fable limit): opus, its rung below, at that effort
+  if [[ $model == *fable* ]] && fable_no "$(pre_dir "$acct")"; then
+    [[ $model == *'[1m]' ]] && model='opus[1m]' || model=opus
+    pm=" --model $(printf %q "$model")${effort:+ --effort $effort}"
   fi
   out=$(bash -c "$(bg_cmd "$acct")$pm -n \"\$0\" \"\$1\"" "$new" "$text" 2>&1)
   nid=$(grep -oE 'backgrounded · [0-9a-f]{8}' <<<"$out" | tail -1); nid=${nid##* }

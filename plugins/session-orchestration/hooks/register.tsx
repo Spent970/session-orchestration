@@ -1582,6 +1582,21 @@ export const register: Register = on => {
     return done
   })
 
+  // The account's Fable limit (no percent is readable): the row Claude Code adds when it's hit, kept as usage/<dir>.fable
+  // "SESSION<TAB>ROW", for lib.sh fable_out to read its quotaLimits (resetsAt) from the transcript.
+  on('session.append', async ($, e, next) => {
+    const done = await next(e)
+    // Claude Code's own row (model <synthetic>), never a reply that quotes it
+    const hit = e.message.type === 'assistant' && e.origin.kind === 'model' && e.origin.model === '<synthetic>' &&
+      e.message.content.some(b => b.type === 'text' && typeof b.text === 'string' && /^You.ve hit your Fable limit/i.test(b.text))
+    if (hit && done.uuid) {
+      const dir = (await accountOf($)) || `${(await $.env.get('HOME').catch(() => undefined)) ?? ''}/.claude`
+      await $.fs.write(`${await stampDir($)}/usage/${dir.replace(/\/+$/, '').split('/').at(-1)}.fable`,
+        `${await $.session.id()}\t${done.uuid}\n`).catch(() => undefined)
+    }
+    return done
+  })
+
   // The commands a tool call queued for the turn's end: /rename (open_pane, name_session), then /reload-plugins (reload_plugins).
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)

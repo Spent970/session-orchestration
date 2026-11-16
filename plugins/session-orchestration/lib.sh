@@ -66,7 +66,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.notify) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.notify) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -219,10 +219,14 @@ detect_host() {
 #                       default empty
 #   plan.enabled        true | false: the task planner splits big tasks into chunks         default true
 #   plan.max_parallel   integer >= 1: chunk sessions at once                                default 3
-#   plan.models.KIND    MODEL/EFFORT (effort low|medium|high|xhigh|max; never fable), KIND design | build | mechanical | review
+#   fable.accounts      JSON list of Claude config dirs (~ expanded) whose account has the fable model (person
+#                       only; no reliable check exists, so the person lists them)          default empty: none
+#   plan.models.KIND    MODEL/EFFORT (effort low|medium|high|xhigh|max; fable only under an account fable.accounts
+#                       lists, else the default), KIND design | build | mechanical | review
 #                       | release | scan | coordinator     default opus/xhigh, opus/medium, sonnet/medium, opus/xhigh,
 #                       sonnet/medium, haiku/low, opus/medium (coordinator: what coord_start, the feature doc's
-#                       start and --successor fall back to when the predecessor's transcript names none)
+#                       start and --successor fall back to when the predecessor's transcript names none; fable/medium
+#                       under an account fable.accounts lists; design, review: fable/xhigh there)
 #   handoff.at.KIND     integer tokens, 0 = off: context where hooks/context-watch.sh asks a session to hand off,
 #                       KIND chunk | task | coordinator (person only)   default 125000, 145000, 145000 (a task's
 #                       successor starts at ~45K: at 120K, handed-over review rounds handed off again within minutes)
@@ -230,12 +234,37 @@ detect_host() {
 #   handoff.stop_room   integer tokens: room left under the compaction ceiling (person only)   default 15000
 #   compact.window      integer tokens: the autoCompactWindow sessions are expected to have (person only)
 #                                                                       default 220000
-# model_ok MODEL [EFFORT]: a model name the CLI takes (a 1M-context [1m] suffix too), never fable, and an effort it
-# takes. The one rule for config plan.models, --plan and --handover's flags.
-# FABLE_OK=1: fable passes (a model the user chose for that session by hand, which a handover keeps).
+# fable_ok: the account a session starts under (FABLE_ACCT, else the current one) has fable: config fable.accounts
+# lists its config dir.
+fable_ok() {
+  local d=${FABLE_ACCT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}} a
+  while IFS= read -r a; do a=${a/#\~/$HOME}; [ -n "$a" ] && [ "${a%/}" = "${d%/}" ] && ! fable_out "$d" && return 0; done < <(config fable.accounts 2>/dev/null)
+  return 1
+}
+# fable_out DIR: the account's Fable limit is reached and hasn't reset. hooks/register.tsx stamps usage/<dir's name>.fable
+# with "SESSION<TAB>ROW" when Claude Code adds its "You've hit your Fable limit" row; that row's quotaLimits says
+# rejected for seven_day_overage_included until resetsAt (epoch s). No percent is readable: only a hit limit shows.
+fable_out() {
+  local d=${1%/} s u
+  IFS=$'\t' read -r s u 2>/dev/null < "${XDG_CACHE_HOME:-$HOME/.cache}/session-status/usage/${d##*/}.fable" || return 1
+  [[ $s =~ ^[A-Za-z0-9-]+$ && $u =~ ^[A-Za-z0-9-]+$ ]] || return 1
+  # || :: a glob matching nothing fails cat, which pipefail would make the whole test fail
+  { cat "$d"/projects/*/"$s".jsonl "$d"/projects/*/"$s"/subagents/*.jsonl 2>/dev/null || :; } | grep -F "\"$u\"" |
+    jq -e --arg u "$u" --argjson now "$(date +%s)" 'select(.uuid == $u) | .quotaLimits // empty |
+      select(.status == "rejected" and .rateLimitType == "seven_day_overage_included" and (.resetsAt | numbers) > $now)' \
+    >/dev/null 2>&1
+}
+# fable_no DIR: fable is known not to run under DIR's account: at its Fable limit, or config fable.accounts lists others.
+# A fable the user chose by hand stays where nothing says so (the list unset).
+fable_no() {
+  fable_out "$1" || { [ -n "$(config fable.accounts 2>/dev/null)" ] && ! FABLE_ACCT=$1 fable_ok; }
+}
+# model_ok MODEL [EFFORT]: a model name the CLI takes (a 1M-context [1m] suffix too), fable only where fable_ok, and
+# an effort it takes. The one rule for config plan.models, --plan and --handover's flags.
+# FABLE_OK=1: fable passes anyway (a model the user chose for that session by hand, which a handover keeps).
 model_ok() {
   local re='^[a-z][a-z0-9.-]*(\[1m\])?$'
-  [[ $1 =~ $re ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]]; } &&
+  [[ $1 =~ $re ]] && { [ "${FABLE_OK:-}" = 1 ] || [[ $1 != *fable* ]] || fable_ok; } &&
     { [ $# = 1 ] || [[ $2 =~ ^(low|medium|high|xhigh|max)$ ]]; }
 }
 # effort_step EFFORT N: EFFORT moved N steps (-1, 0, 1) along low medium high xhigh max, held at either end; fails on
@@ -248,13 +277,14 @@ effort_step() {
 }
 # escalate_rung MODEL EFFORT: "MODEL EFFORT" one rung up (session-status --handover --escalate): the effort first, up
 # to xhigh; then the model (haiku → sonnet → opus at the same effort, a [1m] suffix kept, a full id taking its next
-# family's alias); then opus (or any other model, fable too) xhigh → max. Fails at opus/max (the top) or on an
-# unknown effort.
+# family's alias); then opus (or any other model, fable too) xhigh → max; then opus max → fable max where fable_ok.
+# Fails at the top (opus/max without fable, fable/max) or on an unknown effort.
 escalate_rung() {
   local m=$1 e=$2 s=; [[ $m == *'[1m]' ]] && s='[1m]'
   case $e in
     low|medium|high) echo "$m $(effort_step "$e" 1)" ;;
-    xhigh|max) case $m in *haiku*) echo "sonnet$s $e" ;; *sonnet*) echo "opus$s $e" ;; *) [ "$e" = xhigh ] && echo "$m max" ;; esac ;;
+    xhigh|max) case $m in *haiku*) echo "sonnet$s $e" ;; *sonnet*) echo "opus$s $e" ;;
+      *) if [ "$e" = xhigh ]; then echo "$m max"; else [[ $m == *opus* ]] && fable_ok && echo "fable$s max"; fi ;; esac ;;
     *) return 1 ;;
   esac
 }
@@ -271,10 +301,10 @@ last_model() {
 config() {
   local key=${1:-} v ok=
   case $key in
-    tracker|host|key_pattern|approvals.delegate|features.accounts|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs) ;;
+    tracker|host|key_pattern|approvals.delegate|features.accounts|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate features.accounts features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate features.accounts features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
@@ -292,7 +322,7 @@ config() {
     telemetry) case $v in local|off) ok=1 ;; esac ;;
     pending.file) [[ $v == *.md && $v != /* && $v != *..* ]] && ok=1 ;;
     # a JSON list of folders, printed one per line
-    history.dirs) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
+    history.dirs|fable.accounts) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
     plan.max_parallel) [[ $v =~ ^[1-9][0-9]{0,2}$ ]] && ok=1 ;;
     plan.models.*) [[ $v == */* ]] && model_ok "${v%%/*}" "${v#*/}" && ok=1 ;;
     handoff.*|compact.window) [[ $v =~ ^(0|[1-9][0-9]{0,6})$ ]] && ok=1 ;;
@@ -305,10 +335,13 @@ config() {
   [ -z "$v" ] || echo "warning: config $key=$v is not valid${kind:+ (no $kind/$v.sh found)}: using the default" >&2
   case $key in
     tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;; approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
-    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs) ;; telemetry) echo off ;;
+    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts) ;; telemetry) echo off ;;
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
-    plan.models.design|plan.models.review) echo opus/xhigh ;; plan.models.build|plan.models.coordinator) echo opus/medium ;;
-    plan.models.mechanical|plan.models.release) echo sonnet/medium ;; plan.models.scan) echo haiku/low ;;
+    plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;
+        mechanical|release) v=sonnet/medium ;; scan) v=haiku/low ;; esac
+      # the kinds that default to fable where the account has it (fable_ok), at the same effort; today's model elsewhere
+      case ${key#plan.models.} in design|review|coordinator) ! fable_ok || v=fable/${v#*/} ;; esac
+      echo "$v" ;;
     handoff.at.chunk) echo 125000 ;; handoff.at.task) echo 145000 ;; handoff.at.coordinator) echo 145000 ;;
     handoff.hard_after) echo 25000 ;; handoff.stop_room) echo 15000 ;; compact.window) echo 220000 ;;
   esac

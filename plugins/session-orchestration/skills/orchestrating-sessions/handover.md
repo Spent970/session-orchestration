@@ -12,7 +12,7 @@ coordinator's Start reads those, and each restated rule is re-sent on its every 
 
 1. `session-status --successor` (`--account DIR` for the weekly-limit move): it opens a tab running an interactive
    `claude --model M --effort E -n NAME-next 'Act as a coordinator. You succeed …'`, on the model and effort you run on
-   (else config `plan.models.coordinator`). Nothing opened: hand the user the command it prints
+   (else config `plan.models.coordinator` for the account it starts under: `fable/medium` where `fable.accounts` lists it). Nothing opened: hand the user the command it prints
    (`hand_command`, key `coordinator`). Then arm `--await ready` (Bash, background) and end your turn. From here act
    on no message: forward each, text on stdin, with `session-status --inbox-add --from '<name> (<id8>)'`, run by its
    full path with a quoted heredoc (`<<'EOF'`), so the approval hook reads the text as text even when it quotes a merge.

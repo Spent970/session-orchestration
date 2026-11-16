@@ -7,8 +7,17 @@ description: Size a piece of work into a plan.models kind (scan, mechanical, bui
 
 Each kind maps to a model and effort through config `plan.models.<kind>` (defaults: `scan` haiku/low, `mechanical`
 and `release` sonnet/medium, `build` opus/medium, `design` and `review` opus/xhigh, `coordinator` opus/medium). Size the work into a kind, then take that kind's values.
-Never `fable` unless the user names it. `coordinator` is what a coordinator's start and its successor run on (a
-successor or handed-over session keeps what its predecessor ran on, fable too, when the transcript says).
+`coordinator` is what a coordinator's start and its successor run on (a successor or handed-over session keeps what
+its predecessor ran on, fable too, when the transcript says).
+
+**Fable** only runs under an account config `fable.accounts` lists (the person sets it: nothing tells reliably which
+accounts have fable). There `design`, `review` and `coordinator` default to `fable` at the same effort, any kind may be
+set to `fable/<effort>`, and an escalation goes on from opus/max to fable/max. Under any other account a `fable` value
+falls back to the kind's default, so fable never starts there. Nor does it while the account's weekly Fable limit
+is reached (lib.sh `fable_out`: the "You've hit your Fable limit" row a session got, until its reset): every start
+takes what it would without fable, then fable again once the limit resets. No Fable percent is readable, so this
+only shows once a session on that account hit the limit. Never pick `fable` yourself beyond that unless the user
+names it.
 
 ## Size the work
 
