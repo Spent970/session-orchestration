@@ -12,11 +12,13 @@ const ok = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isSt
 
 test('a handed-over command is one plain line; a file that fails the same checks is ignored', async () => {
   expect(handedProblem('PROJ-1', 'plugin-release x', 'Releases it')).toBeUndefined()
+  expect(handedProblem('PROJ-1', 'cdk deploy', 'Deploys it')).toBeUndefined() // a cd only as the whole first word
   const bad = [['PROJ 1', 'a', 'b'], ['PROJ-1', '', 'b'], ['PROJ-1', 'a', ' '], ['PROJ-1', 'a\nb', 'c'], ['PROJ-1', 'a\u001b[2Jb', 'c'],
-    ['PROJ-1', 'a‮b', 'c'], ['PROJ-1', 'x'.repeat(2001), 'c'], ['PROJ-1', 42, 'c'], ['PROJ-1', 'a\u200bb', 'c'], ['PROJ-1', 'a', 'b\u2028c']] as const
+    ['PROJ-1', 'a‮b', 'c'], ['PROJ-1', 'x'.repeat(2001), 'c'], ['PROJ-1', 42, 'c'], ['PROJ-1', 'a\u200bb', 'c'], ['PROJ-1', 'a', 'b\u2028c'],
+    ['PROJ-1', 'cd /w && make', 'c'], ['PROJ-1', ' pushd /w', 'c'], ['PROJ-1', 'cd', 'c']] as const
   expect(bad.map(([k, c, w]) => handedProblem(k, c, w) !== undefined)).toEqual(bad.map(() => true))
   const tui = ['claude attach a648efd2', 'claude', 'claude --resume abc', 'X=1 claude -c', 'vim f', 'tmux attach',
-    'cd /w && claude --resume abc', 'env X=1 /usr/local/bin/claude attach x', 'claude --model opus']
+    'make && claude --resume abc', 'env X=1 /usr/local/bin/claude attach x', 'claude --model opus']
   expect(tui.map(c => handedProblem('PROJ-1', c, 'w') !== undefined)).toEqual(tui.map(() => true))
   const batch = ['claude plugin update x@y', 'claude -r abc -p hi', 'claude --bg -n x', 'claude-foo', 'lessc a']
   expect(batch.map(c => handedProblem('PROJ-1', c, 'w'))).toEqual(batch.map(() => undefined))

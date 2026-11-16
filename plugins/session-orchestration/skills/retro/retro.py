@@ -932,7 +932,7 @@ def handoff(days=28):
                 except Exception:
                     rel = None
                 if rel:
-                    rootset[d] = rel
+                    rootset[d] = os.path.expanduser(rel)  # relative: to the root; absolute or ~ kept
                 break
             d = os.path.dirname(d)
     # reads of the entries' files: a Read of one, or a Bash command naming one (cat, sed, grep) or running

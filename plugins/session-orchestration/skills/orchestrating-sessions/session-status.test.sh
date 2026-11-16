@@ -1121,7 +1121,9 @@ out=$(run)
 # workspace of 2 repos with no keys; (c) a folder under an adapter; (d) a configured folder. Outside $root's adapter.
 rm -rf "$tmp/.claude-work"   # one account until the accounts case below
 # The terminal it runs in: none, unless T_PROG (TERM_PROGRAM) or T_MUX (TMUX) says.
-init() { (cd "$1" && shift && HOME=$tmp CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
+init() { (cd "$1" && shift && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
+# pof ROOT: ROOT's state folder (lib.sh proj_dir), where setup puts the replies, memory, handoff and briefs
+pof() { echo "$tmp/state/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$1")"; }
 gc() { git -C "$1" -c user.name=t -c user.email=t@t commit -q "${@:2}"; }
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/gh" && chmod +x "$tmp/bin/gh"   # gh present, offline: the GitHub adapter, no PRs
 a=$(mkdir -p "$tmp/init/acme" && cd "$tmp/init/acme" && pwd -P)
@@ -1131,7 +1133,7 @@ out=$(init "$a") && grep -q '^1\. Task keys: ACME-123 (in 66% ' <<<"$out" && gre
   grep -q '^3\. Files: CLAUDE.local.md, .claude/session-status-adapter, ' <<<"$out" || { echo "init (a) failed: $out"; exit 1; }
 init "$a" --check >/dev/null && { echo "init (a) --check exited 0 before --write"; exit 1; }
 out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s (acme-coordinator)\nactive: tracker=jira host=github delegate=off pr_create=off start=read_only terminal=plain messages=none features=none' "$a")" ] && [ -z "$(git -C "$a" status --short)" ] &&
-  grep -q '^- Replies folder (status reports, plans, review reports): `/[^`]*/session-orchestration/replies/[^`]*-init-acme/`\.$' "$a/CLAUDE.local.md" &&
+  grep -q '^- Replies folder (status reports, plans, review reports): `/[^`]*/session-orchestration/projects/[^`]*-init-acme/replies/`\.$' "$a/CLAUDE.local.md" &&
   grep -qF '`approvals.delegate` in' "$a/CLAUDE.local.md" && [ "$(jq -c . "$a/.claude/coordination.local.json")" = '{"features":{"accounts":false},"approvals":{"delegate":false}}' ] &&
   [ "$(jq -c . "$a/.claude/coordination/coordination.json")" = '{"tracker":"jira","host":"github","features":{"review_inbox":false}}' ] && [ "$(cd "$a" && .claude/session-status-adapter urls)" = 'pr https://github.com/acme/{repo}/pull/{id}' ] &&
   [ "$(init "$a" | sed -n '1p;2p;3s/:.*//p;4s/:.*//p')" = "$(printf 'This folder is set up for coordination already (%s, acme-coordinator): nothing to propose.\nOptional, on request (session-status --init --write FLAG):\n  --review-brief\n  --retro-brief' "$a")" ] ||
@@ -1139,19 +1141,23 @@ out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s
 (cd "$a" && HOME=$tmp CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH "$here/session-status" >/dev/null) || { echo "session-status after --init --write failed"; exit 1; }
 cl=$(shasum "$a/CLAUDE.local.md"); init "$a" --write >/dev/null; [ "$(shasum "$a/CLAUDE.local.md")" = "$cl" ] || { echo "init rewrote a file"; exit 1; }
 # the optional briefs, on request into the configured folder: the retro brief's merge regex is the host's merge command
-out=$(init "$a" --write --review-brief --retro-brief) && [ "$out" = "$(printf 'Wrote:\n  .claude/orchestration/review-brief.md\n  .claude/retro-brief.md\nNext: session-status --init --check (expect configured), then open_pane.')" ] &&
-  grep -qF -- "units 7 --project '$(sed 's/[^A-Za-z0-9]/-/g' <<<"$a")'" "$a/.claude/retro-brief.md" &&
-  grep -qF 'git diff origin/main...origin/<branch>' "$a/.claude/orchestration/review-brief.md" &&
+pa=$(pof "$a")
+out=$(init "$a" --write --review-brief --retro-brief) && [ "$out" = "$(printf 'Wrote:\n  %s/review-brief.md\n  %s/retro-brief.md\nNext: session-status --init --check (expect configured), then open_pane.' "$pa" "$pa")" ] &&
+  grep -qF -- "units 7 --project '$(sed 's/[^A-Za-z0-9]/-/g' <<<"$a")'" "$pa/retro-brief.md" &&
+  grep -qF 'git diff origin/main...origin/<branch>' "$pa/review-brief.md" &&
   [ "$(init "$a")" = "This folder is set up for coordination already ($a, acme-coordinator): nothing to propose." ] &&
   [ -z "$(git -C "$a" status --short)" ] || { echo "init briefs: $out"; exit 1; }
-# the old brief name: --write moves it to retro-brief.md (--rnd-brief is the old flag)
-mv "$a/.claude/retro-brief.md" "$a/.claude/rnd-brief.md"; init "$a" --write >/dev/null
-[ -e "$a/.claude/retro-brief.md" ] && [ ! -e "$a/.claude/rnd-brief.md" ] && init "$a" --write --rnd-brief >/dev/null &&
-  mv "$a/.claude/retro-brief.md" "$a/.claude/rnd-brief.md" && echo mine >> "$a/.claude/rnd-brief.md" && init "$a" --write --rnd-brief >/dev/null && tail -1 "$a/.claude/retro-brief.md" | grep -qx mine && [ -z "$(git -C "$a" status --short)" ] && ! grep -q "renamed" "$a/.git/info/exclude" || { echo "init: rnd-brief rename"; exit 1; }
-# A replies folder an older setup put inside the checkout: --check says to move it.
+# the old brief name: --write moves it to retro-brief.md where it is, P or .claude (--rnd-brief is the old flag)
+mv "$pa/retro-brief.md" "$pa/rnd-brief.md"; init "$a" --write >/dev/null
+[ -e "$pa/retro-brief.md" ] && [ ! -e "$pa/rnd-brief.md" ] && init "$a" --write --rnd-brief >/dev/null &&
+  mv "$pa/retro-brief.md" "$pa/rnd-brief.md" && echo mine >> "$pa/rnd-brief.md" && init "$a" --write --rnd-brief >/dev/null && tail -1 "$pa/retro-brief.md" | grep -qx mine &&
+  echo old > "$a/.claude/rnd-brief.md" && init "$a" --write >/dev/null && [ "$(cat "$a/.claude/retro-brief.md")" = old ] && [ ! -e "$a/.claude/rnd-brief.md" ] &&
+  [ -z "$(git -C "$a" status --short)" ] && ! grep -q "renamed" "$a/.git/info/exclude" || { echo "init: rnd-brief rename"; exit 1; }
+rm "$a/.claude/retro-brief.md"
+# A replies folder an older setup put inside the checkout: --check names the command that moves it.
 cp "$a/CLAUDE.local.md" "$tmp/cl.bak" && sed -i.x 's#^- Replies folder (\(.*\)): `.*`\.$#- Replies folder (\1): `.claude/orchestration/replies/`.#' "$a/CLAUDE.local.md"
-init "$a" --check | grep -q '^replies folder .claude/orchestration/replies/ is inside the git checkout ' && mv "$tmp/cl.bak" "$a/CLAUDE.local.md" && rm -f "$a/CLAUDE.local.md.x" &&
-  ! init "$a" --check | grep -q 'inside the git checkout' || { echo "replies-in-checkout warning failed"; exit 1; }
+init "$a" --check | grep -qxF "coordinator files outside $pa: run session-status --init --write --move" && mv "$tmp/cl.bak" "$a/CLAUDE.local.md" && rm -f "$a/CLAUDE.local.md.x" &&
+  ! init "$a" --check | grep -q 'coordinator files outside' || { echo "files-outside warning failed: $(init "$a" --check)"; exit 1; }
 # A project Stop hook that git-commits a folder: --check offers history.dirs instead.
 mkdir -p "$a/.claude/hooks" && printf '#!/bin/bash\ncd docs && git add -A && git commit -qm x\n' > "$a/.claude/hooks/commit.sh" &&
   echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/commit.sh"}]}]}}' > "$a/.claude/settings.local.json" &&
@@ -1170,8 +1176,8 @@ rm -rf "$tmp/init/nc"
 w=$(mkdir -p "$tmp/init/ws/r1" "$tmp/init/ws/r2" && cd "$tmp/init/ws" && pwd -P)
 git -C "$w/r1" init -q && git -C "$w/r2" init -q && gc "$w/r1" --allow-empty -m hello
 out=$(init "$w") && grep -q '^1\. Task keys: session names, ws-<short-desc> ' <<<"$out" && grep -q '(none, workspace of 2 repos)' <<<"$out" &&
-  grep -q '^3\. Files: CLAUDE.md, .claude/session-status-adapter, .claude/orchestration/pending.md' <<<"$out" || { echo "init (b) failed: $out"; exit 1; }
-[ "$(grep -v '^#' "$a/.git/info/exclude")" = "$(printf '/.claude/coordination/\n/.claude/coordination.local.json\n/.claude/coordination.local/\n/CLAUDE.local.md\n/.claude/session-status-adapter\n/.claude/orchestration/\n/.claude/retro-brief.md')" ] || { echo "init excludes: $(cat "$a/.git/info/exclude")"; exit 1; }
+  grep -qF "3. Files: CLAUDE.md, .claude/session-status-adapter, $(pof "$w")/pending.md" <<<"$out" || { echo "init (b) failed: $out"; exit 1; }
+[ "$(grep -v '^#' "$a/.git/info/exclude")" = "$(printf '/.claude/coordination/\n/.claude/coordination.local.json\n/.claude/coordination.local/\n/CLAUDE.local.md\n/.claude/session-status-adapter\n/.claude/retro-brief.md')" ] || { echo "init excludes: $(cat "$a/.git/info/exclude")"; exit 1; }
 # Files the user had (an uncommitted CLAUDE.md, an adapter) stay visible to git; a non-executable adapter is named.
 u=$(mkdir -p "$tmp/init/u" && cd "$tmp/init/u" && pwd -P); git -C "$u" init -q && echo '# mine' > "$u/CLAUDE.md"
 mkdir "$u/.claude" && echo '#!/bin/sh' > "$u/.claude/session-status-adapter"
@@ -1386,6 +1392,75 @@ rc=0; init "$p/sub1" --write --trust=session-status-adapter@0000 >/dev/null || r
 [ "$rc" = 3 ] && [ ! -e "$p/sub1/.claude" ] &&
   init "$p/sub2" --write --own tracker=github >/dev/null && [ "$(cat "$p/.claude/coordination/coordination.json" 2>/dev/null)" = "$before" ] &&
   [ "$(jq -r .tracker "$p/sub2/.claude/coordination/coordination.json")" = github ] || { echo "init (s6) under a parent: $(ls -a "$p/sub1" "$p/sub2/.claude")"; exit 1; }
+# --write --move: an older setup's files into the state folder. old ROOT ORCH REPLIES: ROOT's fresh setup made an
+# older one, its memory and handoff in ORCH and its replies in REPLIES (each as its line says it: relative or absolute).
+old() {
+  local r=$1 p f c o r2 x y; p=$(pof "$1"); init "$r" --write >/dev/null
+  o=$2; [[ $o == /* ]] || o=$r/$o; r2=$3; [[ $r2 == /* ]] || r2=$r/$r2
+  mkdir -p "$(dirname "$r2")" && mv "$p/replies" "${r2%/}" && mkdir -p "$o" && mv "$p/memory.md" "$p/memory" "$p/pending.md" "$o/"
+  f=$r/CLAUDE.md; git -C "$r" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1 && f=$r/CLAUDE.local.md
+  # bash 3.2 splits ${c//PAT/REP} at a / inside a quoted PAT: both go in variables
+  c=$(cat "$f"); x=$p/replies/ y=$3; c=${c//"$x"/$y}; x=$p/ y=$2/; c=${c//"$x"/$y}; printf '%s\n' "$c" > "$f"
+}
+# (m1) replies in the old state folder, memory, handoff and its archive in .claude/orchestration, the briefs and tasks
+# in .claude: all move, the lines follow, emptied folders go and a stray file is named; a second run moves nothing.
+m=$(mkdir -p "$tmp/init/m1" && cd "$tmp/init/m1" && pwd -P); git -C "$m" init -q && echo '# m' > "$m/CLAUDE.md" && git -C "$m" add . && gc "$m" -m i
+pm=$(pof "$m"); orep=$tmp/state/session-orchestration/replies/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$m")
+old "$m" .claude/orchestration "$orep/"
+echo r > "$orep/K-1.md"; mkdir -p "$m/.claude/orchestration/pending" "$m/.claude/tasks/bugs"; echo a > "$m/.claude/orchestration/pending-archive.md"
+echo e > "$m/.claude/orchestration/pending/x.md"; echo b > "$m/.claude/orchestration/review-brief.md"; echo n > "$m/.claude/rnd-brief.md"
+echo t > "$m/.claude/tasks/bugs/t.md"; echo s > "$m/.claude/orchestration/stray.txt"
+grep -qxF "coordinator files outside $pm: run session-status --init --write --move" <<<"$(init "$m" --check)" || { echo "move (m1) check: $(init "$m" --check)"; exit 1; }
+out=$(init "$m" --write --move) &&
+  [ "$(cd "$pm" && find . -type f | sort | paste -sd' ' -)" = "./memory.md ./memory/coordinator.md ./memory/misc.md ./pending-archive.md ./pending.md ./pending/x.md ./replies/K-1.md ./retro-brief.md ./review-brief.md ./tasks/bugs/t.md" ] &&
+  [ ! -e "$orep" ] && [ ! -e "$m/.claude/tasks" ] && [ ! -e "$m/.claude/rnd-brief.md" ] && [ "$(ls -A "$m/.claude/orchestration")" = stray.txt ] &&
+  grep -qxF '  lines in CLAUDE.local.md rewritten' <<<"$out" && grep -qxF 'Still in .claude/orchestration: stray.txt' <<<"$out" &&
+  grep -qF "Replies folder (status reports, plans, review reports): \`$pm/replies/\`." "$m/CLAUDE.local.md" &&
+  grep -qF "Project memory: \`$pm/memory.md\`. Coordinator handoff file: \`$pm/pending.md\`." "$m/CLAUDE.local.md" &&
+  ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" && grep -q '^configured: ' <<<"$(init "$m" --check)" &&
+  [ "$(init "$m" --write --move | head -1)" = "Move: nothing to move (everything is in $pm)" ] || { echo "move (m1): $out / $(cd "$pm" && find . -type f | sort)"; exit 1; }
+# (m2) a tracked CLAUDE.md, the lines in CLAUDE.local.md absolute: a target already in P refuses the whole move, and
+# so does a path line in the tracked CLAUDE.md, which stays byte for byte.
+m=$(mkdir -p "$tmp/init/m2" && cd "$tmp/init/m2" && pwd -P); git -C "$m" init -q && echo '# m' > "$m/CLAUDE.md" && git -C "$m" add . && gc "$m" -m i
+pm=$(pof "$m"); old "$m" "$m/.claude/orchestration" "$m/.claude/orchestration/replies/"
+echo r > "$m/.claude/orchestration/replies/K-2.md"; echo mine > "$pm/memory.md"
+lsm() { (cd "$m" && find . -path ./.git -prune -o -type f -print | sort && cat CLAUDE.local.md); }; before=$(lsm)
+rc=0; out=$(init "$m" --write --move) || rc=$?
+[ "$rc" = 1 ] && [ "$(head -1 <<<"$out")" = "refused: these are in $pm already, so nothing was moved (move or merge them by hand, then run this again):" ] &&
+  grep -qxF "  $pm/memory.md" <<<"$out" && [ "$(lsm)" = "$before" ] || { echo "move (m2) target in P: $rc $out"; exit 1; }
+rm "$pm/memory.md"; echo 'Project memory: `.claude/orchestration/memory.md`.' >> "$m/CLAUDE.md"; gc "$m" -am mem; cp "$m/CLAUDE.md" "$tmp/m2.md"
+rc=0; out=$(init "$m" --write --move) || rc=$?
+[ "$rc" = 1 ] && [ "$(head -1 <<<"$out")" = "refused: the committed CLAUDE.md holds coordinator path lines; move them to CLAUDE.local.md first, then run this again:" ] &&
+  grep -qxF '  Project memory: `.claude/orchestration/memory.md`.' <<<"$out" && cmp -s "$m/CLAUDE.md" "$tmp/m2.md" && [ "$(lsm)" = "$before" ] ||
+  { echo "move (m2) tracked CLAUDE.md: $rc $out"; exit 1; }
+# (m3) a root outside git, its memory and handoff (config pending.file) committed in docs/claude, a remote-less repo of
+# its own: they move, and pending.file follows.
+m=$(mkdir -p "$tmp/init/m3" && cd "$tmp/init/m3" && pwd -P); pm=$(pof "$m")
+old "$m" docs/claude/orchestration docs/claude/orchestration/replies/; echo r > "$m/docs/claude/orchestration/replies/K-3.md"
+git -C "$m/docs/claude" init -q && git -C "$m/docs/claude" add . && gc "$m/docs/claude" -m o
+c=$m/.claude/coordination.local.json; [ -f "$c" ] || echo '{}' > "$c"
+jq '.pending.file = "docs/claude/orchestration/pending.md"' "$c" > "$tmp/x.json" && mv "$tmp/x.json" "$c"
+out=$(init "$m" --write --move) &&
+  [ "$(cd "$pm" && find . -type f | sort | paste -sd' ' -)" = "./memory.md ./memory/coordinator.md ./memory/misc.md ./pending.md ./replies/K-3.md" ] &&
+  [ "$(jq -r .pending.file "$c")" = "$pm/pending.md" ] && [ ! -e "$m/docs/claude/orchestration" ] &&
+  grep -qF "Project memory: \`$pm/memory.md\`." "$m/CLAUDE.md" || { echo "move (m3): $out / $(cd "$pm" && find . -type f | sort)"; exit 1; }
+# (m4) memory and handoff in a parent's folder: the memory file stays, its line moves to P and setup writes P's
+# memory; the handoff file and its line stay (a path the person chose), and --check is quiet after.
+par=$(mkdir -p "$tmp/init/m4/app" && cd "$tmp/init/m4" && pwd -P); m=$par/app; git -C "$m" init -q; pm=$(pof "$m")
+old "$m" "$par/.claude/orchestration" "$tmp/state/session-orchestration/replies/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$m")/"
+out=$(init "$m" --write --move) &&
+  grep -qxF "  $par/.claude/orchestration/memory.md (outside this project: its line moves to $pm/memory.md, the file stays)" <<<"$out" &&
+  grep -qxF "  $par/.claude/orchestration/pending.md (outside this project: it and its line stay)" <<<"$out" &&
+  [ -f "$par/.claude/orchestration/memory.md" ] && [ -f "$pm/memory.md" ] && [ -d "$pm/replies" ] &&
+  grep -qF "Project memory: \`$pm/memory.md\`. Coordinator handoff file: \`$par/.claude/orchestration/pending.md\`." "$m/CLAUDE.md" &&
+  ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" || { echo "move (m4): $out / $(cd "$pm" && find . | sort)"; exit 1; }
+# (m5) memory and handoff inside the replies folder: the folder moves whole and their lines follow it.
+m=$(mkdir -p "$tmp/init/m5" && cd "$tmp/init/m5" && pwd -P); git -C "$m" init -q; pm=$(pof "$m")
+old "$m" docs/notes docs/notes/; echo r > "$m/docs/notes/K-5.md"
+out=$(init "$m" --write --move) && ! grep -q 'move failed' <<<"$out" && [ ! -e "$m/docs" ] &&
+  [ -f "$pm/replies/K-5.md" ] && [ -f "$pm/replies/memory.md" ] && [ -f "$pm/replies/pending.md" ] &&
+  grep -qF "Project memory: \`$pm/replies/memory.md\`. Coordinator handoff file: \`$pm/replies/pending.md\`." "$m/CLAUDE.md" &&
+  ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" || { echo "move (m5): $out / $(cd "$pm" && find . | sort)"; exit 1; }
 
 # --plan: three waves, an overlap and an oversize est in wave 1, a self-cycle with an unknown dep, unknown kind and
 # no done-when or effort in c6. c1 and c4 are done (c2's handoff isn't), so c2, c3 and c5 can run: c3 overlaps c2, so c2 and c5.

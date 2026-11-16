@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # history-git: a local git history of the project's replies folder (the CLAUDE.md section's), its handoff files
 # (config pending.file: FILE = DIR/NAME.md, with NAME/, NAME-archive/ and NAME-archive.md beside it) and the folders in
-# config history.dirs. A folder's repo keeps its git dir outside it, STATE/session-orchestration/history/<the folder's
+# config history.dirs, and the project's state folder (lib.sh proj_dir) when it exists. A folder's repo keeps its git dir outside it, STATE/session-orchestration/history/<the folder's
 # path, other characters as ->.git (core.worktree: the folder): no .git appears in the folder, so a worktree-isolated
 # session writes there as before and a handoff folder inside a project checkout isn't a nested repo. A repo set up by
 # hand is adopted instead, keeping its history: the folder's own or its parent's, with no remote, never the project's
@@ -56,11 +56,12 @@ targets() {
   local r p d glob ds=() gs=() i j keep
   {
     r=$(replies_path "$ROOT"); [ -n "$r" ] && printf '%s\t\n' "$r"
-    p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && [ -f "$ROOT/$p" ] &&
-      printf '%s\t%s\n' "$(dirname "$ROOT/$p")" "$(basename "$p" .md)*"
+    p=$(pending_path "$ROOT") && [ -f "$p" ] && printf '%s\t%s\n' "$(dirname "$p")" "$(basename "$p" .md)*"
     config history.dirs 2>/dev/null | while read -r d; do
       d=${d/#\~/$HOME}; case $d in /*) ;; *) d=$ROOT/$d ;; esac; printf '%s\t\n' "$d"
     done
+    # the project's state folder (lib.sh proj_dir) whole: the replies and handoff files in it fold into its repo
+    p=$(proj_dir "$ROOT") && [ -d "$p" ] && printf '%s\t\n' "$p"
   } | while IFS=$'\t' read -r d glob; do
     d=$(cd "$d" 2>/dev/null && pwd -P) || continue
     [ -n "$glob" ] || case $ROOT/ in "$d"/*) continue ;; esac
@@ -174,7 +175,7 @@ case ${1:-} in
     . "$here/../../lib.sh" || exit 1; ROOT=$(find_root)
     case ${2:-} in
       replies) d=$(replies_path "$ROOT") ;;
-      handoff) p=$(config pending.file 2>/dev/null) && [ -n "$p" ] && d=$ROOT/$p ;;
+      handoff) d=$(pending_path "$ROOT") ;;
       *) echo "usage: session-status --git-history replies|handoff [GIT ARGS…]"; exit 2 ;;
     esac
     [ -n "${d:-}" ] || { echo "no $2 folder configured for $ROOT"; exit 2; }

@@ -77,7 +77,10 @@ remotes (no tracker call) and asks, in one round, with what it detected preselec
    printed for you to copy.
 
 On your yes it writes a small adapter for your tracker, a section in `CLAUDE.local.md` (or `CLAUDE.md` when that
-isn't tracked) and `.claude/coordination.local.json`, all kept out of git. Then the session is your coordinator:
+isn't tracked) and `.claude/coordination.local.json`, all kept out of git. The replies, project memory, handoff file
+and briefs go in the project's state folder, `~/.local/state/session-orchestration/projects/<project path, encoded>/`,
+outside the checkout; a project set up before that moves them there with `session-status --init --write --move`.
+Then the session is your coordinator:
 ask it to start a task (`work on #12: …`), what's going on, or to pass on an answer.
 
 ## Solo or shared
@@ -107,7 +110,7 @@ Installing the plugin adds these to every Claude Code session, in every project:
   starts with `cd`, and an edit of a project file outside `.claude/`, the replies folder, the handoff file and the
   project memory: those belong to a task session.
 - **Local history** (`skills/orchestrating-sessions/history-git`, Stop): when a turn ends, commits what changed in the
-  project's replies folder, handoff files and the folders in config `history.dirs`, one commit per repo named after
+  project's state folder, replies folder, handoff files and the folders in config `history.dirs`, one commit per repo named after
   the session. A folder's git dir sits outside it, unless the folder (or its parent) is the top of a repo with no
   remote, which is adopted with its history (so it replaces a hand-made auto-commit hook); a folder inside another
   is committed only to the outer repo, unless a repo of its own lies between them. Never pushed, files over 1 MB left out. `session-status --git-history replies|handoff` reads it.
