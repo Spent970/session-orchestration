@@ -1,6 +1,6 @@
 ---
 name: defer-task
-description: Use the moment you notice — OR catch yourself mentioning — a bug, missing feature, or refactor that is OUT OF SCOPE of the current task. Invoke it PROACTIVELY on your own findings, not only when asked; capturing it as a task file under .claude/tasks/ IS the action, instead of fixing it now or offering to "file a ticket later". Fires on "latent bug", "out of scope", "while I'm here I noticed", "worth a follow-up", "leave that for now".
+description: Use the moment you notice — OR catch yourself mentioning — a bug, missing feature, or refactor that is OUT OF SCOPE of the current task. Invoke it PROACTIVELY on your own findings, not only when asked; capturing it as a task file in the project's tasks folder IS the action, instead of fixing it now or offering to "file a ticket later". Fires on "latent bug", "out of scope", "while I'm here I noticed", "worth a follow-up", "leave that for now".
 ---
 
 # Defer Out-of-Scope Task
@@ -11,9 +11,9 @@ When you spot something worth fixing that is NOT part of the current task, do no
 
 1. **Categorize**: `features` (new capability), `bugfixes` (something broken), or `refactorings` (works but messy). If none fit, use `bugfixes`.
 
-2. **Dedup**: List `.claude/tasks/<category>/`. If a file already covers the same thing, skip — don't create a duplicate.
+2. **Dedup**: List `TASKS/<category>/`, TASKS being the project's tasks folder: what `cases tasks` prints (beside the project-memory skill), `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/projects/<root, encoded>/tasks/`, outside every checkout so a worktree-isolated session writes there too. If a file already covers the same thing, skip — don't create a duplicate.
 
-3. **Write** `.claude/tasks/<category>/YYYY-MM-DD-<short-slug>.md`:
+3. **Write** `TASKS/<category>/YYYY-MM-DD-<short-slug>.md`:
 
    ```markdown
    # <one-line title>

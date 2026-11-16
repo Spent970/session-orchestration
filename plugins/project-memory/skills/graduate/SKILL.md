@@ -1,6 +1,6 @@
 ---
 name: graduate
-description: The graduate pass over a project's memory, friction cases and deferred tasks - moves proven memory entries into the docs that own them, prunes the rest, turns open project cases into fixes, and resolves .claude/tasks/ files (ticket it, fix it or drop it), each on the user's yes. Use when invoked as /graduate, when asked to graduate, prune or tidy project memory, review deferred tasks or project cases, or when an R&D run's approved proposals include graduation.
+description: The graduate pass over a project's memory, friction cases and deferred tasks - moves proven memory entries into the docs that own them, prunes the rest, turns open project cases into fixes, and resolves deferred task files (ticket it, fix it or drop it), each on the user's yes. Use when invoked as /graduate, when asked to graduate, prune or tidy project memory, review deferred tasks or project cases, or when an R&D run's approved proposals include graduation.
 ---
 
 # Graduate
@@ -15,9 +15,10 @@ where each one goes, applies what the user approves, and empties what it resolve
   count citations (a `grep -l` over the project's transcripts).
 - **Project cases**: `cases list` (beside the project-memory skill; with session-orchestration, `feedback list
   --project`). Each line: times seen, status, path, title.
-- **Deferred tasks**: every file in `.claude/tasks/bugfixes/`, `.claude/tasks/features/` and
-  `.claude/tasks/refactorings/` ([defer-task](../defer-task/SKILL.md)), in the main checkout and in any worktree
-  that still has its own.
+- **Deferred tasks** ([defer-task](../defer-task/SKILL.md)): every file in `bugfixes/`, `features/` and
+  `refactorings/` of the tasks folder `cases tasks` prints (`${XDG_STATE_HOME:-~/.local/state}/session-orchestration/projects/<root, encoded>/tasks/`).
+  Older setups kept them in `.claude/tasks/` of the main checkout or a worktree: sweep those too (with
+  session-orchestration, `session-status --init --write --move` moves them).
 - **The tracker**: does the project have one? The project's `CLAUDE.md` or config names it (session-orchestration's
   `tracker`: `jira` or `github`), or a GitHub remote with issues on. Note the CLI that files a ticket; none found: no
   tracker.
@@ -70,7 +71,7 @@ Only the numbers the user approved; ask again for anything new you find on the w
   with the task file's content as the brief, and delete the file once that session has it.
 - **Drop it**: delete the task file.
 
-Every task file the pass resolved is deleted; `.claude/tasks/` holds only what the user chose to keep.
+Every task file the pass resolved is deleted; the tasks folder holds only what the user chose to keep.
 
 ## 4. Report
 
