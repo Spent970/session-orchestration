@@ -7,7 +7,7 @@ set -euo pipefail; unset XDG_CONFIG_HOME   # the person-wide config.json: never 
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/p"
-sed -e 's#{{repo_slug}}#acme/app#; s#{{key_re}}#DEMO-[0-9]+#; s#{{name}}#app#; s#{{orch}}#.claude/orchestration#' \
+sed -e 's#{{repo_slug}}#acme/app#; s#{{key_re}}#DEMO-[0-9]+#; s#{{name}}#app#; s#{{handoff}}#.claude/orchestration/pending.md#' \
   -e "s#{{urls}}#'pr https://github.com/acme/{repo}/pull/{id}'#; s#^{{?[a-z_]*}}##" \
   "$here/templates/github-adapter" > "$tmp/adapter" && chmod +x "$tmp/adapter"
 cat > "$tmp/prs.json" <<'EOF'

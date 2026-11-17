@@ -74,6 +74,6 @@ case ${1:-} in
         ($u[] | .number as $n | select($linked | index($n)) | "#\($n)")' | sort -u ;;
 {{?key_re_flag}}  key-pattern) echo "$key_re" ;;
 {{?urls}}  urls) printf '%s\n' {{urls}} ;;
-  pending) cat '{{orch}}/pending.md' ;;
+  pending) cat '{{handoff}}' ;;
   *) exit 2 ;;
 esac

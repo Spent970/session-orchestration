@@ -2,7 +2,7 @@
 # session-status adapter for {{name}} (interface: session-orchestration status-reference.md). Written by
 # `session-status --init`; edit freely. Unanswered calls exit 2 and session-status uses its defaults.
 case ${1:-} in
-  pending) cat '{{orch}}/pending.md' ;;
+  pending) cat '{{handoff}}' ;;
 {{?key_re_flag}}  key-pattern) echo '{{key_re}}' ;;
 {{?urls}}  urls) printf '%s\n' {{urls}} ;;
   *) exit 2 ;;

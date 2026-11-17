@@ -14,4 +14,4 @@
   Branches: `{{branch_pattern}}` from `origin/{{default_branch}}`.
 {{?worktree_line}}- Worktrees: `{{worktree_cmd}}`, not EnterWorktree (denied in background sessions). Work in it by absolute path.
 - Replies folder (status reports, plans, review reports): `{{replies_dir}}/`.
-- Project memory: `{{orch}}/memory.md`. Coordinator handoff file: `{{orch}}/pending.md`.
+- Project memory: `{{orch}}/memory.md`. Coordinator handoff file: `{{handoff}}`.
