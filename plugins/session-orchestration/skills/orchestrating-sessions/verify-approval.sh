@@ -24,6 +24,7 @@
 #     origin is this plugin and which starts "Approval pane answer for ", names the key and question itself.
 #     The engine sets that origin from the calling plugin, so no other plugin can produce one, and a worker
 #     only writes rows into its own session.
+#     A successor coordinator's predecessors (its first prompt's `You succeed "NAME" (ID8)`) count as that session.
 set -uo pipefail
 id=${1:-}; cwd=${2:-}; sender=${3:-}; key=${4:-}; action=${5:-}; q=$(cat)
 max_age_h=${MAX_AGE_H:-24}
@@ -66,7 +67,7 @@ else
   esac
   ref=$sent
 fi
-r=$(jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage "$((max_age_h * 3600))" '
+matches() { jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage "$((max_age_h * 3600))" '
   def trim: gsub("^\\s+|\\s+$"; "");
   def names_key: test("(^|[^A-Za-z0-9-])" + ($key | gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/-])"; "\\\(.c)")) + "($|[^A-Za-z0-9-])");
   # A click in the coordinator pane: the prompt this plugin submits, and nothing else it might submit.
@@ -105,7 +106,25 @@ r=$(jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage
      | (if (.note // "") != "" then ", with the user'"'"'s note: \(.note | gsub("\\s+"; " "))" else "" end) as $note
      | if .text | names_key then "verified\($note)"
        elif .answered | names_key then "verified, answering: \(.answered | gsub("\\s+"; " ") | .[-300:])\($note)"
-       else empty end)] | last // empty' "$f")
+       else empty end)] | last // empty' "$1"; }
+# A successor coordinator (its typed first prompt `You succeed "NAME" (ID8)`, from session-status --successor) relays
+# what the user told the coordinator it took over from: that one's transcript counts too, back along the chain, while
+# it was written to within the quote's age window. Each must have been interactive (no bg turn) and gone by NAME.
+r=$(matches "$f"); t=$f
+mins=$(( ($(date +%s) - ref + max_age_h * 3600) / 60 + 1 ))
+for _ in $(seq 50); do   # a bound against a cycle of prompts
+  [ -z "$r" ] || break
+  first=$(jq -rn 'first(inputs | select(.type == "user")) | select(.origin.kind == "human") | .message.content
+        | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end' "$t" 2>/dev/null |
+      grep -oE 'You succeed "[^"]*" \([0-9a-f]{8}\)' | head -1) || break
+  name=${first#You succeed \"}; name=${name%\" (*}; p=${first##*(}; p=${p%)}
+  set -- "$(dirname "$t")/$p"*.jsonl; [ $# = 1 ] && [ -f "$1" ] && [ "$1" != "$t" ] || break
+  t=$1; [ -n "$(find "$t" -mmin "-$mins")" ] || break
+  [ "$(jq -rn --arg n "$name" 'reduce inputs as $e ({bg: false, named: false};
+      if $e.sessionKind == "bg" then .bg = true elif $e.type == "agent-name" and $e.agentName == $n then .named = true else . end)
+      | if (.bg | not) and .named then "ok" else "no" end' "$t" 2>/dev/null)" = ok ] || break
+  r=$(matches "$t")
+done
 [ -n "$r" ] || reject "no recent message typed by the user, question-box answer or pane click matches the whole quote and names $key in it or in the message it answers"
 echo "$r"
 # A command this session also handed the user for this task (hand_command) is still runnable from the pane: doing the

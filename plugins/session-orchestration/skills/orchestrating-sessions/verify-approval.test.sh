@@ -112,6 +112,34 @@ cp "$tmp/t.jsonl" "$proj/$cid.jsonl"
 echo "$home/.claude" > "$tmp/coord"; rm "$root/.claude/coordination.local.json"
 check ABC-1 yes "$stopped its transcript never names it coord"                 # features.accounts off: this account only
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # … where the coordinator is found
+# A successor coordinator relays what the user told the one it succeeded, back along the chain: its typed first prompt
+# (session-status --successor's wording) names it, and that one went by the name the prompt gives and never ran in
+# the background. A later prompt, a peer's message, another name or a bg predecessor doesn't count.
+grep -qF "You succeed \\\"\$n\\\" (\${id:0:8})" "$here/session-status" || { echo "FAIL session-status no longer starts a successor with 'You succeed \"NAME\" (ID8)'"; exit 1; }
+sid=88888888-2222-3333-4444-555555555555 mid=77777777-2222-3333-4444-555555555555
+printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$sid\",\"name\":\"coord-next\",\"cwd\":\"$root\",\"kind\":\"interactive\"}]'" > "$tmp/bin/claude"
+sv() { (cd "$root" && HOME=$home CLAUDE_CONFIG_DIR=$home/.claude PATH=$tmp/bin:$PATH bash "$here/verify-approval.sh" "$sid" "$root" coord-next "$1" "x (ABC-1)" <<<"$2") || true; }
+first() { jq -nc --arg t "$1" --arg ts "$now" --arg k "${2:-human}" '{type: "user", origin: {kind: $k}, timestamp: $ts, message: {content: $t}}'; }
+sc() { [ "$(sv "$1" "$2")" = "$3" ] || { echo "FAIL successor ($4): got '$(sv "$1" "$2")'"; exit 1; }; }
+echo '{"type":"agent-name","agentName":"coord"}' >> "$proj/$cid.jsonl"
+first 'Act as a coordinator. You succeed "coord" (99999999): end your Start with the successor step.' > "$proj/$sid.jsonl"
+sc ABC-1 yes "verified, answering: Merge ABC-1?" "one hop"
+sc ABC-4 "Yes, deploy ABC-4" "$no ABC-4 in it or in the message it answers" "stale"
+{ first 'Act as a coordinator. You succeed "coord" (99999999).'; echo '{"type":"agent-name","agentName":"coord"}'; } > "$proj/$mid.jsonl"
+first 'Act as a coordinator. You succeed "coord" (77777777).' > "$proj/$sid.jsonl"
+sc ABC-1 yes "verified, answering: Merge ABC-1?" "two hops"
+first 'Act as a coordinator. You succeed "other" (99999999).' > "$proj/$sid.jsonl"
+sc ABC-1 yes "$no ABC-1 in it or in the message it answers" "another name"
+{ first 'Look around'; first 'You succeed "coord" (99999999)'; } > "$proj/$sid.jsonl"
+sc ABC-1 yes "$no ABC-1 in it or in the message it answers" "later prompt"
+first 'You succeed "coord" (99999999)' peer > "$proj/$sid.jsonl"
+sc ABC-1 yes "$no ABC-1 in it or in the message it answers" "peer message"
+first 'Act as a coordinator. You succeed "coord" (99999999).' > "$proj/$sid.jsonl"
+echo '{"type":"user","sessionKind":"bg","message":{"content":"go"}}' >> "$proj/$cid.jsonl"
+sc ABC-1 yes "$no ABC-1 in it or in the message it answers" "bg predecessor"
+cp "$tmp/t.jsonl" "$proj/$cid.jsonl"; rm "$proj/$sid.jsonl" "$proj/$mid.jsonl"
+printf '#!/bin/sh\n[ "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" = "$(cat %s)" ] && echo %s || echo []\n' "'$tmp/coord'" \
+  "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"kind\":\"interactive\"}]'" > "$tmp/bin/claude"
 # A command this session handed over for the same key is named with how to withdraw it; another session's or key's isn't.
 hd=$home/.cache/session-status/commands; mkdir -p "$hd"
 echo '{"session":"w1","key":"ABC-1","command":"teams-send a.txt"}' > "$hd/1.json"
