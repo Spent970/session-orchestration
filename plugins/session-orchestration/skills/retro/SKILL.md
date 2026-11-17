@@ -101,6 +101,8 @@ schedules it.
    - Feature use: `usage 30 > usage.tsv`. Each `unused` row (0 uses in 30 days, there all window) is a
      candidate to drop or merge: at most one proposal listing them, never a removal on the run's own say. Pane
      buttons show `-` without `telemetry: local` (setting-up-coordination, Config): say so, and judge them not at all.
+     `fold-SECTION` (a section title pressed) and `card-SECTION` (a row opened there) say which pane sections the
+     user opens and which never: report both.
      The same log holds `chunk` lines (`session-status --plan … --done N` writes one per landed chunk, under
      `telemetry: local`).
    - Planner sizing, when the usage log has chunk lines: `chunks 7 > chunks.tsv`. Report the `ratio` per kind

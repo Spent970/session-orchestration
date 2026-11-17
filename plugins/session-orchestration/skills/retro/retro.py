@@ -1359,6 +1359,8 @@ def inventory():
     labels += re.findall(r"label: '([^']+)'", reg[:reg.find("BUILTIN_KEYS")])  # FIXES, spread into BUILTIN_KEYS
     slug = lambda s: re.sub(r"^-|-$", "", re.sub(r"[^a-z0-9]+", "-", s.lower()))
     inv = {("press", slug(s)) for s in labels}
+    secs = re.search(r"USAGE_SECTIONS = \[([^\]]*)\]", reg)
+    inv |= {("press", f"{p}-{slug(s)}") for s in re.findall(r"'([^']+)'", secs.group(1) if secs else "") for p in ("fold", "card")}
     inv |= {("tool", t) for t in re.findall(r"tool\.register\(\{\s*name: '([a-z_]+)'", reg)}
     inv |= {("skill", d) for d in os.listdir(f"{PLUGIN}/skills") if d != "rnd" and os.path.isfile(f"{PLUGIN}/skills/{d}/SKILL.md")}  # rnd: the old name, counted as retro
     inv |= {("doc", os.path.basename(f)) for f in glob.glob(f"{PLUGIN}/**/*.md", recursive=True)
