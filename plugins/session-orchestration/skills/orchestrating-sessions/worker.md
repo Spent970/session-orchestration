@@ -185,15 +185,23 @@ the file's path. That is a plain-text ask, not a plan approval, so a relay can a
   ([Posting and merging](#posting-and-merging)): ask for it like any other. Report `pushed SHA` or `blocked` with the
   reason. If the event is already fixed (an old build, a pushed fix), say so and do nothing else.
 
+## Handing off at your context mark
+
+The context-watch hook's soft line says how (the handoff heading, the command): write the handoff, then hand yourself
+over with `session-status --handover --self -- '<next step>'`, coordinator or not. It starts your successor under
+your name (with no `--model`/`--effort`, on your plan row's model and effort, else yours); its last line names your
+`-prev-K` rename; then end your turn. You are stopped once idle. Send no message: the coordinator sees the successor
+in its status, and approvals relayed to you still verify for it. Don't hand over when this handoff makes no progress on
+the one you continued (your first prompt's `Supersedes:`) or (a chunk) when you are past 2× your brief's est: message
+the coordinator `handoff ready: KEY[ cN]` with why instead, as when the command fails; it decides whether to escalate
+(its `--escalate` is refused once you have handed yourself over). An interactive session isn't stopped: close it.
+
 ## Chunk sessions
 
 A `Chunk: KEY/N` line in your first prompt marks you as one chunk of a plan:
 - Stay within your brief's est and touches.
 - Keep a clean stop point in reach: everything committed, no background task, no question waiting.
-- The context-watch hook's soft line says how to hand off (the handoff heading, the `-prev-K` rename, whom to
-  tell): follow it. With no coordinator (`session-status --coordinator` prints nothing), finish with `session-status
-  --handover --self -- '<next step>'` instead: its last line names the rename, and with no `--model`/`--effort` your
-  successor runs on your plan row's model and effort.
+- At the context mark, hand off as above.
 - After landing, append `## cN: done` to `KEY-build.md` and run `session-status --plan FILE --done N`.
 
 ## Handing the user a command

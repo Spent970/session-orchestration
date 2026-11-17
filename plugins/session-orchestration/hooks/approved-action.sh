@@ -452,14 +452,31 @@ else
 fi
 
 # The relays this session received: peer messages from another session (not a subagent's hand-back), newest
-# first: sender name, quote, action, source sessionId, source cwd (tab-free JSON lines).
+# first: sender name, quote, action, source sessionId, source cwd, the transcript it came in (tab-free JSON lines).
+# A handover's successor (`Supersedes: ID` in its first prompt, ID's transcript beside its own) also has the relays
+# its predecessors received, so an approval relayed before the handover still holds; each is used once over the chain.
 [ -f "$tp" ] || ask_for "$action" "$action" "$what"
-relays=$(jq -c '
-  (if .type == "user" then .origin elif .type == "attachment" and .attachment.type == "queued_command" then .attachment.origin else null end) as $o
-  | select($o.kind? == "peer" and (($o.from // "") | startswith("uds:")) and ($o.handback | not))
-  | ($o.body // "") as $b
-  | $b | [scan("APPROVAL relayed from the user\\nQuote: ([\\s\\S]*?)\\nAction: ([^\\n]*)\\nSource: ([0-9a-f-]{36}) ([^\\n]+)")]
-  | .[] | {name: $o.name, quote: .[0], action: .[1], sid: .[2], scwd: .[3]}' "$tp" 2>/dev/null) || exit 1
+relays= f=$tp hops=0
+while [ -f "$f" ] && (( hops++ < 20 )); do
+  ! grep -q 'APPROVAL relayed from the user' "$f" || relays="$(jq -c --arg f "$f" '
+    (if .type == "user" then .origin elif .type == "attachment" and .attachment.type == "queued_command" then .attachment.origin else null end) as $o
+    | select($o.kind? == "peer" and (($o.from // "") | startswith("uds:")) and ($o.handback | not))
+    | ($o.body // "") as $b
+    | $b | [scan("APPROVAL relayed from the user\\nQuote: ([\\s\\S]*?)\\nAction: ([^\\n]*)\\nSource: ([0-9a-f-]{36}) ([^\\n]+)")]
+    | .[] | {name: $o.name, quote: .[0], action: .[1], sid: .[2], scwd: .[3], tp: $f}' "$f" 2>/dev/null)${relays:+
+$relays}" || exit 1   # the predecessor's go first: older, and the loop below reads newest first
+  # The first prompt as lib.sh first_prompt reads it (not sourced here), and only when it isn't a peer's message.
+  first=$(head -n 50 "$f" | jq -Rrn 'first(inputs | fromjson? | select(.type == "user" and (.isMeta | not))
+    | [.origin.kind?, (.message.content
+      | if type == "string" then . elif type == "array" then map(select(.type == "text") | .text) | join("\n") else "" end)]
+    | select((.[1] | length > 0) and (.[1] | startswith("This session is being continued") | not)))
+    | select(.[0] != "peer") | .[1]' 2>/dev/null)
+  sup=$(grep -m1 -oE 'Supersedes: [0-9a-f]{8}-[0-9a-f-]{27}' <<<"$first") || break; sup=${sup#Supersedes: }
+  # --handover's task prompt names the predecessor's transcript (another account's projects folder, maybe); a chunk's
+  # doesn't: then it is beside this one's.
+  nf=$(grep -m1 -oE "Supersedes: $sup \\(transcript [^;]+;" <<<"$first"); nf=${nf#*(transcript }; nf=${nf%;}
+  [ "${nf##*/}" = "$sup.jsonl" ] && f=$nf || f=$(dirname "$tp")/$sup.jsonl
+done
 # A relay counts for this command when its Action names the target as a whole word, and the sha256 for a post or
 # "merge"/"approve" with no sha256 for a merge or bare approval (a gh review: its kind and "review" too); then the quote must verify, with the task key the Action names.
 tried= me=
@@ -493,7 +510,7 @@ while IFS= read -r r; do
       bash "$here/../skills/orchestrating-sessions/verify-approval.sh" "$(jq -r .sid <<<"$r")" "$(jq -r .scwd <<<"$r")" "$(jq -r .name <<<"$r")" "$key" "$act")
   # One use per relay: a rerun (the CLI timed out after the server took it) needs a new approval.
   # ponytail: used up when allowed, not when the command succeeds; the deny says to check before asking again.
-  used=~/.cache/session-status/approved/$(printf '%s|%s|%s' "$tp" "$action" "$r" | shasum -a 256 | cut -c1-32)
+  used=~/.cache/session-status/approved/$(printf '%s|%s|%s' "$(jq -r .tp <<<"$r")" "$action" "$(jq -c "del(.tp)" <<<"$r")" | shasum -a 256 | cut -c1-32)
   case "$v" in
     verified*) [ ! -e "$used" ] || { tried="this relay was used once already: check whether that run landed before asking again"; continue; }
                mkdir -p "${used%/*}" && touch "$used" || exit 1
