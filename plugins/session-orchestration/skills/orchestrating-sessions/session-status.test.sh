@@ -543,6 +543,15 @@ run --send-when-idle "$rid" "Wake up" | grep -q '^woke "rev"' && [ "$(calls | gr
 setacct .claude-work ""
 run --send-when-idle "${rid:0:8}" "Back" | grep -q '^resumed 22222222' && [ "$(calls | grep -v ' agents ')" = "cfg --bg --resume $rid Back" ] ||
   { echo "send unlisted failed"; exit 1; }
+# Superseded (rid → s1 → s2, two handovers): refused (exit 5), nothing run, naming the newest successor.
+s1=5e000001-0000-0000-0000-000000000000 s2=5e000002-0000-0000-0000-000000000000
+echo "{\"type\":\"user\",\"message\":{\"content\":\"Work on ABC-1. Supersedes: $rid\"}}" > "$proj/$s1.jsonl"
+echo "{\"type\":\"user\",\"message\":{\"content\":\"Work on ABC-1. Supersedes: ${s1:0:8}\"}}" > "$proj/$s2.jsonl"
+setacct cfg "$(sess "$rid" rev idle 1)"
+out=$(run --send-when-idle "${rid:0:8}" "Fix CI") && rc=0 || rc=$?
+[ "$rc" = 5 ] && grep -q '^22222222 is superseded by 5e000002, which owns its task now' <<<"$out" && ! calls | grep -v ' agents ' | grep -q . ||
+  { echo "send to a superseded session not refused: $rc $out"; exit 1; }
+rm "$proj/$s1.jsonl" "$proj/$s2.jsonl"; setacct cfg ""
 # accounts off with a second account sharing the transcripts: an unlisted session may be live there, so no resume
 rm "$root/.claude/coordination.local.json"
 [ "$(run --send-when-idle "${rid:0:8}" "Back" >/dev/null; echo $?)" = 2 ] && ! calls | grep -q -- '--bg' || { echo "send unlisted, accounts off, resumed"; exit 1; }

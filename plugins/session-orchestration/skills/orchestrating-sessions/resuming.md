@@ -34,6 +34,8 @@ helper waits until the session isn't busy, then:
   name kept, so SendMessage reaches it after (a relay goes that way).
 
 Every resume path refuses a session holding over 200K tokens (exit 4) and prints the `--handover` command for it.
+A session a later handover superseded (`Supersedes: <id>` in a successor's first prompt) gets nothing (exit 5): the
+helper names the newest successor, which owns the task now; send it there.
 Never put a relayed approval in the text: a relay is a SendMessage ([approvals.md](approvals.md)).
 
 ## Resuming: only small sessions

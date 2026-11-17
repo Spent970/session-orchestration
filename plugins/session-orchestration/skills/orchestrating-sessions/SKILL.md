@@ -243,7 +243,8 @@ account through your pane's timer (keep the pane open). What it sent shows under
 that wakes you: nothing to do. A `PR events` section in the output is one it couldn't send (`not forwarded: WHY`, or
 `→ no owner`): send that session `PR REPO#ID (KEY): EVENT on SHA. Fix it and push; force-push, post or merge only with
 the usual approval. Reply when pushed, or blocked.` through `session-status --send-when-idle ID TEXT` (it prints
-`send:` when SendMessage is yours to do; [resuming.md](resuming.md)); an all-merged one with no owner: revive or start
+`send:` when SendMessage is yours to do, and refuses an ID a later handover superseded, naming its successor: send it
+there; [resuming.md](resuming.md)); an all-merged one with no owner: revive or start
 its session for the deploy and the status move. Don't relay it to the user or ask first: it is the worker's own task.
 The script lists each PR, event and head SHA once.
 
