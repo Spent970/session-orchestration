@@ -195,6 +195,58 @@ test('a queued approval becomes buttons; a click submits the answer once and cle
   expect(await again.find({ type: 'Text', text: 'PENDING TEXT' })).toBeDefined()
 })
 
+test('Approve all merges answers each waiting merge ask with its own answer line, after a confirm', async ($, on) => {
+  mock.clock(on)
+  const submitted: string[] = []
+  on('prompt.submit', async (_, e) => {
+    if (e.text.includes('PROJ-6')) return { drop: 'busy' }
+    submitted.push(e.text)
+    return { text: e.text }
+  })
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const toasts: string[] = []
+  on('ui.toast', async (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  let said = ''
+  const confirms: string[] = []
+  const ask = (key: string, question: string, options: string[], details?: string) =>
+    $.tool.call({ tool: 'mcp__session-orchestration__ask_approval', key, question, options, ...(details ? { details } : {}) })
+  on('tool.call', { tool: 'AskUserQuestion' }, async (_, e) => {
+    confirms.push(e.questions[0]?.question ?? '')
+    // Withdrawn while the user reads the confirm: not sent.
+    if (said) await $.tool.call({ tool: 'mcp__session-orchestration__cancel_approval', key: 'PROJ-7' })
+    return said ? { result: { questions: e.questions, answers: Object.fromEntries(e.questions.map(q => [q.question, said])) } } : { deny: 'dismissed' }
+  })
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  await ask('PROJ-1', 'merge acme/app#1', ['Yes, merge acme/app#1 (PROJ-1)', 'No'])
+  await ask('PROJ-2', 'merge acme/app#2 (PROJ-2)?', ['Yes', 'No, wait'])
+  await ask('PROJ-3', 'Post the PROJ-3 comment?', ['Yes, post it', 'No']) // not a merge
+  await ask('PROJ-4', 'merge acme/app#4', ['Yes, merge it', 'Yes, but rebase first']) // two yeses: its own click
+  await ask('PROJ-5', 'merge acme/app#5 and deploy it', ['Yes', 'No']) // more than the merge
+  await ask('PROJ-8', 'merge acme/app#8', ['Yes', 'No'], 'CI is red on lint') // details to read
+  await ask('PROJ-6', 'merge acme/app#6', ['Yes', 'No'])
+  await ask('PROJ-7', 'merge acme/app#7', ['Yes', 'No'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  expect((await ui.find({ type: 'Button', key: 'asks-merge-all' }))?.text).toBe('Approve all 4 merges…')
+  await ui.press({ key: 'asks-merge-all' }) // dismissed: nothing sent
+  expect(submitted).toEqual([])
+  said = 'Yes, approve all 4 merges'
+  await ui.press({ key: 'asks-merge-all' })
+  expect(confirms[1]).toBe('Approve PROJ-1 (merge acme/app#1), PROJ-2 (merge acme/app#2 (PROJ-2)?), PROJ-6 (merge acme/app#6), PROJ-7 (merge acme/app#7)?')
+  expect(submitted).toEqual([
+    'Approval pane answer for PROJ-1: Yes, merge acme/app#1 (PROJ-1). Asked: merge acme/app#1',
+    'Approval pane answer for PROJ-2: Yes. Asked: merge acme/app#2 (PROJ-2)?',
+  ])
+  expect(toasts).toEqual(['Sent 2 of 4 merge answers. Not sent, back in the pane: PROJ-6 (busy). 1 changed meanwhile (answered, withdrawn, OLD or stale): answer it on its own.'])
+  await ui.unmount()
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  expect(await again.find({ type: 'Button', key: 'asks-merge-all' })).toBeUndefined() // PROJ-6 alone
+  expect((await again.find({ type: 'Text', text: /APPROVE/ }))?.text).toMatch(/^ ⚑ APPROVE 5 /)
+})
+
 test('an ask answered in the user\'s own words submits them as the answer', async ($, on) => {
   mock.clock(on)
   const submitted: string[] = []

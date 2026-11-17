@@ -352,6 +352,11 @@ the group line counts each kind. `details`, `target` and `kind` show only in the
 over 24h ago stays, marked OLD with its age in the warning colour and, opened, a dim note to the user (not sent
 with the answer) that it may be out of date and the coordinator can recheck it. The asks are kept per project root in `~/.cache/session-status/asks/` (one file, the store every
 change goes through), so a new coordinator's pane shows what the last one queued; open_pane's result lists them.
+With two or more merge asks waiting, the APPROVE box shows **Approve all N merges…**: a confirm naming each, then
+one ordinary answer line per ask, as if each Yes were clicked, so each relay verifies for its own key. A merge ask
+here: the whole question is the hook's action (`merge app#271`, a trailing `(KEY)` and `?` allowed), exactly one
+option starts "Yes", and it has no `details`; OLD and stale ones are left out. The asks are rechecked after the
+confirm and claimed together; a toast names any not sent (back in the pane) or changed meanwhile.
 An ask the Stale section flags shows `STALE · WHY` on its line and, opened, the reason with **Cancel** (not for age
 alone): the ask is dropped and the coordinator told (pane.md, Stale flags). A Pending entry flagged there gets the
 same chip and, in its card, **Archive** (`e`; see Stale above for when it's left out). The Stale section itself keeps only the lines with no row of their own
