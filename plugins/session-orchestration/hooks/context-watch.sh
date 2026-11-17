@@ -21,11 +21,11 @@
 #   compacted-mid-chunk stamp).
 # - The reply card (reply-card.txt, {dir} the skill's folder): how to answer a message without the skill. Once per
 #   session, again after a compaction, never a coordinator's. A keyed task, a chunk or a review gets it at its first
-#   firing; any other session at its first message (.msg, which the module's session.receive hook writes, mid-turn
+#   firing after .kind is written (a first prompt only writes it, detached: below); any other session at its first message (.msg, which the module's session.receive hook writes, mid-turn
 #   too). It rides on the firing's other text, if any.
 # Subagents' tool calls (agent_id set) are skipped: they carry the parent's transcript.
 # Stamps: ${XDG_CACHE_HOME:-~/.cache}/session-status/handoff-<sid>.<level>; .kind caches the kind and thresholds.
-# ponytail: thresholds cached per session at its first firing; a config change reaches the next session.
+# ponytail: thresholds cached per session when it's classified; a config change reaches the next session.
 # Self-test: bash context-watch.test.sh
 here=$(cd "$(dirname "$0")" && pwd); input=$(cat)
 { read -r sid; read -r tp; read -r ev; read -r cwd; read -r src; read -r agent; } < <(jq -r '.session_id // "", .transcript_path // "",
@@ -33,11 +33,22 @@ here=$(cd "$(dirname "$0")" && pwd); input=$(cat)
 [[ ${sid:-} =~ ^[A-Za-z0-9_-]+$ ]] && [ -f "${tp:-}" ] && [ -z "${agent:-}" ] || exit 0
 d=${XDG_CACHE_HOME:-$HOME/.cache}/session-status; s=$d/handoff-$sid
 claim() { (set -C; : > "$1") 2>/dev/null; }   # atomic: parallel tool calls fire the hook at once
-if [ "$ev" = SessionStart ]; then
-  rm -f "$s.soft" "$s.hard" "$s.noted"; [ "$src" = compact ] || { rm -f "$s.kind" "$s.compact"; exit 0; }
+# Classifying (no .kind yet: a session's first prompt, or a resume) takes ~40 processes: 5-18 s on a loaded machine,
+# past the 5 s kill, which left no .kind, so every prompt redid it. A resume and a first prompt classify in a detached
+# copy (its own process group, one at a time: .classifying) and return at once; a firing while it runs skips (its
+# .kind serves the next one, and a card due now goes out then). Other firings without .kind classify inline.
+detach() {
+  mkdir -p "$d"; rm -f "$s.classifying"; claim "$s.classifying" || return 0
+  (set -m; CW_DETACHED=1 bash "$0" <<<"$input" >/dev/null 2>&1 &)
+}
+if [ -n "${CW_DETACHED:-}" ]; then trap 'rm -f "$s.classifying"' EXIT
+elif [ "$ev" = SessionStart ]; then
+  rm -f "$s.soft" "$s.hard" "$s.noted"; [ "$src" = compact ] || { rm -f "$s.kind" "$s.compact"; detach; exit 0; }
   rm -f "$s.card"; [ -e "$s.compact" ] && exit 0
+elif [ ! -f "$s.kind" ]; then
+  [ -z "$(find "$s.classifying" -mmin -1 2>/dev/null)" ] || exit 0   # one running (a minute: it died)
+  [ "$ev" != UserPromptSubmit ] || { detach; exit 0; }
 fi
-
 # .kind: "KIND KEY N AT HARD NOTE"; a task's has coord_re on a second line, so no call sources lib.sh (13 ms).
 cached=1 re=
 if [ -f "$s.kind" ] && { read -r kind key n at hard note && case $kind in task|review) read -r re ;; esac; } < "$s.kind"; then :
@@ -71,6 +82,7 @@ else
 fi
 thresholds() {   # at, hard and note for $kind, cached
   declare -F config >/dev/null || { cd "${cwd:-.}" 2>/dev/null; . "$here/../lib.sh"; }
+  [ -n "$coord_memo" ] || coord_memo=$(coord_json 2>/dev/null)   # one merge for every config read, not one each
   at=$(config "handoff.at.$kind" 2>/dev/null); after=$(config handoff.hard_after 2>/dev/null)
   room=$(config handoff.stop_room 2>/dev/null); expect=$(config compact.window 2>/dev/null)
   read -r w from < <(compact_window "${CLAUDE_PROJECT_DIR:-$cwd}")   # project settings live at its root, not a subfolder
@@ -85,13 +97,14 @@ thresholds() {   # at, hard and note for $kind, cached
   note=; [ "$w" = "$expect" ] || note="This session's window is $w from $from; expected $expect."
   [ -z "$small" ] || note="${note:+$note }It is too small for handoff.stop_room: hand off at 60% of the $small before compaction, stop at 80%."
   mkdir -p "$d" && printf '%s %s %s %s %s %s\n%s' "$kind" "$key" "${n:--}" "$at" "$hard" "$note" "${re:+$re
-}" > "$s.kind"
+}" > "$s.kind.$$" && mv -f "$s.kind.$$" "$s.kind"   # whole or not at all: a writer may be killed
 }
 if [ -z "$cached" ]; then
   if [ "$kind" = review ] || { [ "$kind" = task ] && [ "$key" = - ]; }; then
-    at=0 hard=0 note=; mkdir -p "$d" && printf '%s - - 0 0\n%s\n' "$kind" "$re" > "$s.kind"
+    at=0 hard=0 note=; mkdir -p "$d" && printf '%s - - 0 0\n%s\n' "$kind" "$re" > "$s.kind.$$" && mv -f "$s.kind.$$" "$s.kind"
   else thresholds; fi
 fi
+[ -z "${CW_DETACHED:-}" ] || exit 0   # the detached copy only writes .kind
 emit() { jq -nc --arg e "$ev" --arg m "$1" '{hookSpecificOutput: {hookEventName: $e, additionalContext: $m}}'; }
 # The card goes out with this firing's other text (say), else on exit; a prompt that is a message counts as one.
 card=
