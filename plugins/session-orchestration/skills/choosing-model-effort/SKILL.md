@@ -1,12 +1,12 @@
 ---
 name: choosing-model-effort
-description: Size a piece of work into a plan.models kind (scan, mechanical, build, design, review, release) and get the model and effort to run it on. Use before starting a session for a task (claude --bg), before proposing sessions so each line shows its kind, before choosing a subagent's model in a coordinated project, and in a retro comparing cost per kind.
+description: Size a piece of work into a plan.models kind (scan, mechanical, build, design, review, release, research) and get the model and effort to run it on. Use before starting a session for a task (claude --bg), before proposing sessions so each line shows its kind, before choosing a subagent's model in a coordinated project, and in a retro comparing cost per kind.
 ---
 
 # Choosing a model and effort
 
 Each kind maps to a model and effort through config `plan.models.<kind>` (defaults: `scan` haiku/low, `mechanical`
-and `release` sonnet/medium, `build` opus/medium, `design` and `review` opus/xhigh, `coordinator` opus/medium). Size the work into a kind, then take that kind's values.
+and `release` sonnet/medium, `build` opus/medium, `design` and `review` opus/xhigh, `research` opus/high, `coordinator` opus/medium). Size the work into a kind, then take that kind's values.
 `coordinator` is what a coordinator's start and its successor run on (a successor or handed-over session keeps what
 its predecessor ran on, fable too, when the transcript says).
 
@@ -32,6 +32,7 @@ Size by what the hardest step needs, not by the task's label. A "fix" can be `me
 | `design` | Choices to make before code: a new interface, a new feature, a plan to split | A new command or skill, a change in how parts fit together |
 | `review` | Judging someone else's change | A PR review, a diff audit |
 | `release` | Landing and releasing work that is already done | Running the release steps, checking the installed version |
+| `research` | Answers a question from sources outside the project (the web, docs, other tools' code), judging what is reliable and what applies here; changes nothing (the `research` skill) | An other-tools scan, a library comparison, how another tool solves a problem |
 
 - Between two kinds, take the one the hardest step needs. Too small costs a retry, and a retry costs more than the
   difference.
