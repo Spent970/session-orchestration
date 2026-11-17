@@ -144,8 +144,8 @@ The gated commands, edits included, and the action the hook names for each (ask 
 - A review: `post <mode> review FILE on TARGET (sha256 X)`; a bare approval `approve TARGET`.
 - A merge: `merge TARGET`, e.g. `merge OWNER/REPO#ID`. Your task's approval covers landing your own PR: the
   coordinator relays it with the Action ending in your session's name, `merge OWNER/REPO#ID (<session name>)` (within 24h of that approval; later, ask for the merge).
-- `msgraph message send|update`: `send|update teams message FILE to <chat or message id and every option, word for
-  word> (sha256 X)`; each `--attachments` file (absolute path) is named with its own `(sha256 Y)`. Mail: `send mail`,
+- `msgraph message send|update`: `send|update teams message FILE to <chat or message id and every option (`--format`
+  too, not `--pretty`), word for word> (sha256 X)`; each `--attachments` file (absolute path) is named with its own `(sha256 Y)`. Mail: `send mail`,
   `reply to mail`, `forward mail` the same way, with no attachments.
 
 ## Asking the user

@@ -29,7 +29,7 @@
 # reserves them. A name split by quotes (g''h) isn't seen.
 # A Teams or mail send under the user's name (msgraph message send|update, mail send|reply|forward) is gated like a
 # post: the action names the body file's sha256 and everything else the call sends (chat or message id, recipients,
-# mentions, subject, a Teams attachment's absolute path and sha256, …) word for word. A --draft or --dry-run sends nothing and passes. What can't be named by a
+# mentions, subject, --format, a Teams attachment's absolute path and sha256, …) word for word. A --draft or --dry-run sends nothing and passes. What can't be named by a
 # sha256 is denied (asked, when attended): mail attachments, mail draft|scheduled send, mail rule create|update (a
 # rule can forward), calendar create|update|cancel|respond (they mail the attendees), file grant (mails an invite),
 # msgraph raw with a write method, and msgraph through a variable or $(…).
@@ -282,9 +282,9 @@ while [ "$i" -lt "${#toks[@]}" ]; do
         -h|--help|--draft|--dry-run) help=1 ;;
         --body-file|--comment-file) bodyfile=${2:-}; shift ;;
         --body|--comment) body=1; shift ;;
-        --format) shift ;;
         --pretty) ;;
-        --importance|--reply-to|--subject|--team-id|--message-id|--send-at|--mailbox) msx+=("$1 ${2:-}"); shift ;;
+        # --format too: text and html render the same file differently.
+        --format|--importance|--reply-to|--subject|--team-id|--message-id|--send-at|--mailbox) msx+=("$1 ${2:-}"); shift ;;
         # Variadic: every word up to the next option.
         --to|--cc|--bcc|--add-to|--remove-to|--add-cc|--remove-cc|--mention|--attachments)
           [ "$1 ${args[0]}" != '--attachments mail' ] || att=1
