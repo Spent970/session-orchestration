@@ -33,10 +33,11 @@ by a parent. Configured adds:
   (a task session isolated in a worktree can't write into a checkout). Setup puts every new file there: `replies/`,
   `memory.md` and `memory/`, `pending.md`, the briefs. Run the command as printed, in this folder (no `cd`): it
   moves an older setup's replies, memory, handoff (with `<name>/`, `<name>-archive*` beside it), briefs and
-  `.claude/tasks/` into P, rewrites their lines in `CLAUDE.local.md` (or an untracked `CLAUDE.md`) and `pending.file`
-  (into `.claude/coordination.local.json`), then runs the plain `--write`. It moves only from inside the root or the
-  old state replies folder, never what git tracks there (a remote-less nested repo's files do move), and nothing at
-  all when a target exists in P or the committed `CLAUDE.md` holds such a line (it names them). A second run says
+  `.claude/tasks/` into P, rewrites their lines in `CLAUDE.local.md` (or an untracked `CLAUDE.md`), the adapter's
+  quoted paths (its `pending)` line) and `pending.file` (into `.claude/coordination.local.json`), then runs the plain
+  `--write`. It moves only from inside the root or the old state replies folder, never what git tracks there (a
+  remote-less nested repo's files do move), and nothing at all when a target exists in P or the committed `CLAUDE.md`
+  or adapter names such a path (it names them). A second run says
   `nothing to move`. `--link` adds a `.coordinator` symlink to P in the root, kept out of git;
 - `project Stop hook commits a folder (COMMAND): …` when a Stop hook in the project's `.claude/settings*.json` runs a
   script that git-commits (a hand-made auto-history). See Propose's **Hand-made history hook**.

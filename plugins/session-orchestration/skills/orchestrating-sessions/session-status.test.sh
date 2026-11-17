@@ -1148,13 +1148,14 @@ out=$(init "$a" --write --review-brief --retro-brief) && [ "$out" = "$(printf 'W
   grep -qF 'git diff origin/main...origin/<branch>' "$pa/review-brief.md" &&
   [ "$(init "$a")" = "This folder is set up for coordination already ($a, acme-coordinator): nothing to propose." ] &&
   [ -z "$(git -C "$a" status --short)" ] || { echo "init briefs: $out"; exit 1; }
-# the old brief name: --write moves it to retro-brief.md where it is, P or .claude (--rnd-brief is the old flag)
+# the old brief name: --write renames the one the retro reads, where it is: P, else .claude (--rnd-brief is the old flag)
 mv "$pa/retro-brief.md" "$pa/rnd-brief.md"; init "$a" --write >/dev/null
 [ -e "$pa/retro-brief.md" ] && [ ! -e "$pa/rnd-brief.md" ] && init "$a" --write --rnd-brief >/dev/null &&
   mv "$pa/retro-brief.md" "$pa/rnd-brief.md" && echo mine >> "$pa/rnd-brief.md" && init "$a" --write --rnd-brief >/dev/null && tail -1 "$pa/retro-brief.md" | grep -qx mine &&
-  echo old > "$a/.claude/rnd-brief.md" && init "$a" --write >/dev/null && [ "$(cat "$a/.claude/retro-brief.md")" = old ] && [ ! -e "$a/.claude/rnd-brief.md" ] &&
+  echo old > "$a/.claude/rnd-brief.md" && init "$a" --write >/dev/null && [ -e "$a/.claude/rnd-brief.md" ] && [ ! -e "$a/.claude/retro-brief.md" ] &&
+  mv "$pa/retro-brief.md" "$tmp/rb.md" && init "$a" --write >/dev/null && [ "$(cat "$a/.claude/retro-brief.md")" = old ] && [ ! -e "$a/.claude/rnd-brief.md" ] &&
   [ -z "$(git -C "$a" status --short)" ] && ! grep -q "renamed" "$a/.git/info/exclude" || { echo "init: rnd-brief rename"; exit 1; }
-rm "$a/.claude/retro-brief.md"
+rm "$a/.claude/retro-brief.md"; mv "$tmp/rb.md" "$pa/retro-brief.md"
 # A replies folder an older setup put inside the checkout: --check names the command that moves it.
 cp "$a/CLAUDE.local.md" "$tmp/cl.bak" && sed -i.x 's#^- Replies folder (\(.*\)): `.*`\.$#- Replies folder (\1): `.claude/orchestration/replies/`.#' "$a/CLAUDE.local.md"
 init "$a" --check | grep -qxF "coordinator files outside $pa: run session-status --init --write --move" && mv "$tmp/cl.bak" "$a/CLAUDE.local.md" && rm -f "$a/CLAUDE.local.md.x" &&
@@ -1408,6 +1409,7 @@ old() {
   f=$r/CLAUDE.md; git -C "$r" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1 && f=$r/CLAUDE.local.md
   # bash 3.2 splits ${c//PAT/REP} at a / inside a quoted PAT: both go in variables
   c=$(cat "$f"); x=$p/replies/ y=$3; c=${c//"$x"/$y}; x=$p/ y=$2/; c=${c//"$x"/$y}; printf '%s\n' "$c" > "$f"
+  f=$r/.claude/session-status-adapter; c=$(cat "$f"); c=${c//"$x"/$y}; printf '%s\n' "$c" > "$f"   # pending) cat 'ORCH/pending.md'
 }
 # (m1) replies in the old state folder, memory, handoff and its archive in .claude/orchestration, the briefs and tasks
 # in .claude: all move, the lines follow, emptied folders go and a stray file is named; a second run moves nothing.
@@ -1422,6 +1424,8 @@ out=$(init "$m" --write --move) &&
   [ "$(cd "$pm" && find . -type f | sort | paste -sd' ' -)" = "./memory.md ./memory/coordinator.md ./memory/misc.md ./pending-archive.md ./pending.md ./pending/x.md ./replies/K-1.md ./retro-brief.md ./review-brief.md ./tasks/bugs/t.md" ] &&
   [ ! -e "$orep" ] && [ ! -e "$m/.claude/tasks" ] && [ ! -e "$m/.claude/rnd-brief.md" ] && [ "$(ls -A "$m/.claude/orchestration")" = stray.txt ] &&
   grep -qxF '  lines in CLAUDE.local.md rewritten' <<<"$out" && grep -qxF 'Still in .claude/orchestration: stray.txt' <<<"$out" &&
+  grep -qxF '  paths in .claude/session-status-adapter rewritten' <<<"$out" && grep -qF "cat '$pm/pending.md'" "$m/.claude/session-status-adapter" &&
+  [ -x "$m/.claude/session-status-adapter" ] &&
   grep -qF "Replies folder (status reports, plans, review reports): \`$pm/replies/\`." "$m/CLAUDE.local.md" &&
   grep -qF "Project memory: \`$pm/memory.md\`. Coordinator handoff file: \`$pm/pending.md\`." "$m/CLAUDE.local.md" &&
   ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" && grep -q '^configured: ' <<<"$(init "$m" --check)" &&
