@@ -2459,7 +2459,9 @@ cat > "$pd/PROJ-9.md" <<'EOF'
 | 4 | d | build | — | `skills/d.sh` | 9K | default | x |
 | 5 | e | build | 1 | — | 9K | default | x |
 EOF
-out=$(CLAUDE_CODE_AUTO_COMPACT_WINDOW= run --plan "$pd/PROJ-9.md" --check 2>&1) && [ -z "$out" ] || { echo "--plan --check, clean plan: $out"; exit 1; }
+out=$(CLAUDE_CODE_AUTO_COMPACT_WINDOW=220000 run --plan "$pd/PROJ-9.md" --check 2>&1) && [ -z "$out" ] || { echo "--plan --check, clean plan: $out"; exit 1; }
+out=$(CLAUDE_CODE_AUTO_COMPACT_WINDOW= run --plan "$pd/PROJ-9.md" --check 2>&1) &&
+  [ "$out" = 'window: no autoCompactWindow set; the marks assume 220000' ] || { echo "--plan --check, no window set: $out"; exit 1; }
 out=$(CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 run --plan "$pd/PROJ-9.md" --check 2>&1) &&
   [ "$out" = 'window 180000 from env; expected 220000' ] || { echo "--plan --check, window: $out"; exit 1; }
 echo '{"permissions":{"defaultMode":"plan"}}' > "$tmp/cfg/settings.json"
