@@ -1686,6 +1686,7 @@ if [ -n "$HANDOVER" ]; then
     ! grep -qE ' review([.,;:!)]|$)' <<<"$marks" || { echo "\"$name\" (${id:0:8}) is a review session: not handed over"; exit 2; }
     keys=$( { first_key "$first"; grep -oE "$KEYRE" <<<"$marks"; } | sort -u)
     bn=$name; [[ $name =~ ^(.+)-prev-[0-9]+$ ]] && bn=${BASH_REMATCH[1]}   # renamed already by its own handoff
+    [ -f "$rd/$bn.md" ] || [[ $bn != retro* ]] || bn=retro   # a retro run (retro-weekly-DATE, …) reports in retro.md
     [ -n "$keys" ] || [ ! -f "$rd/$bn.md" ] || case $bn in */*|.*|*' '*) ;; *) keys=$bn ;; esac   # keyless task: its NAME.md
     [ -n "$keys" ] || { echo "\"$name\" (${id:0:8}) names no task key (first prompt or Session task: marker) and $rdir has no $bn.md: not handed over"; exit 2; }
     [ "$(grep -c . <<<"$keys")" = 1 ] || { echo "\"$name\" (${id:0:8}) names several task keys ($(paste -sd' ' - <<<"$keys")): hand over by hand"; exit 2; }
@@ -1731,8 +1732,9 @@ if [ -n "$HANDOVER" ]; then
   fi
   if [ -n "$pid" ]; then stop_session "$pre" "$id" || { echo "couldn't stop \"$name\" (${id:0:8}): nothing started"; exit 1; }; fi
   base=$name; [[ $name =~ ^(.+)-prev-[0-9]+$ ]] && base=${BASH_REMATCH[1]}   # renamed already by its own handoff
+  K=$(tr '[:lower:]' '[:upper:]' <<<"$key")
   case $(tr '[:lower:]' '[:upper:]' <<<"$base") in
-    "$(tr '[:lower:]' '[:upper:]' <<<"$key")"|"$key"[!0-9]*) new=$base ;;
+    "$K"|"$K"[!0-9]*) new=$base ;;
     *) slug=$(tr '[:upper:]' '[:lower:]' <<<"$base" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-40 | sed -E 's/-+$//'); new=$key${slug:+-$slug} ;;
   esac
   [ -z "$n" ] || new=$key-c$n
