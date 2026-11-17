@@ -117,7 +117,8 @@
 #                       it; --here: a session under another account is moved to yours (same id and name), so you can
 #                       SendMessage it next
 #        session-status --coordinator   names of this account's live coordinator sessions (ran --start,
-#                       --changes, --watch or --owner, or opened the pane), newest first, excluding the caller, then
+#                       --changes, --watch or --owner, or opened the pane), newest first, excluding the caller (a
+#                       ready successor NAME-next before an old one still holding NAME), then
 #                       (features.accounts on) another account's by their live socket's uds: address; no tracker calls
 #        session-status --address NAME|ID [--other]   the uds: address SendMessage reaches a live session at, any
 #                       listed account (--other: another one's only, by exact name, exit 4 when this one's matches,
@@ -1819,7 +1820,12 @@ if [ -n "$COORD" ]; then
       [ "$id" = "${CLAUDE_CODE_SESSION_ID:-}" ] ||
         awk -F'\t' -v id="$id" '$1==id && $2 !~ /-prev-[0-9]+$/ {print $4 "\t" $2 "\t" $9}' "$TMP/agents"
     done > "$TMP/coords"
-  awk -F'\t' '$1 == "claude" {print $2}' "$TMP/coords"
+  # A ready successor (NAME-next, handover/NAME.ready) goes before an old one still holding NAME: that one is retiring,
+  # and a message to it costs a forward and a turn of it.
+  awk -F'\t' -v d="$HO_DIR" '$1 == "claude" { n[++k] = $2; has[$2] = 1 }
+    END { for (i = 1; i <= k; i++) { c = n[i]
+            if (has[c "-next"] && (getline x < (d "/" c ".ready")) >= 0 && !out[c "-next"]++) print c "-next"
+            if (!out[c]++) print c } }' "$TMP/coords"
   awk -F'\t' '$1 != "claude" {print $3}' "$TMP/coords" | while read -r pid; do sock_addr "$pid" || :; done
   exit 0
 fi
