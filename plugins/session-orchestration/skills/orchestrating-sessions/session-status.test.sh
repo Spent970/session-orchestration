@@ -783,15 +783,26 @@ echo '{"type":"assistant","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
 grep -q '^cfg --bg --model claude-opus-5-5 -n PROJ-9-c3b ' <<<"$c" || { echo "handover, model without effort: $c"; exit 1; }
 mv "$tmp/kid.jsonl" "$proj/$kid.jsonl"
-# --self: refused while a coordinator is live; else the successor starts and the caller, mid-turn, isn't stopped.
+# --self, a coordinator live or not: the successor starts; the caller, mid-turn, is stopped only once its turn ends
+# (the detached loop; HANDOVER_STOP_TRIES=0 skips it in the other cases).
+export HANDOVER_STOP_TRIES=0 HANDOVER_STOP_POLL=0
 setacct cfg "$(sess "$kid" "PROJ-9-c3b" busy 1),$(sess "$cid" coord idle 1)"; calls >/dev/null
-out=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self -- 'Go on.') && rc=0 || rc=$?
-[ "$rc" = 3 ] && grep -q 'coordinator "coord" is running' <<<"$out" && ! calls | grep -q 'stop\|--bg' || { echo "self handover beside a coordinator: $out"; exit 1; }
-setacct cfg "$(sess "$kid" "PROJ-9-c3b" busy 1)"
 out=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self -- 'Go on.')
 c=$(calls)
-[ "$out" = 'handed over; rename yourself (call name_session with "PROJ-9-c3b-prev-1"), then end your turn now ("PROJ-9-c3b" (abcdef12) supersedes this session)' ] && ! grep -q ' stop ' <<<"$c" &&
-  grep -q '^cfg --bg -n PROJ-9-c3b Session task: PROJ-9$' <<<"$c" || { echo "self handover: $out"; echo "$c"; exit 1; }
+[ "$out" = 'handed over; rename yourself (call name_session with "PROJ-9-c3b-prev-1"), then end your turn now, with no message ("PROJ-9-c3b" (abcdef12) supersedes this session; it stops once idle)' ] &&
+  ! grep -q ' stop ' <<<"$c" && grep -q '^cfg --bg -n PROJ-9-c3b Session task: PROJ-9$' <<<"$c" || { echo "self handover: $out"; echo "$c"; exit 1; }
+# its turn ended: the loop stops it
+setacct cfg "$(sess "$kid" "PROJ-9-c3b" idle 1),$(sess "$cid" coord idle 1)"
+out=$(CLAUDE_CODE_SESSION_ID=$kid HANDOVER_STOP_TRIES=1 HANDOVER_STOP_POLL=1 run --handover --self -- 'Go on.')
+for _ in 1 2 3 4 5 6 7 8 9 10; do grep -q "^cfg stop ${kid:0:8}" "$tmp/calls" && break; sleep 1; done
+grep -q "^cfg stop ${kid:0:8}" "$tmp/calls" || { echo "self handover: not stopped once idle"; calls; exit 1; }
+for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -qf HANDOVER_STOP_TRIES || break; sleep 1; done   # its last listing done
+calls >/dev/null
+# an interactive caller is the user's terminal: handed over, never stopped
+setacct cfg "$(sess "$kid" "PROJ-9-c3b" idle 1 interactive)"
+out=$(CLAUDE_CODE_SESSION_ID=$kid HANDOVER_STOP_TRIES=1 HANDOVER_STOP_POLL=0 run --handover --self -- 'Go on.')
+sleep 1; grep -q 'close it in its terminal)$' <<<"$out" && ! calls | grep -q ' stop ' || { echo "self handover, interactive: $out"; exit 1; }
+setacct cfg "$(sess "$kid" "PROJ-9-c3b" busy 1)"
 # --self takes a chunk's model/effort from its plan row, a flag given wins; no session id is said plainly.
 printf '## Plan\n\n| # | Chunk | Kind | Deps | Touches | Est | Model/effort | Done when |\n|---|---|---|---|---|---|---|---|\n| 3b | x | build | – | `a` | 60K | sonnet/low | y |\n' > "$root/replies/PROJ-9.md"
 c=$(CLAUDE_CODE_SESSION_ID=$kid run --handover --self --effort high -- 'Go on.' >/dev/null; calls)

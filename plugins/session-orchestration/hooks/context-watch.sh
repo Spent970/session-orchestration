@@ -9,12 +9,13 @@
 #   `Session task: KEY` line in its tail). A task
 #   or review whose tail matches lib.sh's coord_re (session-status's coordinator test) is a coordinator from then on;
 #   one without messages tests this call's own stdin instead, so it never reads the transcript.
-# - Chunk and task texts end with the self-handover (session-status --handover --self) for when no coordinator runs.
+# - Chunk and task texts end with the self-handover (session-status --handover --self), coordinator or not; they message
+#   the coordinator only when it fails or makes no progress.
 # - Window: lib.sh compact_window (env, the project's settings, the user's, else config compact.window).
 #   ceiling = window - 33000; hard = min(at + handoff.hard_after, ceiling - handoff.stop_room);
 #   at = min(handoff.at.KIND, hard - 10000). handoff.at.KIND = 0: off. A window <= 0 is unknown (no clamp); one with
 #   ceiling - stop_room < 20000 gets at = 60% and hard = 80% of the ceiling (of the window when ceiling <= 0).
-# - Past at: one additionalContext (reach the stop point, write the handoff, tell the coordinator, end the turn);
+# - Past at: one additionalContext (reach the stop point, write the handoff, hand over by itself (a coordinator: start its successor));
 #   past hard: one more (stop now). A window other than compact.window adds one line to the first one.
 # - SessionStart after a compaction, chunk sessions only: write the handoff from what's on disk and stop. A
 #   compaction or resume also clears the stamps (a resume may bring another window: the thresholds too, and the
@@ -142,15 +143,15 @@ say() {
 }
 texts() {   # where the handoff goes, the -prev-K rename, whom to tell, and (chunk and task) the self-handover
   printf -v ss %q "${here%/hooks}/skills/orchestrating-sessions/session-status"
-  local rn=" Rename yourself: call name_session with the name \`$ss --prev-name\` prints (your successor takes your name)."
+  # The exceptions come first: a coordinator's --escalate is refused once --self has superseded the session.
+  local hs=" Then, unless this handoff makes no progress on the one your first prompt's \`Supersedes:\` continued$([ "$kind" != chunk ] || echo " or you are past 2× your brief's est"), hand yourself over: \`$ss --handover --self -- '<next step>'\`, and do what it prints (rename yourself, end your turn); the coordinator needs no message. In those cases, or when that command fails, don't hand over: message it \"handoff ready: $key$([ "$kind" != chunk ] || echo " c$n")\" with why (it decides whether to escalate)."
   case $kind in
     chunk) where="\`## c$n: handoff ${sid:0:8}\` (your session id's first 8 characters) appended to $key-build.md in the replies folder"
-           tell="$rn Message the coordinator \"handoff ready: $key c$n\"." ;;
-    task) where="\`## Handoff\` in your replies file, with the status report at its top brought up to date (older handoffs and drafts move to $key-archive.md: worker.md, Replying)"; tell="$rn Message the coordinator \"handoff ready: $key\"." ;;
+           tell=$hs ;;
+    task) where="\`## Handoff\` in your replies file, with the status report at its top brought up to date (older handoffs and drafts move to $key-archive.md: worker.md, Replying)"; tell=$hs ;;
     *) where="coordinator-handover.md in the replies folder, the handover file: overwrite it with the state in no file, as ${here%/hooks}/skills/orchestrating-sessions/handover.md says"
        tell=" Then start your successor with \`$ss --successor\` and do what it prints (that file has the steps)." ;;
   esac
-  case $kind in chunk|task) selfh=" If no coordinator is running (\`$ss --coordinator\` prints nothing), finish with \`$ss --handover --self -- '<next step>'\`." ;; *) selfh= ;; esac
 }
 if [ "$ev" = SessionStart ]; then
   [ "$kind" = chunk ] || exit 0
@@ -180,8 +181,8 @@ texts
 k=$(( ctx / 1000 ))K
 if (( ctx > hard )); then
   claim "$s.hard" || exit 0; touch "$s.soft"
-  say "Context is at $k, past the hard stop. Stop now: start nothing else, write the handoff ($where) from what's on disk.$tell$selfh Then end your turn."
+  say "Context is at $k, past the hard stop. Stop now: start nothing else, write the handoff ($where) from what's on disk.$tell Then end your turn."
 elif (( ctx > at )) && claim "$s.soft"; then
-  say "Context is at $k: hand off. Reach your stop point: finish the current edit, commit, run the checks, and start no new step. Write the handoff ($where).$tell$selfh Then end your turn."
+  say "Context is at $k: hand off. Reach your stop point: finish the current edit, commit, run the checks, and start no new step. Write the handoff ($where).$tell Then end your turn."
 fi
 exit 0

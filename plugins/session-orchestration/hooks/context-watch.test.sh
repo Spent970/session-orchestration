@@ -49,7 +49,8 @@ expect task "$task" 171000 'Stop now'
 expect task "$task" 180000 ''
 grep -q 'handoff ready: PROJ-123 c2' <<<"$(fire chunk2 "$chunk" 126000)" || fail 'chunk message names PROJ-123 c2'
 grep -q '## c2: handoff chunklon' <<<"$(fire chunklong9 "$chunk" 126000)" || fail 'chunk message names its build section'
-grep -qE 'Rename yourself: call name_session with the name `.*session-status --prev-name` prints.* Message the coordinator' <<<"$(fire chunk5 "$chunk" 151000)" || fail 'chunk hard text: rename before the coordinator message'
+grep -qE "unless .*past 2× your brief's est, hand yourself over: \`.*session-status --handover --self -- '<next step>'\`, and do what it prints.*needs no message\. In those cases, or when that command fails, don't hand over: message it \"handoff ready: PROJ-123 c2\"" <<<"$(fire chunk5 "$chunk" 151000)" ||
+  fail 'chunk hard text: the self-handover, the coordinator message only on a failure'
 out=$(fire task2 "$task" 146000); grep -q 'handoff ready: PROJ-123"' <<<"$out" && grep -q '## Handoff' <<<"$out" || fail "task message: $out"
 expect coord "$coord" 144000 ''
 out=$(fire coord "$coord" 146000); grep -q 'handover file' <<<"$out" && ! grep -q 'handoff ready' <<<"$out" &&
@@ -61,11 +62,11 @@ expect coord "$coord" 171000 'Stop now'
 pane='{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__session-orchestration__open_pane","input":{}}]}}'
 LINE=$pane expect pane0 'Fix the bug.' 190000 ''
 EXTRA='{"tool_name": "mcp__session-orchestration__open_pane", "tool_input": {}}' expect pane1 'Fix the bug.' 144000 ''
-out=$(LINE=$pane fire pane1 'Fix the bug.' 146000); grep -q 'handover file' <<<"$out" && ! grep -q 'self' <<<"$out" || fail "open_pane session: $out"
+out=$(LINE=$pane fire pane1 'Fix the bug.' 146000); grep -q 'handover file' <<<"$out" && ! grep -qF -- '--self' <<<"$out" || fail "open_pane session: $out"
 LINE=$pane expect pane2 "$task" 130000 ''
 out=$(fire pane3 "$task" 146000); grep -q 'handover file' <<<"$(LINE=$pane fire pane3 "$task" 150000)" || fail 'task turned coordinator'
 grep -qF -- "orchestrating-sessions/session-status --handover --self -- '<next step>'" <<<"$out" || fail "task self-handover: $out"
-grep -qF -- 'session-status --coordinator` prints nothing' <<<"$(fire chunk4 "$chunk" 151000)" || fail 'chunk hard self-handover'
+out=$(fire chunk4 "$chunk" 151000); grep -qF -- '--handover --self' <<<"$out" && ! grep -qF -- '--coordinator' <<<"$out" || fail "chunk hard self-handover: $out"
 [ -z "$(grep -l window "$t"/cache/session-status/* 2>/dev/null)" ] || fail 'window line under the expected window'
 
 # Window 200000 from env: the mismatch line once, and a lower hard (ceiling 167K - 15K = 152K; at 142K).

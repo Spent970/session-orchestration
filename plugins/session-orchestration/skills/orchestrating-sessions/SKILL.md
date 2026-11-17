@@ -285,6 +285,9 @@ The script lists each PR, event and head SHA once.
   --escalate -- '<what fails, what was tried>'` (one rung up: effort, then model). A third time, or when `--escalate`
   refuses (no rung left, a review session, no `<KEY>.md` or chunk handoff to start from), tell the user what fails
   and what was tried, and stop re-sending it. Each round trip wakes both contexts. A repeated ask for an approval isn't a failure: it's still the user's to answer.
+- **A worker's handover is not news.** A session at its context mark hands itself over (`--handover --self`; its
+  row shows `superseded by`) without a message: don't tell the user. Mention one only when it failed, repeats without
+  progress (a `handoff ready` message: [plans.md](plans.md)), or changes what waits on the user.
 - **Check a session's wording against the project docs before repeating it** to the user.
 - **After a plugin update** (`claude plugin update`, the plugin repo's release flow), call `reload_plugins`
   (ToolSearch: `mcp__session-orchestration__reload_plugins`): `/reload-plugins` runs in your session when the turn

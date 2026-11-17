@@ -1,7 +1,7 @@
 # Running a plan
 
 The coordinator's rules for a task too big for one session. Read this before you split a task into chunks or start
-one, and on a `handoff ready: KEY cN` (a chunk) or `handoff ready: KEY` (a task) message. Flags and the plan table:
+one, and on a `handoff ready: KEY cN` (a chunk) or `handoff ready: KEY` (a task) message (a handoff that needs you). Flags and the plan table:
 [status-reference.md](status-reference.md#plans-and-chunks).
 
 A multi-step task becomes chunks run by separate sessions, so none outgrows its context.
@@ -19,7 +19,10 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    handoff. With `plan.enabled: false` run the task without a plan. **While the planner is evaluated**, odd task
    starts get a plan and even ones run as before, with `plan: off` in the brief (`retro.py trial` compares the two).
 4. **Models** by kind, from `plan.models` (`default` in the table); `fable` only under an account config `fable.accounts` lists.
-5. **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'`,
+5. **Handoffs.** A chunk or task session at its context mark hands itself over (`session-status --handover --self`:
+   its successor keeps its name, it is stopped once idle) and sends nothing; its row shows `superseded by`. Don't tell
+   the user. It messages you only when that failed, made no progress, or (a chunk) ran past 2× its est:
+   **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'`,
    which takes the chunk's model and effort from its plan row; a chunk with `## cN: done` gets none. A chunk that
    handed off past 2× its est, or failed the same way twice: add `--escalate` (one rung up from the row's). **A `handoff ready: PROJ-123` message** (a task): `session-status
    --handover <id> -- '<next step>'`, the next step from `## Handoff` in its replies file. Message and attach the

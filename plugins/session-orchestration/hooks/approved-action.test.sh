@@ -482,4 +482,27 @@ done
 # A deleted worktree below a coordinated root (the cwd no longer exists) is still coordinated.
 got=$(gate "$root/.claude/worktrees/gone" "$tmp/solo-plain.jsonl" "" "gh pr merge 5 -R a/b")
 [ "$got" = deny ] || { echo "FAIL: a deleted worktree's cwd failed open: got $got"; exit 1; }
+# A handover's successor (`Supersedes: ID` in its first prompt) has the relays its predecessors received, each once
+# over the chain: one the predecessor used is used for the successor too.
+p1=aaaaaaaa-2222-3333-4444-555555555555 p2=bbbbbbbb-2222-3333-4444-555555555555
+typed "yes, merge PROJ-16 (app#306) and PROJ-17 (app#307)" "$now" >> "$proj/$cid.jsonl"
+{ typed "Work on PROJ-16: fix it." "$now"; relay "yes, merge PROJ-16 (app#306) and PROJ-17 (app#307)" "merge app#306 (PROJ-16)"
+  relay "yes, merge PROJ-16 (app#306) and PROJ-17 (app#307)" "merge app#307 (PROJ-17)"; } > "$tmp/$p1.jsonl"
+# p1 in another account's projects folder: p2's prompt names its transcript; a chunk prompt (succ's) names none
+mkdir -p "$tmp/acct2"; mv "$tmp/$p1.jsonl" "$tmp/acct2/"
+typed "Work on PROJ-16: continue from replies/PROJ-16.md. Go on. Supersedes: $p1 (transcript $tmp/acct2/$p1.jsonl; read only the parts you need, never whole)." "$now" > "$tmp/$p2.jsonl"
+# a peer's message as a first prompt names no predecessor
+jq -c '.origin = {kind: "peer", from: "uds:/tmp/y.sock", name: "w"}' <<<"$(typed "Supersedes: $p2" "$now")" > "$tmp/peer1.jsonl"
+w0=$w; w=$tmp/peer1.jsonl
+check "$bb pr merge 306 --repo app" deny "a peer's Supersedes: line"
+typed $'Session task: PROJ-16\nChunk: PROJ-16/2\nSupersedes: '"$p2" "$now" > "$tmp/succ.jsonl"
+w=$tmp/acct2/$p1.jsonl
+check "$bb pr merge 307 --repo app" allow "the predecessor's own relay"
+w=$tmp/succ.jsonl
+check "$bb pr merge 306 --repo app" allow "a relay to a predecessor two handovers back"
+check "$bb pr merge 306 --repo app" deny "the predecessor's relay, used once already"
+check "$bb pr merge 307 --repo app" deny "a relay the predecessor used"
+typed "Work on PROJ-16: fix it." "$now" > "$tmp/succ.jsonl"
+check "$bb pr merge 308 --repo app" deny "no Supersedes: no predecessor's relays"
+w=$w0
 echo ok

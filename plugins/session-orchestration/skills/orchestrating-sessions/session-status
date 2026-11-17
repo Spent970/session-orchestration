@@ -126,8 +126,8 @@
 #                       (first prompt, marker, review, maybe) with its state, first prompt line and markers
 #        session-status --handover ID|--self [--model M] [--effort E] [--escalate] [--] 'WHAT NEXT'   a task or chunk
 #                       session too big to resume is stopped and a fresh one takes its task over, under its name, from the replies
-#                       folder's KEY.md (a chunk: KEY-build.md's handoff); --self, a session hands itself over when no
-#                       coordinator runs (see the block)
+#                       folder's KEY.md (a chunk: KEY-build.md's handoff); --self, a session hands itself over at its
+#                       context mark, coordinator or not (see the block)
 #        session-status --prev-name [NAME]   NAME-prev-K, the name a session renames itself to when it hands off: K the
 #                       lowest free number over every listed session name (NAME: the caller's own); --title also
 #                       titles the caller's terminal tab with it
@@ -1262,8 +1262,9 @@ fi
 # there; its effort only with its model), else the daemon's default. A chunk session (a `Chunk:
 # KEY/N` line in its first prompt) needs no KEY.md: its successor, KEY-cN, continues from `## cN: handoff` in
 # KEY-build.md and follows KEY-cN.md, both in the replies folder. --self (ID = $CLAUDE_CODE_SESSION_ID): a session
-# hands itself over as its last step, with no coordinator running (one would start the successor): it isn't
-# stopped, nor refused as mid-turn; the successor starts and the caller ends its turn.
+# hands itself over as its last step, a coordinator running or not (it isn't woken: its status shows the successor):
+# it isn't refused as mid-turn; the successor starts, the caller ends its turn, and a detached loop stops it (background only) once
+# idle (HANDOVER_STOP_POLL seconds apart, HANDOVER_STOP_TRIES times: 30 and 40).
 # --escalate: the successor runs one rung above that model/effort (lib.sh escalate_rung: effort up to xhigh, then
 # haiku → sonnet → opus, then max), for a session that failed the same way twice (SKILL.md Rules); refused (exit 2,
 # nothing stopped) at the top rung or when the old model or effort is unknown. Logs a usage escalate line.
@@ -1279,10 +1280,6 @@ if [ -n "$HANDOVER" ]; then
   [ -z "$effort" ] || model_ok opus "$effort" || { echo "--effort $effort: one of low medium high xhigh max"; exit 2; }
   row=$(find_session "$want") || { echo "couldn't list the sessions; try again"; exit 1; }
   [ -n "$row" ] || { echo "no session $want in any account"; exit 2; }
-  if [ -n "$self" ]; then   # after find_session: --coordinator prints nothing, not an error, when the listing fails
-    c=$(bash "$SELF" --coordinator 2>/dev/null | head -1)
-    [ -z "$c" ] || { echo "coordinator \"$c\" is running: it starts your successor. Message it \"handoff ready\" instead; not handed over"; exit 3; }
-  fi
   read_row id name st pre started cwd kind status pid
   f=$(transcript_of "$id"); [ -n "$f" ] || { echo "no transcript for \"$name\" (${id:0:8}): not handed over"; exit 2; }
   first=$(first_prompt "$f")
@@ -1304,7 +1301,7 @@ if [ -n "$HANDOVER" ]; then
   pairs=$(ls "$(dirname "$f")"/*.jsonl 2>/dev/null | supersedes)
   succ=$(awk -v id="$id" '$1 == id {print substr($2, 1, 8)}' <<<"$pairs" | tail -1)
   [ -z "$succ" ] || { echo "\"$name\" (${id:0:8}) is superseded by $succ already: not handed over again"; exit 2; }
-  [ -z "$self" ] || pid=   # the caller itself: never stopped, and its own turn is the one running
+  [ -z "$self" ] || pid=   # the caller itself: not stopped here (its own turn is the one running); see the loop below
   if [ -n "$pid" ]; then
     mid_turn && { echo "\"$name\" is mid-turn: not handed over; try when its turn ends"; exit 3; }
     [ "$status" = waiting ] && { echo "\"$name\" is waiting on a prompt: not handed over; answer it first ($pre attach ${id:0:8})"; exit 3; }
@@ -1372,7 +1369,14 @@ if [ -n "$HANDOVER" ]; then
   nid=$(grep -oE 'backgrounded · [0-9a-f]{8}' <<<"$out" | tail -1); nid=${nid##* }
   [ -n "$nid" ] || { echo "${pid:+stopped \"$name\" (${id:0:8}), but }the new session didn't start: $(tail -1 <<<"$out")"; exit 1; }
   [ -z "$esc" ] || usage "$([ -n "$n" ] && echo chunk || echo task)" escalate "${model%\[1m\]}" "$effort" "$base"
-  [ -z "$self" ] || { echo "handed over; rename yourself (call name_session with \"$(prev_name "$name")\"), then end your turn now (\"$new\" ($nid) supersedes this session)"; exit 0; }
+  if [ -n "$self" ]; then
+    # A background caller is stopped once its turn ends, as a coordinator's --handover stops it, from a detached
+    # process that outlives this call: --stop again while it says busy (3) or the listing or stop failed (1); done on
+    # 0 (stopped, or not running) and 2 (gone). An interactive one is the user's terminal: never stopped.
+    [ "$kind" != background ] || (set -m; HANDOVER_STOP_ID=$id nohup bash -c 'i=${HANDOVER_STOP_TRIES:-40}; while (( i-- > 0 )); do sleep "${HANDOVER_STOP_POLL:-30}"
+      bash "$0" --stop "$HANDOVER_STOP_ID"; case $? in 0|2) break ;; esac; done' "$SELF" </dev/null >/dev/null 2>&1 &)
+    echo "handed over; rename yourself (call name_session with \"$(prev_name "$name")\"), then end your turn now, with no message (\"$new\" ($nid) supersedes this session; $([ "$kind" = background ] && echo "it stops once idle" || echo "close it in its terminal"))"; exit 0
+  fi
   echo "handed $key${n:+ c$n} over: \"$name\" (${id:0:8}) ${pid:+stopped, }superseded by \"$new\" ($nid)${esc:+, escalated to $model/$effort}"
   [ "$name" != "$new" ] || echo "\"$name\" (old) wasn't renamed: two sessions share $name until it is"
   exit 0
