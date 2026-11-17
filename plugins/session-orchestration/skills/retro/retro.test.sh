@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Self-check for retro.py and retro-weekly: synthetic transcripts in three accounts (~/.claude, ~/.claude-work sharing its
-# projects/ by symlink, ~/.claude-other with its own), a fixed --until window, and a stubbed claude for the launcher.
+# Self-check for retro.py (the launcher: retro-run.test.sh): synthetic transcripts in three accounts (~/.claude, ~/.claude-work sharing its
+# projects/ by symlink, ~/.claude-other with its own) and a fixed --until window.
 # Run: bash retro.test.sh  (prints "ok" or the failed check).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -441,23 +441,6 @@ retro search hunter2xyz 7 >/dev/null && fail "search: a masked secret isn't foun
   fail "search: a session's second account" "$(retro search "other account" 7)"
 rm -r "$a/eeeeeeee-5555.jsonl" "$a/ffffffff-6666.jsonl" "$home/.claude-other/projects/-x-proj"
 
-# The stub in ~/.local/bin (HOME=$tmp below): retro-weekly puts that first on its PATH, so the real claude never runs.
-mkdir -p "$tmp/.local/bin"
-printf '#!/bin/sh\necho "$@" > %q\n' "$tmp/claude.args" > "$tmp/.local/bin/claude"; chmod +x "$tmp/.local/bin/claude"
-out=$(HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp" --dry-run)
-grep -q 'claude --bg --model opus --effort xhigh -n retro-weekly-' <<<"$out" && grep -qx "$tmp/.local/bin/claude" <<<"$out" && [ ! -e "$tmp/claude.args" ] ||
-  fail "retro-weekly --dry-run starts nothing, and finds the stub" "$out"
-HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp"
-grep -q 'session-orchestration:retro' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log" || fail "retro-weekly starts the run" "$(cat "$tmp/log")"
-HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp/nope" && fail "retro-weekly: a missing root fails" ""
-grep -q "no project root $tmp/nope" "$tmp/log" || fail "retro-weekly logs a missing root" "$(cat "$tmp/log")"
-# the old entry points: the rnd-weekly shim (a crontab line names it) starts the same run; /rnd is a stub for retro
-rm -f "$tmp/claude.args"
-out=$(HOME=$tmp RND_LOG=$tmp/log2 "$here/../rnd/rnd-weekly" "$tmp" --dry-run)
-grep -q 'claude --bg --model opus --effort xhigh -n retro-weekly-' <<<"$out" || fail "rnd-weekly shim --dry-run" "$out"
-HOME=$tmp RND_LOG=$tmp/log2 "$here/../rnd/rnd-weekly" "$tmp"
-grep -q 'session-orchestration:retro' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log2" || fail "rnd-weekly shim starts the run" "$(cat "$tmp/log2")"
-grep -q '^name: rnd$' "$here/../rnd/SKILL.md" && grep -q 'session-orchestration:retro' "$here/../rnd/SKILL.md" || fail "/rnd stub points at retro" ""
 # usage counts the old name's slash command as a retro use
 printf '%s\n' '{"type":"user","timestamp":"2026-10-12T09:00:00.000Z","message":{"content":"<command-name>/session-orchestration:rnd</command-name>"}}' > "$a/rrrrrrrr-7777.jsonl"
 out=$(XDG_STATE_HOME=$tmp/state retro usage)
