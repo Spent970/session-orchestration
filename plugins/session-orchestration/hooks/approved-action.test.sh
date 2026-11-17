@@ -37,6 +37,7 @@ typed() { jq -nc --arg ts "$2" --arg t "$1" '{type: "user", origin: {kind: "huma
   typed "yes, reply to AAMk+x/y= for everyone" "$now"
   typed "yes, send the PROJ-22 mail" "$now"
   typed "yes, send the PROJ-23 mail" "$now"
+  typed "yes, send the PROJ-24 message" "$now"
 } > "$proj/$cid.jsonl"
 export CLAUDE_CODE_SESSION_ATTENDED=0 # unattended (a --bg session) unless a check says otherwise
 printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"kind\":\"interactive\"}]'" > "$tmp/bin/claude"
@@ -69,11 +70,12 @@ w=$tmp/worker.jsonl
   relay "yes, approve PROJ-13" "approve org/app#303 (PROJ-13)"
   relay "yes, request changes on PROJ-14" "post request-changes review $tmp/body.txt on org/app#304 (sha256 $sha) for PROJ-14"
   relay "yes, merge PROJ-15 (app#305)" "merge app#305 (PROJ-15)"
-  relay "yes, send the PROJ-20 message" "send teams message $tmp/body.txt to 19:abc@thread.v2 --mention ann@ex.org (sha256 $sha) for PROJ-20"
+  relay "yes, send the PROJ-20 message" "send teams message $tmp/body.txt to 19:abc@thread.v2 --format markdown --mention ann@ex.org (sha256 $sha) for PROJ-20"
   relay "yes, send the PROJ-21 mail" "send mail $tmp/body.txt to --to ann@ex.org bob@ex.org --subject Weekly report (sha256 $sha) for PROJ-21"
   relay "yes, reply to AAMk+x/y= for everyone" "reply to mail $tmp/body.txt to AAMk+x/y= --reply-all (sha256 $sha)"
   relay "yes, send the PROJ-22 mail" "send mail $tmp/body.txt to --to boss@ex.org --reply-to 19:xyz@thread.v2 (sha256 $sha) for PROJ-22"
   relay "yes, send the PROJ-23 mail" "send mail $tmp/body.txt to --to ann@ex.org --subject UTF-8 fix (sha256 $sha) for PROJ-23"
+  relay "yes, send the PROJ-24 message" "send teams message $tmp/body.txt to 19:fmt@thread.v2 --format text (sha256 $sha) for PROJ-24"
 } > "$w"
 
 run() { # $1 command → allow | deny | pass | blocked (exit 2)
@@ -158,6 +160,9 @@ check "msgraph message send 19:zzz@thread.v2 --body-file $tmp/body.txt --mention
 check "msgraph message send 19:abc@thread.v2 --body-file $tmp/body.txt --mention ann@ex.org && msgraph mail list" deny "teams send with another msgraph call"
 check "$mg message send 19:abc@thread.v2 --body-file $tmp/body.txt --format markdown --mention ann@ex.org" allow "teams send with a relay"
 check "msgraph message send 19:abc@thread.v2 --body-file $tmp/body.txt --mention ann@ex.org" deny "teams send, relay used once already"
+check "msgraph message send 19:fmt@thread.v2 --body-file $tmp/body.txt" deny "teams send, the relay's --format dropped"
+check "msgraph message send 19:fmt@thread.v2 --body-file $tmp/body.txt --format html" deny "teams send, another --format than the relay's"
+check "msgraph message send 19:fmt@thread.v2 --body-file $tmp/body.txt --format=text" allow "teams send with --format, relayed with it as the worker printed it"
 check "msgraph mail send --to ann@ex.org bob@ex.org --cc eve@ex.org --subject 'Weekly report' --body-file $tmp/body.txt" deny "mail send, a cc the relay doesn't name"
 check "msgraph mail send --to ann@ex.org --subject 'Weekly report' --body-file $tmp/body.txt" deny "mail send, a recipient dropped"
 check "msgraph mail send --to ann@ex.org bob@ex.org --subject 'Weekly report' --body-file $tmp/body.txt --attachments /tmp/a.pdf" deny "mail attachments"
