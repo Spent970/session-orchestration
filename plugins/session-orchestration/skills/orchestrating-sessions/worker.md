@@ -144,6 +144,12 @@ The gated commands, edits included, and the action the hook names for each (ask 
 - A review: `post <mode> review FILE on TARGET (sha256 X)`; a bare approval `approve TARGET`.
 - A merge: `merge TARGET`, e.g. `merge OWNER/REPO#ID`. Your task's approval covers landing your own PR: the
   coordinator relays it with the Action ending in your session's name, `merge OWNER/REPO#ID (<session name>)` (within 24h of that approval; later, ask for the merge).
+  Started by a yes given under another key that approved your landing too: `(<session name>, approved under <that
+  key>)`, within 24h of that yes.
+  A project that lands by fast-forwarding the branch its main checkout has out, not by a PR: from your worktree,
+  `session-status --land <branch>`, alone (git refuses a plain `push . HEAD:<branch>` there, and `git -C` into that
+  checkout isn't yours to run). It is gated as `merge <branch>`, relayed as `merge <branch> (<session name>)`; it
+  fast-forwards only, and refuses while that checkout has uncommitted changes.
 - `msgraph message send|update`: `send|update teams message FILE to <chat or message id and every option (`--format`
   too, not `--pretty`), word for word> (sha256 X)`; each `--attachments` file (absolute path) is named with its own `(sha256 Y)`. Mail: `send mail`,
   `reply to mail`, `forward mail` the same way, with no attachments.

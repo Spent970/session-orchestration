@@ -1767,4 +1767,18 @@ out=$(run --stale | grep -v '^session ')   # earlier fixtures' sessions asking: 
 pending "ABC-12": reword: names ask 99, not queued; = ask 7' ] && grep -qxF '  * ask 7 ABC-12: worktree .claude/worktrees/nope gone' <<<"$(run)" &&
   [ "$(run --changes | grep -c '^now:   \* ask 7 ')" = 1 ] && [ "$(run --changes | grep -c 'ask 7')" = 0 ] || { echo "Stale section failed: $out"; exit 1; }
 rm -r "$af" "$root/pend.md" "$root/.claude/coordination.local.json"; run --changes >/dev/null
+# --land: from a linked worktree, fast-forwards the branch the main checkout has out, files included; refuses a
+# dirty checkout and a non-fast-forward.
+lr=$tmp/land; git init -q -b main "$lr" && echo a > "$lr/f" && git -C "$lr" add f && git -C "$lr" -c user.name=t -c user.email=t@t commit -qm a
+git -C "$lr" worktree add -q -b feat "$lr-wt" && echo b >> "$lr-wt/f" && git -C "$lr-wt" -c user.name=t -c user.email=t@t commit -qam b
+(cd "$lr-wt" && "$here/session-status" --land main >/dev/null 2>&1) && [ "$(git -C "$lr" rev-parse main)" = "$(git -C "$lr-wt" rev-parse HEAD)" ] &&
+  [ "$(cat "$lr/f")" = "$(printf 'a\nb')" ] && [ -z "$(git -C "$lr" status --porcelain)" ] || { echo "--land didn't fast-forward main"; exit 1; }
+! (cd "$lr-wt" && "$here/session-status" --land mian 2>/dev/null) && ! git -C "$lr" rev-parse -q --verify mian >/dev/null &&
+  ! (cd "$lr-wt" && "$here/session-status" --land feat 2>/dev/null) || { echo "--land took a missing or its own branch"; exit 1; }
+echo c >> "$lr-wt/f" && git -C "$lr-wt" -c user.name=t -c user.email=t@t commit -qam c && echo x >> "$lr/f"
+! (cd "$lr-wt" && "$here/session-status" --land main >/dev/null 2>&1) && [ "$(git -C "$lr" log -1 --format=%s main)" = b ] ||
+  { echo "--land moved main over a dirty checkout"; exit 1; }
+git -C "$lr" checkout -q f && git -C "$lr" -c user.name=t -c user.email=t@t commit -q --allow-empty -m d
+! (cd "$lr-wt" && "$here/session-status" --land main >/dev/null 2>&1) && [ "$(git -C "$lr" log -1 --format=%s main)" = d ] ||
+  { echo "--land forced a non-fast-forward"; exit 1; }
 echo ok

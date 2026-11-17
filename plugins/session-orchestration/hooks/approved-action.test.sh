@@ -251,6 +251,27 @@ typed "Approval pane answer for claude-plugins-y: Yes, start claude-plugins-y. A
 check "gh pr merge 40 -R acme/app --auto --rebase" allow "merge relayed under this session's approved task"
 check "gh pr merge 41 -R acme/app --auto --rebase" deny "merge relayed under another session's task"
 check "gh pr comment 42 -R acme/app -F $tmp/body.txt" deny "a post isn't the task's landing"
+# A yes under another key (a design task's pane ask) that started this session with its landing: "(<name>, approved
+# under KEY)" verifies the quote with KEY; still only for this session's own name.
+typed "Approval pane answer for design-z: Start stage 1 now as its own PR; landing it is approved with it. Asked: How to go on?" "$now" >> "$proj/$cid.jsonl"
+{ relay "Approval pane answer for design-z: Start stage 1 now as its own PR; landing it is approved with it. Asked: How to go on?" "merge acme/app#43 (claude-plugins-x)"
+  relay "Approval pane answer for design-z: Start stage 1 now as its own PR; landing it is approved with it. Asked: How to go on?" "merge acme/app#44 (claude-plugins-y, approved under design-z)"
+  relay "Approval pane answer for design-z: Start stage 1 now as its own PR; landing it is approved with it. Asked: How to go on?" "merge acme/app#45 (claude-plugins-x, approved under design-q)"
+  relay "Approval pane answer for design-z: Start stage 1 now as its own PR; landing it is approved with it. Asked: How to go on?" "merge acme/app#46 (claude-plugins-x, approved under design-z)"
+} >> "$w"
+check "gh pr merge 43 -R acme/app --auto --rebase" deny "a yes under another key, relayed with this session's name alone"
+check "gh pr merge 44 -R acme/app --auto --rebase" deny "approved under a key, for another session's name"
+check "gh pr merge 45 -R acme/app --auto --rebase" deny "approved under a key the quote doesn't name"
+check "gh pr merge 46 -R acme/app --auto --rebase" allow "merge relayed as approved under the key the yes was given under"
+relay "Approval pane answer for claude-plugins-y: Yes, start claude-plugins-y. Asked: Start claude-plugins-y?" "merge acme/app#47 (claude-plugins-x, approved under claude-plugins-y)" >> "$w"
+check "gh pr merge 47 -R acme/app --auto --rebase" deny "approved under a key whose yes doesn't speak of landing"
+# A landing by fast-forward (session-status --land BRANCH) is gated as a merge of BRANCH, run alone.
+check "grep -n 'session-status --land main' worker.md" pass "a mention of --land"
+check "bash /x/session-status --land main" deny "--land, no relay"
+relay "Approval pane answer for claude-plugins-x: Yes, start claude-plugins-x. Asked: Start claude-plugins-x?" "merge main (claude-plugins-x)" >> "$w"
+check "true && bash /x/session-status --land main" deny "--land in a chain"
+check "/x/session-status --land main" allow "--land relayed as the task's landing"
+check "/x/session-status --land main" deny "--land relay used once already"
 # A Teams attachment goes into the action with its sha256.
 osha=$(shasum -a 256 "$tmp/other.txt" | cut -d' ' -f1)
 typed "yes, send the PROJ-24 message" "$now" >> "$proj/$cid.jsonl"

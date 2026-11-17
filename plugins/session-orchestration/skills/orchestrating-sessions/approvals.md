@@ -120,7 +120,11 @@ user a command).
   send's `--attachments` files are each named with their own sha256 too. A `gh` merge's Action names `OWNER/REPO#ID`;
   the user's approval of the task covers landing its own PR: relay that with the worker's session name in the
   parentheses, `Action: merge OWNER/REPO#ID (<session name>)`, within 24h of that approval (later, ask for the
-  merge itself). A relay whose source session has since stopped still
+  merge itself). When the yes that started the session was given under another key and speaks of its landing (a
+  design task's pane answer "start stage 1 as its own PR; landing it is approved with it"), quote that answer and
+  relay `Action: merge OWNER/REPO#ID (<session name>, approved under <that key>)`: the hook verifies the quote with
+  that key, within 24h of the answer. A project that lands by fast-forward instead: `Action: merge <branch> (<session
+  name>)` for the worker's `session-status --land <branch>`. A relay whose source session has since stopped still
   verifies, by its transcript's send of that quote.
 - Never relay an approval for something that was denied or blocked in your own session.
 - A review-inbox decision isn't relayed: the user's click on the inbox page is their approval to post that row
