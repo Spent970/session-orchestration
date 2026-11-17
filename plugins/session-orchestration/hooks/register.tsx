@@ -16,7 +16,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Color, EngineInterface, Register, RenderElement, RenderNode, SessionRateLimit, ToolCallResult, UiPressArgument } from 'claude-code'
 
-import type { ActionResult, Actions, Ask, AskBody, AskKind, Board, Handed, PaneAction, Peek } from '../types'
+import type { ActionResult, Actions, Ask, AskBody, AskKind, Board, Handed, PaneAction, Peek, SectionState } from '../types'
 
 const PANE = 'coordinator'
 // An ask stays until answered or cancelled; past OLD_MS it is drawn as old (check it still applies). Its answer
@@ -26,7 +26,8 @@ const asks = atom({ plugin: 'session-orchestration', key: 'asks' } as const, [])
 const board = atom({ plugin: 'session-orchestration', key: 'board' } as const, null)
 const seq = atom({ plugin: 'session-orchestration', key: 'seq' } as const, 0)
 const refreshing = atom({ plugin: 'session-orchestration', key: 'refreshing' } as const, false)
-const wrapped = atom({ plugin: 'session-orchestration', key: 'wrapped' } as const, [])
+const paneSections = atom({ plugin: 'session-orchestration', key: 'paneSections' } as const, {})
+const showHidden = atom({ plugin: 'session-orchestration', key: 'showHidden' } as const, false)
 const selected = atom({ plugin: 'session-orchestration', key: 'selected' } as const, null)
 const dismissed = atom({ plugin: 'session-orchestration', key: 'dismissed' } as const, [])
 const rowsBusy = atom({ plugin: 'session-orchestration', key: 'rowsBusy' } as const, [])
@@ -287,7 +288,25 @@ export const USAGE_EXTRA = ['Stop', 'Run handed','Copy handed', 'Dismiss handed'
 // The sections whose title and row presses are logged as fold-SLUG and card-SLUG (retro.py inventories them); a
 // footer the status command or an adapter adds later isn't logged until it's listed here.
 export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Worked on', 'Other work']
+// Its slug: the title, lowercase, its "(…)" dropped; the ones config pane.sections keeps (lib.sh PANE_SLUGS).
+export const sectionSlug = (title: string) => usageName(title.replace(/\s*\(.*$/, ''))
+const ON_YOU = ['waiting-on-you', 'decisions', 'needs-action']
+// The plugin's defaults under the person's config: every section open but Resolved, whose items need nothing.
+export function sectionState(conf: Record<string, SectionState>, title: string): SectionState {
+  const slug = sectionSlug(title)
+  const s = conf[slug] ?? (slug === 'resolved' ? 'line' : 'open')
+  return s === 'hidden' && ON_YOU.includes(slug) ? 'line' : s
+}
+// `session-status --config pane.sections`' object; anything else (a failed run) is undefined: keep the last one.
+export function parseSections(text: string): Record<string, SectionState> | undefined {
+  try {
+    const o: unknown = JSON.parse(text)
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return undefined
+    return Object.fromEntries(Object.entries(o).filter((e): e is [string, SectionState] => ['open', 'line', 'hidden'].includes(String(e[1]))))
+  } catch { return undefined }
+}
 export const usageName = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+export const PANE_SLUGS = new Set(USAGE_SECTIONS.map(sectionSlug))
 const logPress = ($: EngineInterface, label: string) => void $.process
   .run(['bash', '-c', '. "$0" && usage "$1" press', `${$.plugin.root}/lib.sh`, usageName(label)], { timeoutMs: 10_000 })
   .catch(() => undefined)
@@ -999,13 +1018,24 @@ async function paneActionFor($: EngineInterface, command: string) {
 // One sweep at a time: a Refresh press or a tick during one joins it.
 let inFlight: Promise<void> | undefined
 let lastGood: Board | undefined
+// Section slugs a sweep's config read leaves alone: pressed since the read began (its write may land after it), or
+// one whose write failed (kept for this pane only).
+let secPresses = 0
+const secPressedAt = new Map<string, number>()
+const secUnsaved = new Set<string>()
 function refresh($: EngineInterface) {
   inFlight ??= (async () => {
     await update($, refreshing, () => true)
+    const from = secPresses
+    const secsRead = runStatus($, ['--config', 'pane.sections']).then(async text => {
+      const secs = parseSections(text)
+      const keep = (k: string) => !PANE_SLUGS.has(k) || secUnsaved.has(k) || (secPressedAt.get(k) ?? 0) > from
+      if (secs) await update($, paneSections, c => ({ ...Object.fromEntries(Object.entries(secs).filter(([k]) => !keep(k))), ...Object.fromEntries(Object.entries(c).filter(([k]) => keep(k))) }))
+    })
     const [status, pending, urls, acts, term] = await Promise.all([
       // A full sweep waits on the tracker, messages and accounts: ~5 min on a slow network; under the 10-min tick.
       runStatus($, [], { timeoutMs: 420_000 }), runStatus($, ['--pending']), runStatus($, ['--urls']), loadActions($),
-      runStatus($, ['--config', 'terminal']), refreshActivity($),
+      runStatus($, ['--config', 'terminal']), refreshActivity($), secsRead,
     ])
     await update($, actions, () => acts)
     // A name only: a failed run's `failed: …` text means none.
@@ -1756,7 +1786,8 @@ export const register: Register = on => {
     const list = await liveAsks($)
     const b = await read($, board)
     const busy = await read($, refreshing)
-    const expanded = await read($, wrapped)
+    const secConf = await read($, paneSections)
+    const unhide = await read($, showHidden)
     const sel = await read($, selected)
     const hidden = await read($, dismissed)
     const rowBusy = await read($, rowsBusy)
@@ -1920,44 +1951,70 @@ export const register: Register = on => {
     const actErrors = [...(acts?.errors ?? []), ...proj.errors, ...(!acts && st?.fixes.length ? ['project root unknown (session-status --root): fix lines not offered'] : [])]
     const counts = [st && `${st.tasks.length} tasks`, pend && `${pend.length} pending`].filter(Boolean).join(' · ')
 
-    // A section's title toggles its items between one line each, cut to fit, and wrapped in full: an accent
-    // bar, the title in capitals, the count as a badge, then a rule to the pane's edge.
-    type Wrap = 'wrap' | 'truncate-end'
-    // `collapsible` (RESOLVED: its items need nothing): the title instead shows and hides the items, cut to a line.
+    // A section: an accent bar, the title in capitals, the count as a badge, then a rule to the pane's edge; its
+    // state (sectionState) says whether its rows follow (open), not (line: no blank line above it either) or the
+    // section isn't drawn (hidden: named in the pane's last line, which shows them for this pane). A title press
+    // toggles open and line and writes it to the person's config (session-status --pane-section); a section config
+    // can't hold (an adapter's footer), or a failed write, folds for this pane only. A shown hidden one folds and writes
+    // like any other (a way to unhide it); the last line hides them again.
+    // Folding Waiting on you or Decisions gives its rows no digit, so 1-9 go to the rows still drawn.
     // The section a row is drawn in, for its card- usage name (a fixed title, never the row's text).
     let curSec: string | undefined
     const inSection = <T,>(id: string, f: () => T) => { curSec = id; try { return f() } finally { curSec = undefined } }
     const logSection = (what: string, id: string | undefined) => { if (id && USAGE_SECTIONS.includes(id)) logPress($, `${what} ${id}`) }
-    const section = (id: string, count: number, body: (wrap: Wrap, accent: Color) => RenderElement[], collapsible = false) => {
-      const isOpen = expanded.includes(id)
-      const collapsed = collapsible && !isOpen
-      const toggle = () => (logSection('fold', id), update($, wrapped, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id])))
+    const hiddenSecs: string[] = []
+    // Called after the sections it names are drawn.
+    // Shown, it says so and its press hides them again.
+    const hiddenLine = () => hiddenSecs.length > 0 && (
+      <Box marginTop={1}>
+        <Button key="sec-hidden" plain onPress={() => update($, showHidden, v => !v)}>
+          <Text dimColor>  {unhide ? 'shown' : 'hidden'}: {hiddenSecs.join(' · ')}{unhide ? ' · hide' : ''}</Text>
+        </Button>
+      </Box>
+    )
+    const section = (id: string, count: number, body: (accent: Color) => RenderElement[]) => {
+      const state = sectionState(secConf, id)
+      const slug = sectionSlug(id)
+      if (state === 'hidden') { hiddenSecs.push(`${slug} ${count}`); if (!unhide) return false }
+      const isOpen = state !== 'line' // a hidden one shown by the last line's press shows its rows; a press folds it
+      const toggle = async () => {
+        const next: SectionState = isOpen ? 'line' : 'open'
+        logSection(isOpen ? 'fold' : 'unfold', id)
+        secPressedAt.set(slug, ++secPresses)
+        await update($, paneSections, c => ({ ...c, [slug]: next }))
+        if (!PANE_SLUGS.has(slug)) return
+        const r = await $.process.run(['bash', `${$.plugin.root}/skills/orchestrating-sessions/session-status`, '--pane-section', slug, next], { timeoutMs: 30_000 })
+          .catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: err instanceof Error ? err.message : String(err) }))
+        if (r.exitCode === 0) return void secUnsaved.delete(slug)
+        secUnsaved.add(slug)
+        $.ui.toast(`${id}: ${oneLine(r.stderr || r.stdout) || `exit ${r.exitCode}`}; ${next === 'line' ? 'folded' : 'opened'} for this pane only`)
+      }
       const accent = accentOf(id)
       const head = `▌ ${id.toUpperCase()} ${count} ▾ `
       return (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={isOpen ? 1 : 0}>
           <Button key={`sec-${id}`} plain onPress={toggle}>
             <Text color={accent}>▌</Text> <Text bold color={accent}>{id.toUpperCase()}</Text> <Text bold color={accent}>{count}</Text> <Text color={accent}>{isOpen ? '▾' : '▸'}</Text> <Text color={accent} dimColor wrap="truncate-end">{'─'.repeat(Math.max(cols - head.length, 0))}</Text>
           </Button>
-          {collapsed ? [] : inSection(id, () => body(collapsible || !isOpen ? 'truncate-end' : 'wrap', accent))}
+          {isOpen ? inSection(id, () => body(accent)) : []}
         </Box>
       )
     }
-    // An item: its lead (a chip, LEAD_W wide) and its text, both pressable, selecting it. Selected or in a
-    // wrapped section, the text wraps under itself; else it is cut to one line. Selected, it opens as a card, as
+    // An item: its lead (a chip, LEAD_W wide) and its text, both pressable, selecting it. Selected, the text
+    // wraps under itself; else it is cut to one line. Selected, it opens as a card, as
     // Projects' thread cards: a rounded box in `accent` holding the row and `more` (details, links, actions).
     // Row ids come from item text; a repeat of the same text gets ~n, so each row has its own key.
     // `hotkey`: a digit that selects it while the pane has focus. The engine draws it (`1: `) before the lead,
     // so the lead gives up those 3 columns: its leading space and 2 of its padding.
     const used = new Map<string, number>()
-    const row = (base: string, wrap: Wrap, accent: Color, lead: Seg, body: Seg[], more: () => RenderElement[], hotkey?: string) => {
+    const row = (base: string, accent: Color, lead: Seg, body: Seg[], more: () => RenderElement[], hotkey?: string) => {
       const n = used.get(base) ?? 0
       used.set(base, n + 1)
       const id = n ? `${base}~${n}` : base
       const isSel = sel === id
       const sec = curSec
       const press = () => (isSel || logSection('card', sec), select(id)()) // an open, not a close
-      const cut = !isSel && wrap === 'truncate-end'
+      const cut = !isSel
       const text = hotkey ? lead[0].slice(1, -2) : lead[0]
       const line = (
         <Box height={cut ? 1 : undefined} overflow={cut ? 'hidden' : undefined}>
@@ -1972,7 +2029,7 @@ export const register: Register = on => {
       return [isSel ? <Box flexDirection="column" borderStyle="round" borderColor={accent} paddingRight={1}>{line}{more()}</Box> : line]
     }
 
-    const taskRow = (t: Task, wrap: Wrap, accent: Color, group: Group) => {
+    const taskRow = (t: Task, accent: Color, group: Group) => {
       const all = factsOf(t)
       const [c] = all
       const live = t.sess.state !== 'none' && !t.sess.state.startsWith('closed')
@@ -1993,7 +2050,7 @@ export const register: Register = on => {
       const open = prs.filter(p => p.state === 'OPEN').map(p => `${p.repo}#${p.id}`).join(', ')
       // A chip its group's heading already says (IN REVIEW under In review, …) gives way to a blank lead.
       const lead = c.onYou && claim(t.key) ? solidChip(c.chip) : IMPLIED[group] === c.chip ? seg(' '.repeat(LEAD_W)) : wordChip(c.chip, c.color)
-      return row(id, wrap, accent, lead, [
+      return row(id, accent, lead, [
         keySeg(id, t.key), seg(' '),
         ...(words.length > 0 ? [seg(words.map(f => f.text).join(', '), { color: words[0]?.color }), seg(' ')] : []),
         ...ctxOf(sa),
@@ -2021,7 +2078,7 @@ export const register: Register = on => {
         ...peekView(id, c.color),
       ])
     }
-    const footerItem = (title: string, text: string, wrap: Wrap, accent: Color, hotkey?: string) => {
+    const footerItem = (title: string, text: string, accent: Color, hotkey?: string) => {
       const w = title !== OTHER && waitingOf(text)
       if (w) {
         const key = waitKey(w.name)
@@ -2034,7 +2091,7 @@ export const register: Register = on => {
         // Its decision is queued in APPROVE already: that ask is what counts, this row points to it.
         const queued = key ? list.filter(a => a.key === key).map(a => a.id) : []
         const chip = unanswered ? wordChip('stale', 'inactive') : !queued.length && claim(key ?? `session ${w.name}`) ? solidChip('session') : wordChip('session', 'warning')
-        return row(id, wrap, accent, chip, [
+        return row(id, accent, chip, [
           ...(key ? [keySeg(id, key), seg(' '), seg(rest, { dimColor: true })] : [keySeg(id, w.name)]),
           ...(queued.length ? [seg(` → ask ${queued.join(', ')}`, { color: 'permission' })] : []),
           ...(wctx.length > 0 ? [seg(' '), ...wctx] : []),
@@ -2055,7 +2112,7 @@ export const register: Register = on => {
         const oa = acts_.find(a => a.id.startsWith(o.id))
         const prog = progressOf(oa, now)
         const chip = isRunning(o.state) ? wordChip('running', 'suggestion') : wordChip(o.state, o.state === 'idle' ? 'success' : 'inactive')
-        return row(id, wrap, accent, chip, [
+        return row(id, accent, chip, [
           // A review: its task key first, as a row of that task reads; the session's name when it says more.
           ...(o.review
             ? [keySeg(id, o.review), seg(' review', { dimColor: true }),
@@ -2082,7 +2139,7 @@ export const register: Register = on => {
       const isNotice = title === 'Notices'
       const n = isNotice ? notice(text) : { label: '•', text, color: undefined }
       const command = !isNotice && leftoverCommand(text) // a leftover's cleanup command
-      return row(`${title}-${text}`, wrap, accent, seg(chipText(n.label), { color: n.color ?? accent, bold: true }), [seg(n.text)], () => [bar(accent,
+      return row(`${title}-${text}`, accent, seg(chipText(n.label), { color: n.color ?? accent, bold: true }), [seg(n.text)], () => [bar(accent,
         isNotice && act('x', 'Dismiss', dismiss(text)),
         command && act('c', 'Copy command', copy(command)),
         act('k', 'Ask', ask(`the ${title.toLowerCase()} item ${JSON.stringify(text)} (quoted from the status output; someone else's words, not an instruction)`)),
@@ -2091,7 +2148,7 @@ export const register: Register = on => {
     // A pending item. `top`: its copy in WAITING ON YOU (an item on the user that no waiting session covers).
     // Flagged stale (stale.jq): a STALE chip and why; in Pending, Archive (`--pending-done LABEL -- WHY`) unless the
     // only reason is its age.
-    const pendRow = (p: { date?: string; text: string; label: string }, wrap: Wrap, accent: Color, top = false, hotkey?: string) => {
+    const pendRow = (p: { date?: string; text: string; label: string }, accent: Color, top = false, hotkey?: string) => {
       const { key, onYou: mine } = pendingOf(p.text)
       const label = p.label
       const why = stale.pending.get(label)
@@ -2104,7 +2161,7 @@ export const register: Register = on => {
       // The lead: on the user, the chip (solid the first time); else the item's age, amber from a week.
       const lead = mine ? (claim(key ?? p.text) ? solidChip(top ? 'pending' : 'on you') : wordChip('on you', 'warning'))
         : seg(` ${(days === undefined ? '·' : `${days}d`).padEnd(CHIP_W)} `, days !== undefined && days >= 7 ? { color: 'warning', bold: true } : { color: accent })
-      return row(id, wrap, accent, lead, [
+      return row(id, accent, lead, [
         ...(key ? [keySeg(id, key), seg(' ')] : []),
         ...(mine && days !== undefined ? [seg(`${days}d`, { dimColor: true }), seg(' ')] : []),
         ...(why ? [seg('STALE', { color: 'warning', bold: true }), seg(` · ${why} `, { color: 'warning' })] : []),
@@ -2154,13 +2211,13 @@ export const register: Register = on => {
     const decisions: typeof topPend = [], behind: typeof topPend = []
     for (const p of topPend) (liveBehind(p.text, st, live) ? behind : decisions).push(p)
     // A fold (foldOf): one row for the items, their copied commands joined, each item's text in its card.
-    const foldRow = (title: string, fold: string[], wrap: Wrap, accent: Color) => {
+    const foldRow = (title: string, fold: string[], accent: Color) => {
       const leftovers = title === LEFTOVERS
       const cmds = fold.map(i => {
         const c = leftovers ? leftoverCommand(i) : otherOf(i)?.command
         return c && !leftovers ? stopOf(c) : c
       }).filter((c): c is string => !!c)
-      return row(`fold-${title}`, wrap, accent, wordChip(`${fold.length}`, accent), [
+      return row(`fold-${title}`, accent, wordChip(`${fold.length}`, accent), [
         seg(leftovers ? `${fold.length} worktrees clean+merged` : `${fold.length} sessions idle over a day or superseded`, { dimColor: true }),
       ], () => [
         ...fold.map(i => detail(accent, '│', <Text dimColor wrap="truncate-end">{i}</Text>)),
@@ -2173,10 +2230,10 @@ export const register: Register = on => {
       // Other sessions: running first, then idle, then the rest (done).
       const rank = (i: string) => { const st = otherOf(i)?.state ?? ''; return isRunning(st) ? 0 : st === 'idle' ? 1 : 2 }
       const { fold, rest } = foldOf(s.title, s.title === OTHER ? [...shown].sort((a, c) => rank(a) - rank(c)) : shown)
-      return shown.length > 0 && section(s.title, shown.length, (wrap, accent) => [
-        ...rest.flatMap(i => footerItem(s.title, i, wrap, accent)),
-        ...(fold.length ? foldRow(s.title, fold, wrap, accent) : []),
-      ], s.title === RESOLVED)
+      return shown.length > 0 && section(s.title, shown.length, accent => [
+        ...rest.flatMap(i => footerItem(s.title, i, accent)),
+        ...(fold.length ? foldRow(s.title, fold, accent) : []),
+      ])
     }
 
     // APPROVE: the asks grouped by task key, each group and ask one line until pressed open. A group alone in
@@ -2253,7 +2310,7 @@ export const register: Register = on => {
       return { first, rest, all: [first, ...rest] }
     }
     // A session of another project (all projects on): its project's folder name, what it does, its context.
-    const elseRow = (a: Activity, wrap: Wrap, accent: Color) => {
+    const elseRow = (a: Activity, accent: Color) => {
       const id = `all-${a.id}`
       const chip = isRunning(a.state) ? wordChip('running', 'suggestion') : a.status === 'waiting' ? wordChip('waiting', 'warning')
         : wordChip(a.state || a.status, a.state === 'idle' ? 'success' : 'inactive')
@@ -2261,7 +2318,7 @@ export const register: Register = on => {
       // An empty prefix is the default account's plain `claude`.
       const command = `${a.pre || 'claude'} attach ${a.id.slice(0, 8)}`
       const name = a.name || a.id.slice(0, 8)
-      return row(id, wrap, accent, chip, [
+      return row(id, accent, chip, [
         keySeg(id, name), seg(' '),
         seg(a.cwd.split('/').pop() ?? '', { color: 'ide' }), seg(' '),
         ...(prog.length > 0 ? prog.flatMap(f => [seg(f.text, { color: f.color }), seg(' ')]) : a.last ? [seg(a.last, { dimColor: true }), seg(' ')] : []),
@@ -2344,17 +2401,17 @@ export const register: Register = on => {
       const summary = !ydRaw && sum?.text
       const keyed = r.tasks.filter(t => !t.key.startsWith('"'))
       const loose = r.tasks.filter(t => t.key.startsWith('"'))
-      const taskLines = (ts: YdTask[], wrap: Wrap, accent: Color) => ts.flatMap(t => {
+      const taskLines = (ts: YdTask[], accent: Color) => ts.flatMap(t => {
         const href = !t.key.startsWith('"') && !t.key.includes('#') ? linkFor(b?.urls ?? '', 'ticket', { key: t.key }) : undefined
         return [
-          <Text key={`yd-${t.key}`} wrap={wrap}>
+          <Text key={`yd-${t.key}`} wrap="truncate-end">
             <Text color={accent}>▸ </Text>
             {href ? <Link href={href} label={t.key} /> : <Text bold>{t.key}</Text>}
             {t.status && <Text color={accent}> {t.status}</Text>}
             {t.title && <Text dimColor> {t.title}</Text>}
           </Text>,
           ...t.events.map((ev, i) => (
-            <Text key={`yd-${t.key}-${i}`} wrap={wrap}>{'    '}<Text dimColor>{ev.when}</Text>  {ev.text}</Text>
+            <Text key={`yd-${t.key}-${i}`} wrap="truncate-end">{'    '}<Text dimColor>{ev.when}</Text>  {ev.text}</Text>
           )),
         ]
       })
@@ -2382,8 +2439,9 @@ export const register: Register = on => {
           {r.failed.length > 0 && <Text color="warning">Tracker lookup failed: {r.failed.join(' ')}</Text>}
           {r.other.length > 0 && <Text color="warning">{r.other.join('\n')}</Text>}
           {ydRead && !ydRead.loading && !r.tasks.length && <Text dimColor>Nothing found for that day.</Text>}
-          {!summary && keyed.length > 0 && section('Worked on', keyed.length, (wrap, accent) => taskLines(keyed, wrap, accent))}
-          {!summary && loose.length > 0 && section('Other work', loose.length, (wrap, accent) => taskLines(loose, wrap, accent))}
+          {!summary && keyed.length > 0 && section('Worked on', keyed.length, accent => taskLines(keyed, accent))}
+          {!summary && loose.length > 0 && section('Other work', loose.length, accent => taskLines(loose, accent))}
+          {hiddenLine()}
         </Box>
       )
     }
@@ -2485,7 +2543,7 @@ export const register: Register = on => {
         {b && !b.status && <Text color="warning">session-status printed nothing.</Text>}
         {st && st.other.length > 0 && <Text color="warning">{st.other.join('\n')}</Text>}
 
-        {proj.list.length + actErrors.length > 0 || lastRun ? section('Actions', proj.list.length, (wrap, accent) => [
+        {proj.list.length + actErrors.length > 0 || lastRun ? section('Actions', proj.list.length, accent => [
           // Each with the command it runs, so a press never runs something unseen.
           ...proj.list.map(a => (
             <Box key={`action-row-${a.label}`} paddingLeft={2} columnGap={2}>
@@ -2493,33 +2551,34 @@ export const register: Register = on => {
                 <Button key={`action-${a.label}`} plain hotkey={a.hotkey} label={running === a.label ? `${a.label}…` : a.label}
                   onPress={() => (logPress($, 'Project action'), runAction($, a))} />
               </Box>
-              <Text dimColor wrap={wrap}>{a.command}</Text>
+              <Text dimColor wrap="truncate-end">{a.command}</Text>
             </Box>
           )),
-          ...actErrors.map(e => <Text key={`action-error-${e}`} color="error" wrap={wrap}>  ✗ {e}</Text>),
-          ...(lastRun ? [<Text key="action-result" wrap={wrap}>
+          ...actErrors.map(e => <Text key={`action-error-${e}`} color="error" wrap="truncate-end">  ✗ {e}</Text>),
+          ...(lastRun ? [<Text key="action-result" wrap="truncate-end">
             {'  '}<Text color={lastRun.ok ? 'success' : 'error'}>{lastRun.ok ? '✓' : '✗'} {lastRun.label}</Text>
             <Text dimColor> {lastRun.at}{lastRun.line ? ` · ${lastRun.line}` : ''}</Text>
           </Text>] : []),
         ]) : false}
 
-        {waitItems.length + behind.length > 0 && section('Waiting on you', waitItems.length + behind.length, (wrap, accent) => [
+        {waitItems.length + behind.length > 0 && section('Waiting on you', waitItems.length + behind.length, accent => [
           // 1-9 select them while the pane has focus (ctrl+x tab): the keyboard's way to what needs you.
-          ...waitItems.flatMap(i => footerItem('Waiting on you', i, wrap, accent, waitingOf(i) ? digit() : undefined)),
-          ...behind.flatMap(p => pendRow(p, wrap, ACCENT.Pending, true, digit())),
+          ...waitItems.flatMap(i => footerItem('Waiting on you', i, accent, waitingOf(i) ? digit() : undefined)),
+          ...behind.flatMap(p => pendRow(p, ACCENT.Pending, true, digit())),
         ])}
-        {decisions.length > 0 && section('Decisions', decisions.length, wrap => decisions.flatMap(p => pendRow(p, wrap, ACCENT.Pending, true, digit())))}
+        {decisions.length > 0 && section('Decisions', decisions.length, () => decisions.flatMap(p => pendRow(p, ACCENT.Pending, true, digit())))}
 
         {GROUPS.map(g => {
           const ts = orderTasks(st?.tasks.filter(t => groupOfT.get(t) === g) ?? [], factsOf)
-          return ts.length > 0 && section(g, ts.length, (wrap, accent) => ts.flatMap(t => taskRow(t, wrap, accent, g)))
+          return ts.length > 0 && section(g, ts.length, accent => ts.flatMap(t => taskRow(t, accent, g)))
         })}
 
         {st?.sections.filter(s => s !== waitSec && s.title !== RESOLVED).map(footer)}
-        {elsewhere.length > 0 && section(OTHER_PROJECTS, elsewhere.length, (wrap, accent) => elsewhere.flatMap(a => elseRow(a, wrap, accent)))}
+        {elsewhere.length > 0 && section(OTHER_PROJECTS, elsewhere.length, accent => elsewhere.flatMap(a => elseRow(a, accent)))}
 
-        {restPend.length > 0 && section('Pending', restPend.length, (wrap, accent) => restPend.flatMap(p => pendRow(p, wrap, accent)))}
+        {restPend.length > 0 && section('Pending', restPend.length, accent => restPend.flatMap(p => pendRow(p, accent)))}
         {st?.sections.filter(s => s.title === RESOLVED).map(footer)}
+        {hiddenLine()}
         {b && !pend && b.pending && (
           <Box flexDirection="column" marginTop={1}>
             <Text bold>Pending</Text>

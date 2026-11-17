@@ -29,18 +29,24 @@ export type Handed = {
   running?: true; outcome?: string
 }
 
+// A pane section's state (config pane.sections): open, its rows; line, its title alone; hidden, named in the pane's
+// last line.
+export type SectionState = 'open' | 'line' | 'hidden'
+
 // A card's Peek or Diff view: the row it shows under (its base id), which, and session-status's text
 // (--peek or --diff); loading while that runs; patch: the Diff shows the patch, not only the stat.
 export type Peek = { row: string; kind: 'peek' | 'diff'; text: string; loading?: true; patch?: true }
 
-// refreshing: a sweep is running; wrapped: the pane sections shown in full rather than one line per item;
+// refreshing: a sweep is running;
 // selected: the item whose actions show; dismissed: notices hidden for this session; rowsBusy: task keys
 // whose row is being refreshed; actions, actionResult, actionBusy: project actions, the last run's outcome, the
 // label of the one running.
 declare module 'claude-code' {
   interface PluginState {
     'session-orchestration': {
-      asks: Ask[]; board: Board | null; seq: number; refreshing: boolean; wrapped: string[]
+      asks: Ask[]; board: Board | null; seq: number; refreshing: boolean
+      // config pane.sections (slug → state), read each sweep and set by a title press; the hidden sections shown.
+      paneSections: Record<string, SectionState>; showHidden: boolean
       selected: string | null; dismissed: string[]; rowsBusy: string[]
       actions: Actions | null; actionResult: ActionResult | null; actionBusy: string | null
       // session-status --activity's text: what each live session is doing (refreshed every minute).

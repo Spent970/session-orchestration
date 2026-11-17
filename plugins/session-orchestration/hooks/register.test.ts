@@ -1,7 +1,7 @@
 import type { On, ToolCallResult } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf } from './register'
+import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf, sectionSlug, sectionState, parseSections } from './register'
 
 test('status rows parse whatever the columns hold', async () => {
   const pad = (k: string, st: string) => `${k.padEnd(9)} ${st.padEnd(14)} `
@@ -253,19 +253,19 @@ const AGENTS = '61c8fb76-aaaa\tpr review proj-4679\tblocked\tCLAUDE_CONFIG_DIR=~
 const ROW_4679 = 'PROJ-4679  In Development app#236 OPEN +Ann  | no-wt | sess:"pr review proj-4679" idle | Decisive automap'
 const LEFTOVER = '\nLeftovers (task finished):\n  PROJ-4177 Done — session "old": claude stop 18a61163'
 
-function sweep(on: On, status = STATUS) {
+function sweep(on: On, status = STATUS, sections = '{}') {
   const runs: string[][] = []
   on('process.run', async (_, e) => {
     runs.push(e.argv.slice(2))
     const arg = e.argv[2]
-    const stdout = arg === '--dismiss' ? '' : arg === '--stop' ? `stopped "probe" (${e.argv[3]})` : arg === '--pending' ? PENDING : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : arg === 'PROJ-4679' ? ROW_4679 : status
+    const stdout = arg === '--dismiss' ? '' : arg === '--stop' ? `stopped "probe" (${e.argv[3]})` : arg === '--pending' ? PENDING : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : arg === 'PROJ-4679' ? ROW_4679 : e.argv[3] === 'pane.sections' ? sections : status
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.open', async () => ({ value: { isPlaced: true } }))
   return runs
 }
 
-test('rows say what they wait on in plain words; a section title toggles wrapping', async ($, on) => {
+test('rows say what they wait on in plain words; a section title folds it', async ($, on) => {
   mock.clock(on)
   sweep(on, `${STATUS}\nPROJ-5131  Code Review    app#269 MERGED   | no-wt | sess:— | Tighten docs${LEFTOVER}`)
   await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
@@ -287,8 +287,54 @@ test('rows say what they wait on in plain words; a section title toggles wrappin
   expect((await row('pend-PROJ-4679 (#236): waiting on a prod release.'))[1]).toBe('PROJ-4679 (#236): waiting on a prod release.')
   expect(await ui.find({ type: 'Text', text: /carried/ })).toBeUndefined()
   await ui.press({ key: 'sec-Pending' })
-  expect(await ui.find({ type: 'Text', text: /▾/ })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'sec-Pending' }))?.text).toMatch(/PENDING 2 ▸/)
+  expect(await ui.find({ type: 'Button', key: 'pend-PROJ-4842 all done.' })).toBeUndefined()
   await ui.unmount()
+})
+
+test('pane.sections: a section open, one line or hidden; a title press writes it; the hidden line shows the rest', async ($, on) => {
+  mock.clock(on)
+  const runs = sweep(on, STATUS, '{"pending":"hidden","notices":"line","waiting-on-you":"hidden"}')
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  await ui.press({ key: 'refresh' })
+  const notice = 'Notices-mail      Accountant: pay the levy'
+  // line: the title alone
+  expect((await ui.find({ type: 'Button', key: 'sec-Notices' }))?.text).toMatch(/NOTICES 1 ▸/)
+  expect(await ui.find({ type: 'Button', key: notice })).toBeUndefined()
+  // what needs the user is never hidden: one line
+  expect((await ui.find({ type: 'Button', key: 'sec-Waiting on you' }))?.text).toMatch(/WAITING ON YOU 1 ▸/)
+  // open (the default)
+  expect((await ui.find({ type: 'Button', key: 'sec-In review' }))?.text).toMatch(/IN REVIEW \d+ ▾/)
+  // hidden: named in the last line, which shows it
+  expect(await ui.find({ type: 'Button', key: 'sec-Pending' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'sec-hidden' }))?.text).toMatch(/hidden: pending 2/)
+  await ui.press({ key: 'sec-hidden' })
+  expect((await ui.find({ type: 'Button', key: 'sec-hidden' }))?.text).toMatch(/shown: pending 2 · hide/)
+  expect(await ui.find({ type: 'Button', key: 'pend-PROJ-4842 all done.' })).toBeDefined()
+  // the last line hides them again
+  await ui.press({ key: 'sec-hidden' })
+  expect(await ui.find({ type: 'Button', key: 'sec-Pending' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'sec-hidden' }))?.text).toMatch(/hidden: pending 2/)
+  // a title press opens it and writes it to the person's config
+  await ui.press({ key: 'sec-Notices' })
+  expect(await ui.find({ type: 'Button', key: notice })).toBeDefined()
+  await ui.press({ key: 'sec-In review' })
+  expect((await ui.find({ type: 'Button', key: 'sec-In review' }))?.text).toMatch(/IN REVIEW \d+ ▸/)
+  expect(runs.filter(r => r[0] === '--pane-section')).toEqual([['--pane-section', 'notices', 'open'], ['--pane-section', 'in-review', 'line']])
+  await ui.unmount()
+})
+
+test('section states: slugs, the plugin defaults and what a config run gives', () => {
+  expect([RESOLVED, LEFTOVERS, OTHER, 'Waiting on you'].map(sectionSlug)).toEqual(['resolved', 'leftovers', 'other-sessions', 'waiting-on-you'])
+  expect(sectionState({}, 'Idle')).toBe('open')
+  expect(sectionState({}, RESOLVED)).toBe('line')
+  expect(sectionState({ resolved: 'open', decisions: 'hidden', idle: 'hidden' }, RESOLVED)).toBe('open')
+  expect(sectionState({ decisions: 'hidden' }, 'Decisions')).toBe('line')
+  expect(sectionState({ idle: 'hidden' }, 'Idle')).toBe('hidden')
+  expect(parseSections('{"idle":"line","x":"wide"}')).toEqual({ idle: 'line' })
+  expect(parseSections('failed: timeout')).toBeUndefined()
+  expect(parseSections('[]')).toBeUndefined()
 })
 
 test('Pending leaves out the on-you entries shown above; each title or row press logs one usage line', async ($, on) => {
@@ -312,10 +358,11 @@ test('Pending leaves out the on-you entries shown above; each title or row press
   expect(await ui.find({ type: 'Button', key: `on-${on9001}` })).toBeDefined() // DECISIONS
   expect(await ui.find({ type: 'Button', key: `pend-${on9001}` })).toBeUndefined() // not again in PENDING
   expect(await ui.find({ type: 'Button', key: 'pend-PROJ-4842 all done.' })).toBeDefined()
-  await ui.press({ key: 'sec-Pending' })
   await ui.press({ key: 'pend-PROJ-4842 all done.' })
+  await ui.press({ key: 'sec-Pending' })
+  await ui.press({ key: 'sec-Pending' })
   await ui.unmount()
-  expect(used).toEqual(['refresh', 'fold-pending', 'card-pending'])
+  expect(used).toEqual(['refresh', 'card-pending', 'fold-pending', 'unfold-pending'])
 })
 
 test('a selected task shows its details and actions: attach, links, refresh, ask', async ($, on) => {
@@ -958,7 +1005,7 @@ test('a failed /reload-plugins says so and names the command to run', async ($, 
 })
 
 test('usage names: fixed words lib.sh usage accepts', () => {
-  const names = [...Object.values(BUILTIN_KEYS), ...USAGE_EXTRA, ...USAGE_SECTIONS.flatMap(s => [`fold ${s}`, `card ${s}`])].map(usageName)
+  const names = [...Object.values(BUILTIN_KEYS), ...USAGE_EXTRA, ...USAGE_SECTIONS.flatMap(s => [`fold ${s}`, `unfold ${s}`, `card ${s}`])].map(usageName)
   expect([...GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, OTHER, LEFTOVERS].filter(s => !USAGE_SECTIONS.includes(s))).toEqual([])
   expect(usageName('Attach in tab')).toBe('attach-in-tab')
   expect(names.every(n => /^[a-z0-9-]{1,40}$/.test(n))).toBe(true)
