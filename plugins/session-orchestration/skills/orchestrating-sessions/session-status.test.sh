@@ -82,6 +82,15 @@ chmod +x "$tmp/bin/claude"; : > "$tmp/calls"; }
 
 if section board; then
 [ "$(run --coordinator)" = coord ] && [ -z "$(CLAUDE_CODE_SESSION_ID=$cid run --coordinator)" ] || { echo "--coordinator failed"; exit 1; }
+# A ready successor (coord-next, handover/coord.ready) goes before the old one still holding the name, though older.
+nid=77777777-2222-3333-4444-555555555555; mkdir -p "$tmp/bin3"
+echo '{"type":"assistant","input":{"command":"session-status --changes"}}' > "$proj/$nid.jsonl"; touch -t "$(date -d "-1 hours" +%Y%m%d%H%M 2>/dev/null || date -v-1H +%Y%m%d%H%M)" "$proj/$nid.jsonl"
+printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"status\":\"idle\"},{\"sessionId\":\"$nid\",\"name\":\"coord-next\",\"cwd\":\"$root\",\"status\":\"idle\"}]'" > "$tmp/bin3/claude"; chmod +x "$tmp/bin3/claude"
+run3() { (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin3:$PATH "$here/session-status" "$@"); }
+[ "$(run3 --coordinator | paste -sd' ' -)" = 'coord coord-next' ] || { echo "--coordinator, successor not ready: $(run3 --coordinator)"; exit 1; }
+mkdir -p "$tmp/.cache/session-status/handover"; : > "$tmp/.cache/session-status/handover/coord.ready"
+[ "$(run3 --coordinator | paste -sd' ' -)" = 'coord-next coord' ] || { echo "--coordinator, successor ready: $(run3 --coordinator)"; exit 1; }
+rm -f "$proj/$nid.jsonl" "$tmp/.cache/session-status/handover/coord.ready"
 # --coordinator-of: a subproject with its own config has its own coordinator; a plain subfolder is this one's.
 mkdir -p "$root/sub/.claude" "$root/plain" "$tmp/bin2"; echo '{}' > "$root/sub/.claude/coordination.local.json"
 printf '#!/bin/sh\necho "${AGENTS_JSON:-[]}"\n' > "$tmp/bin2/claude"; chmod +x "$tmp/bin2/claude"
