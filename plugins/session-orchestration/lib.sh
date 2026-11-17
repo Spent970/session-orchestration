@@ -71,7 +71,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start, .retro$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start, .retro, .pane$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -242,6 +242,12 @@ detect_host() {
 #   feedback.project_dir  this project's feedback cases (feedback --project; ~ expanded, relative: to the project
 #                       root; keep it out of git)     default empty: the state dir's feedback-projects/<root>
 #   telemetry           local | off: pane presses to the local usage log (usage below)     default off
+#   pane.sections       JSON object, a pane section's slug (PANE_SLUGS) to open | line | hidden: how the coordinator
+#                       pane draws it (open: its rows; line: its title alone; hidden: only named in the pane's last
+#                       line). Read from this project's .claude/coordination.local.json only, never a committed or
+#                       the person-wide file; a title press writes it (session-status --pane-section). Bad entries are
+#                       dropped with a warning; hidden reads as line for the on-you sections (PANE_ON_YOU).
+#                       default {}: every section open, resolved one line
 #   pending.file        the coordinator's handoff file, *.md, relative to the project root, ~ or absolute (pending_path): its entries' history
 #                       and archive (skills/orchestrating-sessions/pending)              default empty (none)
 #   history.dirs        JSON list of folders (relative to the root, ~ or absolute) the Stop hook keeps a local git
@@ -336,7 +342,8 @@ config() {
     features.retro|retro.scope|retro.schedule|retro.account|retro.sections) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator|plan.models.retro|plan.models.research) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    pane.sections) pane_sections; return 0 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window pane.sections)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
@@ -389,6 +396,45 @@ config() {
     handoff.at.chunk) echo 125000 ;; handoff.at.task) echo 145000 ;; handoff.at.coordinator) echo 145000 ;;
     handoff.hard_after) echo 25000 ;; handoff.stop_room) echo 15000 ;; compact.window) echo 220000 ;;
   esac
+}
+
+# The coordinator pane's section slugs (hooks/register.tsx sectionSlug: a title, lowercase, its "(…)" dropped), and
+# the on-you ones, which are never hidden.
+PANE_SLUGS=" waiting-on-you decisions needs-action in-review working landing idle other-sessions leftovers notices stale-prompts stale other-projects pending resolved actions worked-on other-work "
+PANE_ON_YOU=" waiting-on-you decisions needs-action "
+# pane_sections: config pane.sections, from the project's person file only (a per-project, per-person key), as one
+# JSON object of its valid entries.
+pane_sections() {
+  local f j k v out='{}'
+  f=$(person_file 2>/dev/null) && [ -f "$f" ] && j=$(jq -c '.pane.sections // {}' "$f" 2>/dev/null) || j='{}'
+  [ "$(jq -r type <<<"$j")" = object ] || { echo "warning: config pane.sections=$j is not a JSON object: using the default" >&2; j='{}'; }
+  while IFS=$'\t' read -r k v; do
+    [[ $PANE_SLUGS == *" $k "* ]] || { echo "warning: config pane.sections: no section $k (one of$PANE_SLUGS): ignored" >&2; continue; }
+    case $v in open|line) ;; hidden) [[ $PANE_ON_YOU != *" $k "* ]] ||
+      { echo "warning: config pane.sections.$k=hidden: what needs you is never hidden: line" >&2; v=line; } ;;
+      *) echo "warning: config pane.sections.$k=$v is not open, line or hidden: ignored" >&2; continue ;; esac
+    out=$(jq -c --arg k "$k" --arg v "$v" '.[$k] = $v' <<<"$out")
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value | tostring)"' <<<"$j")
+  echo "$out"
+}
+# pane_section_set SLUG STATE: pane.sections.SLUG = STATE in the project's person file (.claude/coordination.local.json
+# at the root, made when missing), never a committed one. Two quick presses are two runs: a flock(2) on the file (as
+# session-status's inbox_lock; held on fd 9 until the run exits) keeps one from losing the other's write, and the write
+# goes through the file itself, so its mode and a symlink stay.
+pane_section_set() {
+  local f out
+  [[ $PANE_SLUGS == *" ${1:-} "* ]] && [[ ${2:-} =~ ^(open|line|hidden)$ ]] ||
+    { echo "usage: session-status --pane-section SLUG open|line|hidden (SLUG one of$PANE_SLUGS)" >&2; return 2; }
+  [ "$2" != hidden ] || [[ $PANE_ON_YOU != *" $1 "* ]] || { echo "pane-section: $1 needs you: open or line only" >&2; return 2; }
+  f=$(coord_file coordination.local.json) || f=$(find_root)/.claude/coordination.local.json
+  ! tracked "$f" 2>/dev/null || { echo "pane-section: $f is committed: not written" >&2; return 1; }
+  mkdir -p "${f%/*}" && exec 9>>"$f" || return 1
+  perl -MFcntl=:flock -e 'alarm 10; open(my $l, ">>&=", 9) or exit 1; flock($l, LOCK_EX) or exit 1' ||
+    echo "pane-section: couldn't lock $f; going on unlocked" >&2
+  [ -s "$f" ] || echo '{}' > "$f" || return 1
+  out=$(jq --arg k "$1" --arg v "$2" 'if type == "object" then .pane.sections[$k] = $v else error("not a JSON object") end' "$f") ||
+    { echo "pane-section: $f isn't a JSON object: not written" >&2; return 1; }
+  printf '%s\n' "$out" > "$f"
 }
 
 # usage NAME [KIND [MODEL EFFORT EST [ACT]]]: with telemetry=local, one line in the local usage log:

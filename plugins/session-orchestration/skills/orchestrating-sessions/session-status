@@ -141,6 +141,8 @@
 #        session-status --init [--check | --write …]   set this folder up for coordination: the setting-up-coordination
 #                       skill's session-init documents the modes; runs in the cwd, not the root
 #        session-status --config KEY   a config value (lib.sh at the plugin root lists the keys), e.g. approvals.delegate
+#        session-status --pane-section SLUG open|line|hidden   how the coordinator pane draws a section (config
+#                       pane.sections), written to the project's .claude/coordination.local.json; a title press runs it
 #        session-status --kind KIND[:S|M|L] [NAME]   `--model M --effort E` from plan.models.KIND for a task start (a
 #                       size moves the effort a step), logged as a usage start line (NAME, the -n session name, hashed)
 #        session-status --plan FILE [--check | --next | --brief N | --done N]   a design's plan table: waves and chunk
@@ -160,6 +162,7 @@ set -uo pipefail
 [ "${1:-}" = --init ] && { shift; exec bash "$(dirname "$0")/../setting-up-coordination/session-init" "$@"; }
 . "$(dirname "$0")/../../lib.sh" || exit 1
 [ "${1:-}" = --config ] && { config "${2:-}"; exit; }
+[ "${1:-}" = --pane-section ] && { [ $# = 3 ] || set -- "$1" "" ""; pane_section_set "$2" "$3"; exit; }
 # --kind KIND [NAME]: `--model M --effort E` from plan.models.KIND for a plain task start's `claude --bg` line, logged as
 # a usage start line (lib.sh usage) with NAME (the -n session name) hashed, so `retro.py kinds` ties a kind to its
 # session's cost and outcome. KIND:S | KIND:M | KIND:L sizes it: S one effort step down, L one up (low…max, held at

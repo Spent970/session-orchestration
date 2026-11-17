@@ -294,7 +294,17 @@ fill, `ctx 62%` (dim; amber from 80%, red from 90%), and an idle background sess
 12m` once its transcript has been quiet over 10 minutes. **Other sessions** lists the sessions that
 own no task (running first, a review led by its task key), with the same progress, or the last line
 of an idle one; pressed, attach, the ticket link and Ask. Then the other status footers, the pending
-file's `- ` items Waiting on you and Decisions don't already show, and **Resolved** last, collapsed until pressed. Above the groups, **▶ RUN** lists
+file's `- ` items Waiting on you and Decisions don't already show, and **Resolved** last. Each section is open (its
+rows, one line each: a pressed one opens as a card and wraps), one line (its title and count alone) or hidden (not
+drawn; a dim `hidden: pending 15` line at the end names those, and a press on it shows them in this pane). Config
+`pane.sections` sets them per project, by slug (the title in lowercase, `-` for spaces, without its `(…)`:
+`waiting-on-you`, `other-sessions`, `resolved`); unset, every section is open but Resolved, one line. A press on a
+title toggles open and one line and writes it (`session-status --pane-section SLUG STATE`; a section the config can't
+name, an adapter's footer, folds for this pane only, as does a failed write, which says so in a toast). Once shown, a
+hidden section's title press folds and writes it like any other, so it is no longer hidden, and the last line
+(`shown: … · hide`) hides them again.
+Folding Waiting on you or Decisions gives their rows no digit key. Waiting on you, Decisions
+and Needs action are never hidden: there `hidden` reads as one line, with a warning from `--config pane.sections`. Above the groups, **▶ RUN** lists
 the commands sessions handed the user (`hand_command`), per task key, each counted on you under its
 task, with Run, Copy and Dismiss buttons (no key): pane.md, Handed-over commands.
 

@@ -1318,6 +1318,42 @@ echo '{"retro":{"account":".","sections":[]}}' > "$a/.claude/coordination.local.
   { echo "retro relative account, empty sections: $(cfg "$a" retro.account 2>&1) $(cfg "$a" retro.sections 2>&1)"; exit 1; }
 echo '{"features":{"retro":true},"retro":{"scope":"both","schedule":"mon 12:00"}}' > "$b/.claude/coordination/coordination.json"
 [ "$(cfg "$b" features.retro):$(cfg "$b" retro.scope):$(cfg "$b" retro.schedule)" = 'false:project:' ] || { echo "config: the repo file set retro"; exit 1; }
+# pane.sections: from the project's person file only, bad entries dropped with a warning, hidden read as line for what
+# needs you; --pane-section writes it there (made when missing), refuses hidden for those and a committed file; the
+# repo file and the person-wide file can't set it.
+pss() { (cd "$1" && shift && XDG_CONFIG_HOME=$tmp/xdg "$here/session-status" "$@"); }
+# lib.sh PANE_SLUGS is register.tsx USAGE_SECTIONS' slugs (sectionSlug), so the two can't drift.
+want=$(grep '^export const USAGE_SECTIONS = ' "$here/../../hooks/register.tsx" | grep -o "'[^']*'" | tr -d "'" |
+  sed -E 's/ *\(.*$//' | tr 'A-Z' 'a-z' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g' | sort | tr '\n' ' ')
+have=$(. "$here/../../lib.sh" && tr ' ' '\n' <<<"$PANE_SLUGS" | grep . | sort | tr '\n' ' ')
+[ -n "$want" ] && [ "$want" = "$have" ] || { echo "PANE_SLUGS drifted from USAGE_SECTIONS: [$have] vs [$want]"; exit 1; }
+want=$(grep '^const ON_YOU = ' "$here/../../hooks/register.tsx" | grep -o "'[^']*'" | tr -d "'" | sort | tr '\n' ' ')
+have=$(. "$here/../../lib.sh" && tr ' ' '\n' <<<"$PANE_ON_YOU" | grep . | sort | tr '\n' ' ')
+[ -n "$want" ] && [ "$want" = "$have" ] || { echo "PANE_ON_YOU drifted from ON_YOU: [$have] vs [$want]"; exit 1; }
+echo '{"pane":{"sections":{"pending":"hidden","idle":"line","decisions":"hidden","x":"open","working":"wide"}}}' > "$a/.claude/coordination.local.json"
+w=$(pss "$a" --config pane.sections 2>&1 >/dev/null)
+[ "$(pss "$a" --config pane.sections 2>/dev/null)" = '{"pending":"hidden","idle":"line","decisions":"line"}' ] &&
+  [ "$(grep -c '^warning: config pane.sections' <<<"$w")" = 3 ] || { echo "pane.sections: $w"; exit 1; }
+pss "$a" --pane-section idle open && [ "$(jq -c .pane.sections "$a/.claude/coordination.local.json")" = '{"pending":"hidden","idle":"open","decisions":"hidden","x":"open","working":"wide"}' ] ||
+  { echo "pane-section set: $(cat "$a/.claude/coordination.local.json")"; exit 1; }
+for s in working landing in-review notices; do pss "$a" --pane-section "$s" line & done; wait
+[ "$(jq -c '.pane.sections | [.working, .landing, .["in-review"], .notices]' "$a/.claude/coordination.local.json")" = '["line","line","line","line"]' ] ||
+  { echo "pane-section lost a parallel press: $(cat "$a/.claude/coordination.local.json")"; exit 1; }
+rm "$a/.claude/coordination.local.json"; mkdir -p "$tmp/xdg/session-orchestration"
+echo '{"pane":{"sections":{"idle":"line"}}}' > "$tmp/xdg/session-orchestration/config.json"
+[ "$(pss "$a" --config pane.sections)" = '{}' ] && pss "$a" --pane-section pending hidden &&
+  [ "$(pss "$a" --config pane.sections)" = '{"pending":"hidden"}' ] || { echo "pane-section made the file: $(pss "$a" --config pane.sections 2>&1)"; exit 1; }
+rm -r "$tmp/xdg"
+rc=0; pss "$a" --pane-section decisions hidden 2>/dev/null || rc=$?; [ $rc = 2 ] || { echo "pane-section hid decisions: $rc"; exit 1; }
+rc=0; pss "$a" --pane-section bogus line 2>/dev/null || rc=$?; [ $rc = 2 ] || { echo "pane-section took a bogus slug: $rc"; exit 1; }
+cp "$b/.claude/coordination/coordination.json" "$tmp/cfg.json"
+echo '{"pane":{"sections":{"idle":"line"}}}' > "$b/.claude/coordination/coordination.json"
+[ "$(pss "$b" --config pane.sections)" = '{}' ] && [ "$(cd "$b" && . "$here/../../lib.sh" && coord_json | jq -c .pane)" = null ] ||
+  { echo "config: the repo file set pane.sections"; exit 1; }
+mv "$tmp/cfg.json" "$b/.claude/coordination/coordination.json"
+pc=$(mkdir -p "$tmp/panec/.claude" && cd "$tmp/panec" && pwd -P); git -C "$pc" init -q; echo '{}' > "$pc/.claude/coordination.local.json"; git -C "$pc" add .claude
+rc=0; pss "$pc" --pane-section idle line 2>/dev/null || rc=$?
+[ $rc = 1 ] && [ "$(cat "$pc/.claude/coordination.local.json")" = '{}' ] || { echo "pane-section wrote a committed file: $rc"; exit 1; }
 # plugin coordinator: on in the root feedback.repo_dir names, with its doc line; off in any other root.
 echo "{\"feedback\":{\"repo_dir\":\"$a\"}}" > "$a/.claude/coordination.local.json"
 c=$(init "$a" --check); grep -x 'active: .* pr_create=on .* features=.*plugin_coordinator' <<<"$c" >/dev/null &&
