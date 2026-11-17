@@ -1,7 +1,10 @@
 #!/usr/bin/env python3 -I
 """Retro measurement over Claude Code transcripts. Read-only; prints short TSV rows, never transcript bodies.
 
-usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
+usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project ROOT|RX]
+  --project (any command): read only the transcripts of one project: ROOT, a path (/, ~ or . first), keeps the
+                                  sessions whose working directory is ROOT or under it (its worktrees too); else RX, a
+                                  regex on the transcript's project folder name
   sessions [days=7]               one row per session: turns, peak context, compactions, tokens, USD, human msgs,
                                   denials, `!` handoffs, AskUserQuestion, tool errors, cross-session in/out, first prompt
   events [days=7]                 one row per event: deny (detail2: source/reasonType: the hook's or classifier's
@@ -11,7 +14,7 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
                                   a headless test session (leave those out of refusal counts), else empty
   context [days=7] [split_iso] [project_rx]  context per request (avg, median, >200K and excess, base median) for
                                   all, since split, and matching projects; `over` rows per session; `fork` rows
-  units [days=7] [--project RX] [--merge|--done|--post RX] [--merged FILE] [--keys FILE]  merged PRs, finished
+  units [days=7] [--merge|--done|--post RX] [--merged FILE] [--keys FILE]  merged PRs, finished
                                   tickets, review posts whose command ran, one row each; USD per unit on stderr.
                                   --merged: the adapter's `yesterday EPOCH KEY…` output, whose merges of the sessions'
                                   keys count too (a reviewer pressed merge); merge_ran on stderr is the ones a session
@@ -49,6 +52,8 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
   search TEXT [days=7]            one line per hit of TEXT in prompts, cross-session messages and sessions' own text:
                                   NAME (ID8) · date · who: snippet, masked (emails, credentials, long opaque strings)
                                   and capped at 220 chars; 3 a session, 30 in all (session-status --search)
+  sections SCOPE [NAME…]          the report sections a SCOPE run (project or plugin) writes, one per line, in order:
+                                  NAMEs (config retro.sections) keep only those; one the scope lacks is named on stderr
   html IN.md OUT.html             Markdown report -> self-contained HTML
 
 Transcripts: <account>/projects/*/*.jsonl for every account dir ($CLAUDE_CONFIG_DIR, ~/.claude, ~/.claude-*),
@@ -93,10 +98,35 @@ def roots():
     return seen
 
 
+PROJECT = None  # --project's test on a transcript path; None reads every project
+
+
+def project_filter(arg):
+    """--project's value as a test on a transcript. A path: the session's first `cwd` is the root or under it (as typed
+    or resolved: a symlinked root), its folder named after one of those (Claude Code makes every non-alphanumeric
+    character a dash); a transcript with no cwd keeps its folder named exactly so, or a dot folder's (`--`) under it.
+    Anything else: a regex on the folder name."""
+    if arg[:1] not in "/~.":
+        rx = re.compile(arg)
+        return lambda f: bool(rx.search(os.path.basename(os.path.dirname(f))))
+    rs = {os.path.abspath(os.path.expanduser(arg)), os.path.realpath(os.path.expanduser(arg))}
+    enc = tuple(re.sub(r"[^A-Za-z0-9]", "-", r) for r in rs)
+
+    def keep(f):
+        d = os.path.basename(os.path.dirname(f))
+        if not d.startswith(enc):
+            return False
+        cwd = next((o["cwd"] for _, o in lines(f) if isinstance(o.get("cwd"), str)), None)
+        if cwd is None:
+            return any(d == e or d.startswith(e + "--") for e in enc)
+        return any(cwd == r or cwd.startswith(r.rstrip("/") + "/") for r in rs)
+    return keep
+
+
 def transcripts():
     for r in roots():
         for f in glob.glob(f"{r}/*/*.jsonl"):
-            if os.path.getmtime(f) >= CUT:
+            if os.path.getmtime(f) >= CUT and (not PROJECT or PROJECT(f)):
                 yield f
 
 
@@ -337,17 +367,14 @@ def units(days=7, *opts):
     """Units of work whose command ran (its result is neither an error nor a denial): `merge`, `done` (a ticket
     finished) and `post` (a review comment posted from a review session: name or first prompt says review), one
     row per unit id, first time. --merge/--done/--post RX override the regexes (one capture group: the id);
-    --project RX keeps transcripts whose project folder matches. The totals line on stderr gives USD per merge and per
+    --project (a global option) keeps one project's transcripts. The totals line on stderr gives USD per merge and per
     finished ticket over those sessions, and per post over the review sessions among them."""
     window(days)
     o_ = dict(zip(opts[::2], opts[1::2]))
     rx = {k: re.compile(o_.get(f"--{k}", v)) for k, v in UNITS.items()}
-    proj = re.compile(o_.get("--project", ""))
     found, total, review, keys = {}, 0.0, 0.0, set()
     print("kind\tid\tsession\tts\tcommand")
     for f in transcripts():
-        if not proj.search(os.path.basename(os.path.dirname(f))):
-            continue
         sid = os.path.basename(f)[:8]
         cost = sum(c for _, _, c in requests(f))
         total += cost
@@ -1536,14 +1563,36 @@ def search(text="", days=7):
         sys.exit(1)
 
 
+# Report sections in order, and the scopes that have each (skills/retro/SKILL.md, Sections).
+BOTH, PROJ, PLUG = {"project", "plugin"}, {"project"}, {"plugin"}
+SECTIONS = {"units": BOTH, "context": BOTH, "waste": BOTH, "feedback": BOTH, "coordinator": PROJ, "memory": PROJ,
+            "protocol": PLUG, "features": PLUG, "sizing": PLUG}
+
+
+def sections(scope="", *names):
+    if scope not in ("project", "plugin"):
+        sys.exit("usage: retro.py sections project|plugin [NAME…]")
+    for n in names:
+        if scope not in SECTIONS.get(n, set()):
+            print(f"skipped: {n} (not a {scope} section)", file=sys.stderr)
+    for n, scopes in SECTIONS.items():
+        if scope in scopes and (not names or n in names):
+            print(n)
+
+
 CMDS = {"sessions": sessions, "events": events, "context": context, "units": units, "waits": waits, "bgtasks": bgtasks, "replies": replies,
         "triggers": triggers, "usage": usage, "chunks": chunks, "kinds": kinds, "trial": trial, "handoff": handoff, "start": start, "loads": loads, "search": search,
-        "html": md2html}
+        "sections": sections, "html": md2html}
 
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["--until"] and len(a) > 1:
         END = datetime.fromisoformat(a[1].rstrip("Z")).replace(tzinfo=timezone.utc).timestamp(); a = a[2:]
+    if "--project" in a:
+        i = a.index("--project")
+        if i + 1 >= len(a):
+            sys.exit("--project needs a ROOT path or a regex")
+        PROJECT = project_filter(a[i + 1]); a = a[:i] + a[i + 2:]
     if not a or a[0] not in CMDS:
         sys.exit(__doc__)
     CMDS[a[0]](*a[1:])
