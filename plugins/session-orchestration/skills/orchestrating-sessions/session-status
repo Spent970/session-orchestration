@@ -996,7 +996,7 @@ if [ "${1:-}" = --changes ]; then
   # PR events: an open PR of a row with an owner newly failing CI (CI-FAILED), in conflict (CONFLICT) or with changes
   # requested (!NAME, `changes requested by`) is a line `* REPO#ID EVENT @SHA (KEY) → "NAME" ID`; a row whose PRs are
   # all MERGED while it is still on the board (its status not moved to done) is `* REPO#ID[,…] all-merged (KEY,
-  # STATUS) → "NAME" ID`, or `→ no owner`. Each comes with the nudge for its owner (SKILL.md, Watching). At most once
+  # STATUS) → "NAME" ID`, or `→ no owner`. Each comes with the nudge for its owner (sessions.md, PR events). At most once
   # per PR, event and head SHA ($last.pr-events): CI and a conflict again only on a new head; changes requested not
   # again while it stays (a push doesn't clear it, a review does); all-merged once per task and PR set. The SHA is the
   # PR's repo's worktree head as pushed (the only one, when the names differ), else `-`.
@@ -1053,7 +1053,7 @@ if [ "${1:-}" = --changes ]; then
   [ -z "$old" ] || evl+=$(awk -F'\t' '{ print "  * " $4 " (not forwarded: no coordinator pane sent it)" }' <<<"$old")$'\n'
   fwc=$(cat "$fw" 2>/dev/null)
   evl+=$(awk -F'\t' '$1 == "failed" { print "  * " $2 " (not forwarded: " $3 ")" }' <<<"$fwc")
-  evl=$(grep . <<<"$evl"); ev=; [ -z "$evl" ] || ev=$'PR events (send each owner the nudge, SKILL.md):\n'$evl
+  evl=$(grep . <<<"$evl"); ev=; [ -z "$evl" ] || ev=$'PR events (send each owner the nudge, sessions.md):\n'$evl
   [ -z "$stopped" ] || ev+=${ev:+$'\n'}$'Stopped (finished tasks\' sessions and worktrees, by the watcher; tell the user in one line):\n'${stopped%$'\n'}
   # Logins restored: a project action (.claude/coordinator-actions.json) whose `when` held at the last committing run
   # and no longer does (the sign-in it offers is back), with the keys of the blocked reports (<replies>/KEY.md, first
@@ -1655,7 +1655,7 @@ fi
 # it isn't refused as mid-turn; the successor starts, the caller ends its turn, and a detached loop stops it (background only) once
 # idle (HANDOVER_STOP_POLL seconds apart, HANDOVER_STOP_TRIES times: 30 and 40).
 # --escalate: the successor runs one rung above that model/effort (lib.sh escalate_rung: effort up to xhigh, then
-# haiku → sonnet → opus, then max), for a session that failed the same way twice (SKILL.md Rules); refused (exit 2,
+# haiku → sonnet → opus, then max), for a session that failed the same way twice (sessions.md, Repeats and reloads); refused (exit 2,
 # nothing stopped) at the top rung or when the old model or effort is unknown. Logs a usage escalate line.
 # The old session's advisor (lib.sh last_advisor) goes onto the line as --advisor A, where it still pairs with the
 # successor's model (lib.sh advisor_ok: none once that is fable, an --escalate to fable too) and, for fable, the

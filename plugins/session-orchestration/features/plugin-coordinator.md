@@ -39,7 +39,7 @@ the user decides a won't-fix, and you mark the case `dropped` on their word.
 
 **Batches.** Put cases that change the same file or step into one batch. Every other case is a batch of its own,
 most seen first. Start or propose the batches as `session-status --config start.kinds.feedback_apply` says
-(`read_only`, `propose` or `at_once`; [SKILL.md](../skills/orchestrating-sessions/SKILL.md), Starting a session): an
+(`read_only`, `propose` or `at_once`; [sessions.md](../skills/orchestrating-sessions/sessions.md), Starting a session): an
 apply session pushes and opens a PR, so `read_only` proposes it, and `at_once` starts it, then one line to the user
 per session. Either way, one line per apply session, with its session name, its cases' titles, the done-when, and its
 kind with the reason, sized per batch with the `choosing-model-effort` skill (a one-file doc fix is `mechanical`, a new

@@ -31,8 +31,23 @@ demand, and entries leave once they've proved themselves. A flat file past a scr
 session you start: it builds the topic files and the new index as copies, re-checks for lines appended meanwhile,
 and swaps the index in with one `mv`, so no worker's append is lost.
 
-- Prune in passing, as [SKILL.md](SKILL.md) (Project memory) says. You and whoever the index names for graduation
-  are the only ones who delete or rewrite entries; sessions only append.
+The project's `CLAUDE.md` may name a project memory file: an index over topic files, read on demand. Sessions append
+to it; you prune it.
+- **Friction is feedback, not memory.** A step you missed or worked around because of this plugin (its docs,
+  scripts, tools) goes to `feedback add`, and one the project caused to `feedback add --project`
+  ([feedback.md](feedback.md)), never a memory line. Memory holds project facts and the user's preferences.
+- **A lesson the user gives you** that comes from a missing plugin step is filed with `feedback add`, and from a
+  missing project-script step with `feedback add --project`, in addition to any memory line. When it's unclear which
+  of plugin feedback, project feedback or memory it is, queue one `ask_approval` with those three before writing.
+- When the user tells you to remember something for the project, or a preference about how you coordinate, append
+  it to the coordinator topic file (a flat file: append there). A preference a config key holds (the start mode
+  above) goes in that key instead.
+- Prune in passing: delete an entry that is wrong, superseded, about a task state that has since resolved, already
+  in a `CLAUDE.md`, a doc or a skill, or a caution whose reason no longer holds; merge two about the same trap; and
+  rewrite an absolute rule ("never X") with its scope and reason. Splitting a flat file, `[team]`
+  lines, graduation and retro follow-ups: below.
+- You and whoever the index names for graduation are the only ones who delete or rewrite entries; sessions only
+  append.
 - **Team memory** (shared mode): a line true and useful to a collaborator on another machine, with another account
   and coordinator, is tagged `[team]` (`- <date> <TASK>: [team] …`); in doubt, it's personal. Sessions read the repo's
   `.claude/coordination/memory.md` (and its `memory/<topic>.md`, P's topic names) before yours ([worker.md](worker.md),

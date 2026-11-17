@@ -11,7 +11,7 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    Size classes: S ≤ 22K, M ≤ 43K, L ≤ 65K. Multiply a `build` chunk's first guess by 1.35 (measured: build chunks
    grew 1.35× their est, n=8); other kinds stay at 1.0 until `retro.py chunks` has enough samples to say otherwise.
    The 1.35 is a median of two groups (five chunks at 1.0–1.4×, three at ~2.5×), so it under-sizes the second: a
-   chunk past 2× its est at a handoff counts as a failure for SKILL.md's "same failure twice" rule (step 5).
+   chunk past 2× its est at a handoff counts as a failure for sessions.md's "same failure twice" rule (step 5).
 2. **Write the plan** as a table under `## Plan` in `<replies>/PROJ-123.md`, and run `session-status --plan FILE --check`.
    Write one brief per chunk, `<replies>/PROJ-123-cN.md`, from `--plan FILE --brief N`, plus a shared
    `PROJ-123-chunk-rules.md` (paths, setup, interface, checks, landing by fast-forward). Keep plans in the replies folder.

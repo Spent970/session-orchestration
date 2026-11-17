@@ -83,7 +83,7 @@ the retro hands them on and never starts an apply session:
 
 Never apply without the user's yes for that batch. The one standing yes: in the coordinator that may start apply
 sessions (the plugin coordinator where there is one, else any), `session-status --config start.kinds.feedback_apply`
-printing `at_once` (SKILL.md, Starting a session) means start them, then tell the user in one line per session; the
+printing `at_once` (sessions.md, Starting a session) means start them, then tell the user in one line per session; the
 footer's `— apply?` is then answered already.
 
 ## Applying (an apply session)
