@@ -13,10 +13,10 @@ mkdir -p "$(dirname "$LOG")"
 ss=$(cd "$(dirname "$0")" && pwd)/../orchestrating-sessions/session-status   # before the cd: $0 may be relative
 cd "$root" 2>/dev/null || { echo "$(date '+%F %T') no project root $root" >> "$LOG"; exit 1; }
 name=retro-weekly-$(date +%F)
-# model and effort: the review kind's (config plan.models.review), logged as a start line like any task start
+# model and effort: the retro kind's (config plan.models.retro), logged as a start line like any task start
 if [ "${2:-}" = "--dry-run" ]; then   # --config: no start line for a run that starts nothing
-  me=$(bash "$ss" --config plan.models.review) && me="--model ${me%%/*} --effort ${me#*/}"
-else me=$(bash "$ss" --kind review "$name"); fi || me=
+  me=$(bash "$ss" --config plan.models.retro) && me="--model ${me%%/*} --effort ${me#*/}"
+else me=$(bash "$ss" --kind retro "$name"); fi || me=
 read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
 cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "Session task: weekly retro run. Use the session-orchestration:retro skill and follow it.")
 if [ "${2:-}" = "--dry-run" ]; then
