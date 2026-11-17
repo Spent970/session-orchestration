@@ -1,26 +1,4 @@
 #!/bin/bash
-# Weekly R&D run launcher for cron or launchd: starts a background session in a project root that follows the
-# rnd skill (SKILL.md beside this file, plus the project's .claude/rnd-brief.md). Edit those, not the schedule line.
-# usage: rnd-weekly PROJECT_ROOT [--dry-run]     log: $RND_LOG (default rnd-weekly.log in ~/Library/Logs on macOS,
-# else in ${XDG_STATE_HOME:-~/.local/state})
-# PATH: where claude is installed (cron's PATH is minimal); put anything else the session needs in the schedule line.
-set -euo pipefail
-export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-root=${1:?usage: rnd-weekly PROJECT_ROOT [--dry-run]}
-if [ "$(uname)" = Darwin ]; then logdir=$HOME/Library/Logs; else logdir=${XDG_STATE_HOME:-$HOME/.local/state}; fi
-LOG=${RND_LOG:-$logdir/rnd-weekly.log}
-mkdir -p "$(dirname "$LOG")"
-ss=$(cd "$(dirname "$0")" && pwd)/../orchestrating-sessions/session-status   # before the cd: $0 may be relative
-cd "$root" 2>/dev/null || { echo "$(date '+%F %T') no project root $root" >> "$LOG"; exit 1; }
-name=rnd-weekly-$(date +%F)
-# model and effort: the review kind's (config plan.models.review), logged as a start line like any task start
-if [ "${2:-}" = "--dry-run" ]; then   # --config: no start line for a run that starts nothing
-  me=$(bash "$ss" --config plan.models.review) && me="--model ${me%%/*} --effort ${me#*/}"
-else me=$(bash "$ss" --kind review "$name"); fi || me=
-read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
-cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "Session task: weekly R&D run. Use the session-orchestration:rnd skill and follow it.")
-if [ "${2:-}" = "--dry-run" ]; then
-  printf '%q ' "${cmd[@]}"; echo; command -v claude; exit 0
-fi
-echo "$(date '+%F %T') start in $root" >> "$LOG"
-"${cmd[@]}" >> "$LOG" 2>&1
+# Old entry point of the weekly retro run (a crontab line may still name this path): same arguments, now the
+# retro launcher beside it. Removed one release after the alias period.
+exec "$(cd "$(dirname "$0")" && pwd)/../retro/retro-weekly" "$@"

@@ -66,7 +66,7 @@ else
         [[ $l == [Ww]"ork on $nm" || $l == [Ww]"ork on $nm"[!A-Za-z0-9_-]* ]]; then key=$nm; fi
     fi
   fi
-  key=${key//[^A-Za-z0-9_.-]/}; while [[ $key == *. ]]; do key=${key%.}; done; key=${key:--}   # rnd.py strips .,;:!) too
+  key=${key//[^A-Za-z0-9_.-]/}; while [[ $key == *. ]]; do key=${key%.}; done; key=${key:--}   # retro.py strips .,;:!) too
   case $kind in task|review) [ -z "$a" ] || names=$("$a" status-names 2>/dev/null); re=$(coord_re "${names:-}") ;; esac
 fi
 thresholds() {   # at, hard and note for $kind, cached
@@ -101,7 +101,7 @@ if [ "$kind" != coordinator ] && [ ! -e "$s.card" ] && { [ "$kind $key" != 'task
   trap '[ -z "$card" ] || emit "$card"' EXIT
 fi
 # shortcut: a coordinator whose first prompt isn't `Act as a coordinator` is a keyless task until its first status
-# run, so a message before that gets it the card; tell it by the first prompt if rnd.py loads shows coordinator cards.
+# run, so a message before that gets it the card; tell it by the first prompt if retro.py loads shows coordinator cards.
 [ ! -e "$s.hard" ] || exit 0   # past the hard stop: told to stop, nothing more (but a card still due)
 # A task or review without messages (no key, a review, handoff.at.task=0) only waits to turn coordinator: its own
 # tool call (stdin, coord_re's tool_name branch) decides, without the tail, grep and jq (~39 ms on a 45 MB transcript).

@@ -2,7 +2,7 @@
 
 The coordinator's rules beyond the core's short form. Read this when you resolve a handoff entry while config
 `pending.file` is set, need an entry's past, split or prune project memory, carry `[team]` lines, graduate an entry,
-or act on an R&D run's approved proposals.
+or act on a retro's approved proposals.
 
 ## Handoff file with `pending.file`
 
@@ -16,7 +16,7 @@ or act on an R&D run's approved proposals.
   other than `A-Za-z0-9._-` turned into `-` (`deploy window` → `deploy-window`). Keep it under 4 KB, with only
   what's current (Notices says when it grows past).
 - A hook records every wording of every entry in `NAME/SLUG.history.md` as the file changes. `--pending-history
-  LABEL [--last N]` prints it. It's for R&D and for the rare entry whose past you need: don't read history files by
+  LABEL [--last N]` prints it. It's for retro and for the rare entry whose past you need: don't read history files by
   default.
 
 ## Project memory
@@ -40,11 +40,11 @@ and swaps the index in with one `mv`, so no worker's append is lost.
   missing), then delete them from your memory once it's merged. Without shared mode they stay in yours.
 - **Graduation** moves an entry into the project doc that owns its situation once it has proved itself: old enough
   and still true, or cited by several sessions. The index states the project's thresholds and who runs it (e.g. the
-  weekly R&D run proposes, a followups session applies). It edits a doc, so it's a session's job, not yours: the
+  weekly retro proposes, a followups session applies). It edits a doc, so it's a session's job, not yours: the
   session runs project-memory's `graduate` skill (`/graduate`), which also resolves open project cases and
   `.claude/tasks/` files.
-- **An R&D run only measures and proposes** (the `rnd` skill). When the user approves some of its proposals, start a
+- **A retro only measures and proposes** (the `retro` skill). When the user approves some of its proposals, start a
   fresh followups session for them (`claude --bg -n rnd-<N>-followups`, N the run's number; brief: that run's report
   in the replies folder plus the approved numbers, reporting in `replies/rnd-<N>-followups.md`). Never resume the
-  R&D session for it. A proposal built from project feedback cases names them: the followups session marks each
+  retro session for it. A proposal built from project feedback cases names them: the followups session marks each
   `feedback mark FILE fixed '<what changed>'` once its fix lands ([feedback.md](feedback.md)).

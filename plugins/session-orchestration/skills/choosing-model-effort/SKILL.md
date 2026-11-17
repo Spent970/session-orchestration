@@ -1,6 +1,6 @@
 ---
 name: choosing-model-effort
-description: Size a piece of work into a plan.models kind (scan, mechanical, build, design, review, release) and get the model and effort to run it on. Use before starting a session for a task (claude --bg), before proposing sessions so each line shows its kind, before choosing a subagent's model in a coordinated project, and in an R&D run comparing cost per kind.
+description: Size a piece of work into a plan.models kind (scan, mechanical, build, design, review, release) and get the model and effort to run it on. Use before starting a session for a task (claude --bg), before proposing sessions so each line shows its kind, before choosing a subagent's model in a coordinated project, and in a retro comparing cost per kind.
 ---
 
 # Choosing a model and effort
@@ -50,7 +50,7 @@ change is the kind's or an escalation's (`session-status --handover --escalate`,
 
 - **A session (`claude --bg`)**: run `session-status --kind <kind>[:S|M|L] <session-name>` as its own call (`<session-name>` is
   the `-n` value: letters, digits, `.`, `_`, `-`, at most 80) and paste the `--model M --effort E` it prints onto the
-  start line. Exit 2 means a wrong kind or name: fix it, and don't start without the flags. It logs the start for rnd,
+  start line. Exit 2 means a wrong kind or name: fix it, and don't start without the flags. It logs the start for retro,
   so run it once per task: a handover or fresh restart of the same task reuses the flags. `session-status` is in this
   plugin's `skills/orchestrating-sessions/` (`../orchestrating-sessions/session-status` from this skill's folder) and
   isn't on a task session's PATH: run it by that path.
@@ -59,7 +59,7 @@ change is the kind's or an escalation's (`session-status --handover --escalate`,
   plan.models.<kind>` prints it) as `model` when it is an alias the tool takes (`sonnet`, `opus`, `haiku`). A full
   model id: pass its family's alias. Set `effort` only when the user, a CLAUDE.md or a skill asks for that effort.
   Nothing is logged.
-- **An R&D run**: the usage log's start lines (`{"k":"start","what":KIND,"model":…,"effort":…,"sess":…,"size":…}`, size only when given) carry
+- **A retro**: the usage log's start lines (`{"k":"start","what":KIND,"model":…,"effort":…,"sess":…,"size":…}`, size only when given) carry
   `sess`, the first 12 hex characters of the session name's sha256 (the hash only keeps the name out of clear text:
-  someone who can guess a name can confirm it). rnd's `kinds` report joins them to sessions that way and compares
+  someone who can guess a name can confirm it). retro's `kinds` report joins them to sessions that way and compares
   cost and outcome per kind (a sized start as `build:L`), with the escalations each start's sessions logged.

@@ -13,7 +13,7 @@ d, key = os.path.dirname(path), os.path.basename(path).removesuffix(".md")
 KINDS = dict(m.split("=", 1) for m in os.environ["PLAN_MODELS"].split())
 MAXP, AT = max(1, int(os.environ["PLAN_MAXP"])), int(os.environ["PLAN_AT"])
 okme = lambda me: "/" in me and subprocess.run(["bash", "-c", '. "$0" && model_ok "${1%%/*}" "${1#*/}"', os.environ["PLAN_LIB"], me]).returncode == 0   # lib.sh's one rule
-START = 60000   # ponytail: a constant session start; a later chunk calibrates it from rnd.py's measured base
+START = 60000   # ponytail: a constant session start; a later chunk calibrates it from retro.py's measured base
 
 lines, i = open(path).read().splitlines(), 0
 while i < len(lines) and not re.match(r"## (Build )?[Pp]lan(\s|$)", lines[i]): i += 1
@@ -97,7 +97,7 @@ if mode == "--check":
     if out: sys.exit(print("\n".join(out)) or 1)
     sys.exit()
 
-if mode == "--done":   # row N's kind, model/effort and est, and this session's act from rnd.py, as a usage chunk line
+if mode == "--done":   # row N's kind, model/effort and est, and this session's act from retro.py, as a usage chunk line
     n = a[2].removeprefix("c")
     if n not in R: die(f"no row {n} in {path}")
     r = R[n]; m, _, e = (KINDS.get(r["kind"], "") if r["model"] == "default" else r["model"]).partition("/")
@@ -105,9 +105,9 @@ if mode == "--done":   # row N's kind, model/effort and est, and this session's 
     if os.environ["PLAN_TELEMETRY"] != "local":
         sys.exit(print(f"nothing logged: telemetry is {os.environ['PLAN_TELEMETRY']}, not local (config telemetry)"))
     act, sid = "", os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8]
-    try:   # growth has one definition: rnd.py's; no session id, no act
+    try:   # growth has one definition: retro.py's; no session id, no act
         if not sid: raise ValueError
-        out = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.environ["PLAN_LIB"]), "skills/rnd/rnd.py"),
+        out = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.environ["PLAN_LIB"]), "skills/retro/retro.py"),
                               "chunks", "7", "--session", sid], capture_output=True, text=True, timeout=120).stdout.splitlines()
         act = out[1].split("\t")[out[0].split("\t").index("act_K")] if len(out) > 1 else ""
     except (OSError, ValueError, IndexError, subprocess.SubprocessError): pass

@@ -27,7 +27,7 @@ feedback add bugfixes 'session-status exits 1 when the adapter prints nothing' \
 
 - Category: `bugfixes`, `features` or `refactorings`.
 - Write in the plugin's terms only. `--where` is a path inside the plugin; `--found` is your role and step
-  (coordinating, a task session, the R&D run), never the task or project; `--evidence` is at most 3 lines and names
+  (coordinating, a task session, the retro), never the task or project; `--evidence` is at most 3 lines and names
   no ticket, path, person or project.
 - Exit 3 lists open cases that look the same. If one is, `feedback seen FILE` adds today to its `seen:` line (that
   count ranks it); otherwise rerun with `--new`.
@@ -57,21 +57,21 @@ project's own terms: it is never scrubbed or sent. `--where` is the project file
 `feedback list`, `count` and `footer` show both scopes; `--plugin` or `--project` picks one. The project store is
 project-memory's `cases` (its `project-memory` skill), which a project without a coordinator uses directly.
 
-The R&D run groups the open project cases into patterns and proposes one project fix per pattern (a doc, script or
+The retro groups the open project cases into patterns and proposes one project fix per pattern (a doc, script or
 setting); its followups session applies the approved ones and marks each case `fixed`. The apply flow below never
 takes them.
 
 ## Offering it
 
 - **The coordinator.** The status sweep's footer shows `plugin feedback: N open (M seen ≥2×) — apply?` at most
-  once a day, then `· project feedback: K open …, for the next R&D run` when the project has some. Pass it on to the
+  once a day, then `· project feedback: K open …, for the next retro` when the project has some. Pass it on to the
   user with the other footer items; on a yes to the apply, start an apply session (below).
-- **The R&D run** ends its report with the open plugin cases, most seen first (`feedback list --plugin`), and offers
-  the apply; the project's cases are proposals in that report ([rnd](../rnd/SKILL.md), step 7).
+- **The retro** ends its report with the open plugin cases, most seen first (`feedback list --plugin`), and offers
+  the apply; the project's cases are proposals in that report ([retro](../retro/SKILL.md), step 7).
 
 **With a plugin coordinator** (config `feedback.repo_dir` set, a person key), the plugin's cases are that
 coordinator's ([features/plugin-coordinator.md](../../features/plugin-coordinator.md)). Every other coordinator and
-the R&D run hands them on and never starts an apply session:
+the retro hands them on and never starts an apply session:
 - While it runs, your footer has no plugin part. While it doesn't, the footer reads `plugin feedback: N open (M seen
   ≥2×), for the plugin coordinator, which isn't running — start it? (feedback coordinator --start)`. On a yes, run
   that command.
@@ -79,7 +79,7 @@ the R&D run hands them on and never starts an apply session:
   and tell them the plugin coordinator takes it. If they want it applied now, also `SendMessage` the name that
   `feedback coordinator` prints: one line with the case's path, saying the user wants it now. When it says the
   plugin coordinator runs under another account, SendMessage can't reach it: ask the user to tell it there.
-- The R&D run's report lists the open cases as the plugin coordinator's, with no apply offer.
+- The retro's report lists the open cases as the plugin coordinator's, with no apply offer.
 
 Never apply without the user's yes for that batch.
 

@@ -105,7 +105,7 @@
 #                       what it's doing now (session-peek.jq); any project, any account
 #        session-status --search TEXT [days]   one line per hit of TEXT (default the last 7 days) in sessions' prompts,
 #                       messages and own text, any project and account: NAME (ID8) · date · who: snippet, masked
-#                       and capped (rnd.py search); --peek ID for more
+#                       and capped (retro.py search); --peek ID for more
 #        session-status --dir KEY|ID…   the folder a task or session works in (the first argument that resolves):
 #                       KEY's worktree; for an ID, the git top of its latest cwd (its transcript), else that cwd
 #        session-status --diff KEY|ID…  that folder's changes since its merge-base with origin/HEAD, committed or
@@ -161,7 +161,7 @@ set -uo pipefail
 . "$(dirname "$0")/../../lib.sh" || exit 1
 [ "${1:-}" = --config ] && { config "${2:-}"; exit; }
 # --kind KIND [NAME]: `--model M --effort E` from plan.models.KIND for a plain task start's `claude --bg` line, logged as
-# a usage start line (lib.sh usage) with NAME (the -n session name) hashed, so `rnd.py kinds` ties a kind to its
+# a usage start line (lib.sh usage) with NAME (the -n session name) hashed, so `retro.py kinds` ties a kind to its
 # session's cost and outcome. KIND:S | KIND:M | KIND:L sizes it: S one effort step down, L one up (low…max, held at
 # the ends), M as configured; a size needs NAME, and is logged with it.
 if [ "${1:-}" = --kind ]; then
@@ -204,10 +204,10 @@ if [ "${1:-}" = --prev-name ]; then
   fi
   exit 0
 fi
-# --search TEXT [days]: rnd.py search, every project and account, the caller left out.
+# --search TEXT [days]: retro.py search, every project and account, the caller left out.
 if [ "${1:-}" = --search ]; then
   [ -n "${2:-}" ] && [[ ${3:-7} =~ ^[0-9]+$ ]] || { echo "usage: session-status --search TEXT [days]" >&2; exit 2; }
-  exec python3 -I "$(dirname "$0")/../rnd/rnd.py" search "$2" "${3:-7}"
+  exec python3 -I "$(dirname "$0")/../retro/retro.py" search "$2" "${3:-7}"
 fi
 # --plan FILE [--check | --next | --brief N | --done N]: FILE's plan table (the first table under `## Plan` or `## Build plan`:
 # # | Chunk | Kind | Deps | Touches | Est | Model/effort | Done when), with each chunk's state from the
@@ -215,8 +215,8 @@ fi
 # live sessions (one named KEY-cN: running). Alone: the waves and each row's state. --check: one line per problem,
 # exit 1. --next: the waves, then a `claude --bg` line per runnable chunk, running ones holding slots and touches.
 # --brief N: a brief skeleton for row N, to finish by hand. --done N: row N's kind, model/effort (default: plan.models)
-# and est, with this session's act_K from `rnd.py chunks 7 --session` (summed over the sessions its Supersedes: chain
-# reaches; left out if rnd fails), go to lib.sh usage as a
+# and est, with this session's act_K from `retro.py chunks 7 --session` (summed over the sessions its Supersedes: chain
+# reaches; left out if retro fails), go to lib.sh usage as a
 # chunk line; it prints the line or why nothing was logged.
 # bg_cmd PREFIX: `PREFIX --bg`, plus ` --permission-mode default` when that account's settings default to plan mode
 # (--handover and --plan --next start sessions with it).
@@ -1832,7 +1832,7 @@ if [ -n "$NPID" ]; then
 fi
 
 # Plugin feedback (feedback.md), once a day, on a coordinator's full sweep only ($TMP/watchers, no keys): a terminal, a
-# task session, the R&D run or a one-ticket lookup would use it up unread, and so would the --changes child and the
+# task session, the retro or a one-ticket lookup would use it up unread, and so would the --changes child and the
 # pane (SESSION_STATUS_NO_FEEDBACK).
 [ -n "${SESSION_STATUS_NO_FEEDBACK:-}" ] || [ $# != 0 ] || ! grep -q "/${CLAUDE_CODE_SESSION_ID:-none}\.jsonl$" "$TMP/watchers" || { fb=$("$(dirname "$SELF")/feedback" footer 2>/dev/null) && [ -n "$fb" ] && printf '\n%s\n' "$fb"; }
 

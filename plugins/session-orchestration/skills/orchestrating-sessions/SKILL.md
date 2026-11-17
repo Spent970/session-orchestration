@@ -90,7 +90,7 @@ Waking a session makes it re-read its whole context, often hundreds of thousands
    - `plugin feedback: N open … — apply?` (at most once a day): pass it to the user, and on a yes start an apply
      session ([feedback.md](feedback.md)). `…, for the plugin coordinator, which isn't running — start it?`: on a
      yes, run `feedback coordinator --start`, never an apply session. Its `project feedback` part waits for the next
-     R&D run.
+     retro.
 2. Message a session only to give it work, or for something only it knows. `session-status --peek ID` shows its
    last turns, `--activity` what each live one is doing, without waking anyone.
 3. Never `claude -p --resume` an old session just to ask for status.
@@ -108,7 +108,7 @@ N mentions)` beside it is a word count, not an owner: never message or resume it
 to a session whose first prompt or `Session task:` names the key.
 - **A check that errored is not a check.** No output from a failed command (an `xargs` overflow, a bad path) is not
   "no owner": fix it and run it again.
-- **A name that doesn't fit the ticket is a stop sign** (an R&D name on a product ticket): recheck with `--owner`,
+- **A name that doesn't fit the ticket is a stop sign** (a retro name on a product ticket): recheck with `--owner`,
   don't explain it away.
 
 **Blocked isn't done.** A background session that has finished its turn sits in `state: blocked`, so blocked means
@@ -150,7 +150,7 @@ what it unblocks>. Done when: <the end state of the whole job and the check that
 or blocked.'`
 - `--model`/`--effort`: size the task into a `plan.models` kind with the `choosing-model-effort` skill, run
   `session-status --kind <kind> <session-name>` first (the `-n` value), as its own call, and paste the `--model M --effort E` it prints
-  (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for rnd. `fable` only as `--kind` prints it
+  (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for retro. `fable` only as `--kind` prints it
   (config `fable.accounts`, `choosing-model-effort`) or when the user names it: then set it by hand. A handover or fresh restart of that task takes the same flags without running `--kind` again, so the task logs
   one start.
 - The first prompt names the task. `-n` names the session by its ticket (e.g. `PROJ-1234-fix-settler`: no spaces).
@@ -218,7 +218,7 @@ to it; you prune it.
   mode above), append it to the coordinator topic file (a flat file: append there).
 - Prune in passing: delete an entry that is wrong, superseded, about a task state that has since resolved, or
   already in a `CLAUDE.md`, a doc or a skill, and merge two about the same trap. Splitting a flat file, `[team]`
-  lines, graduation and R&D follow-ups: [memory-rules.md](memory-rules.md).
+  lines, graduation and retro follow-ups: [memory-rules.md](memory-rules.md).
 
 ## Watching
 
@@ -296,7 +296,7 @@ The files next to this one, each read whole when its event comes up, never at St
 | [handover.md](handover.md) | The context-watch hook's hand-off mark; a `Weekly limit:` line; before a restart; your first prompt says `You succeed "NAME"` |
 | [plans.md](plans.md) | A task too big for one session; a `handoff ready: KEY cN` or `handoff ready: KEY` message |
 | [pane.md](pane.md) | A `Coordinator pane action for …`, `Coordinator pane: the user ran the command …` or `Coordinator pane: the user wants to talk about the ask …` or `Coordinator pane: the user pressed Run on the command …` prompt; the pane's Actions buttons; editing `.claude/coordinator-actions.json` |
-| [memory-rules.md](memory-rules.md) | Resolving a handoff entry with `pending.file` set; an entry's history; splitting or pruning memory; `[team]` lines; graduation; an R&D run's approved proposals |
+| [memory-rules.md](memory-rules.md) | Resolving a handoff entry with `pending.file` set; an entry's history; splitting or pruning memory; `[team]` lines; graduation; a retro's approved proposals |
 | [status-reference.md](status-reference.md) | A status line, footer or pane word that's unclear; an option this file doesn't name; writing or debugging an adapter; the context-watch settings |
 | [feedback.md](feedback.md) | The `plugin feedback: …` footer; plugin feedback the user gives you; the moment you tell the user you worked around this plugin or the project, took an extra round trip, misreported because of a script's output or a file, or needed them to step in (`feedback add`, `--project` for the project's own friction) |
 | A feature's doc | When its line in `--start`'s output says |

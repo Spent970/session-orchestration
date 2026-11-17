@@ -992,7 +992,7 @@ out=$(run --peek "${pid:0:8}")
 grep -q '^Work on ABC-50$' <<<"$out" && grep -q '^Running them\.$' <<<"$out" && grep -q '^→ Bash: Run the tests' <<<"$out" &&
   ! grep -q 'subagent\|system-reminder' <<<"$out" && grep -q '^_Now: ' <<<"$out" || { echo "peek failed: $out"; exit 1; }
 [ "$(run --peek 'x*'; echo $?)" != 0 ] || { echo "peek took a bad id"; exit 1; }
-# --search: rnd.py search over this account's transcripts (rnd.test.sh covers the rest); TEXT is required.
+# --search: retro.py search over this account's transcripts (retro.test.sh covers the rest); TEXT is required.
 [ "$(run --search 'running THEM')" = "cccccccc · - · claude: Running them." ] && ! run --search 2>/dev/null &&
   ! run --search x y 2>/dev/null || { echo "--search failed: $(run --search 'running them')"; exit 1; }
 # --dir: a session's latest cwd, as its git top; a task key, its worktree. --diff: against its merge-base with origin/HEAD,
@@ -1134,16 +1134,20 @@ out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s
   grep -q '^- Replies folder (status reports, plans, review reports): `/[^`]*/session-orchestration/replies/[^`]*-init-acme/`\.$' "$a/CLAUDE.local.md" &&
   grep -qF '`approvals.delegate` in' "$a/CLAUDE.local.md" && [ "$(jq -c . "$a/.claude/coordination.local.json")" = '{"features":{"accounts":false},"approvals":{"delegate":false}}' ] &&
   [ "$(jq -c . "$a/.claude/coordination/coordination.json")" = '{"tracker":"jira","host":"github","features":{"review_inbox":false}}' ] && [ "$(cd "$a" && .claude/session-status-adapter urls)" = 'pr https://github.com/acme/{repo}/pull/{id}' ] &&
-  [ "$(init "$a" | sed -n '1p;2p;3s/:.*//p;4s/:.*//p')" = "$(printf 'This folder is set up for coordination already (%s, acme-coordinator): nothing to propose.\nOptional, on request (session-status --init --write FLAG):\n  --review-brief\n  --rnd-brief' "$a")" ] ||
+  [ "$(init "$a" | sed -n '1p;2p;3s/:.*//p;4s/:.*//p')" = "$(printf 'This folder is set up for coordination already (%s, acme-coordinator): nothing to propose.\nOptional, on request (session-status --init --write FLAG):\n  --review-brief\n  --retro-brief' "$a")" ] ||
   { echo "init (a) --write failed: $out / $(git -C "$a" status --short)"; exit 1; }
 (cd "$a" && HOME=$tmp CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH "$here/session-status" >/dev/null) || { echo "session-status after --init --write failed"; exit 1; }
 cl=$(shasum "$a/CLAUDE.local.md"); init "$a" --write >/dev/null; [ "$(shasum "$a/CLAUDE.local.md")" = "$cl" ] || { echo "init rewrote a file"; exit 1; }
-# the optional briefs, on request into the configured folder: the R&D brief's merge regex is the host's merge command
-out=$(init "$a" --write --review-brief --rnd-brief) && [ "$out" = "$(printf 'Wrote:\n  .claude/orchestration/review-brief.md\n  .claude/rnd-brief.md\nNext: session-status --init --check (expect configured), then open_pane.')" ] &&
-  grep -qF -- "units 7 --project '$(sed 's/[^A-Za-z0-9]/-/g' <<<"$a")'" "$a/.claude/rnd-brief.md" &&
+# the optional briefs, on request into the configured folder: the retro brief's merge regex is the host's merge command
+out=$(init "$a" --write --review-brief --retro-brief) && [ "$out" = "$(printf 'Wrote:\n  .claude/orchestration/review-brief.md\n  .claude/retro-brief.md\nNext: session-status --init --check (expect configured), then open_pane.')" ] &&
+  grep -qF -- "units 7 --project '$(sed 's/[^A-Za-z0-9]/-/g' <<<"$a")'" "$a/.claude/retro-brief.md" &&
   grep -qF 'git diff origin/main...origin/<branch>' "$a/.claude/orchestration/review-brief.md" &&
   [ "$(init "$a")" = "This folder is set up for coordination already ($a, acme-coordinator): nothing to propose." ] &&
   [ -z "$(git -C "$a" status --short)" ] || { echo "init briefs: $out"; exit 1; }
+# the old brief name: --write moves it to retro-brief.md (--rnd-brief is the old flag)
+mv "$a/.claude/retro-brief.md" "$a/.claude/rnd-brief.md"; init "$a" --write >/dev/null
+[ -e "$a/.claude/retro-brief.md" ] && [ ! -e "$a/.claude/rnd-brief.md" ] && init "$a" --write --rnd-brief >/dev/null &&
+  mv "$a/.claude/retro-brief.md" "$a/.claude/rnd-brief.md" && echo mine >> "$a/.claude/rnd-brief.md" && init "$a" --write --rnd-brief >/dev/null && tail -1 "$a/.claude/retro-brief.md" | grep -qx mine && [ -z "$(git -C "$a" status --short)" ] && ! grep -q "renamed" "$a/.git/info/exclude" || { echo "init: rnd-brief rename"; exit 1; }
 # A replies folder an older setup put inside the checkout: --check says to move it.
 cp "$a/CLAUDE.local.md" "$tmp/cl.bak" && sed -i.x 's#^- Replies folder (\(.*\)): `.*`\.$#- Replies folder (\1): `.claude/orchestration/replies/`.#' "$a/CLAUDE.local.md"
 init "$a" --check | grep -q '^replies folder .claude/orchestration/replies/ is inside the git checkout ' && mv "$tmp/cl.bak" "$a/CLAUDE.local.md" && rm -f "$a/CLAUDE.local.md.x" &&
@@ -1167,7 +1171,7 @@ w=$(mkdir -p "$tmp/init/ws/r1" "$tmp/init/ws/r2" && cd "$tmp/init/ws" && pwd -P)
 git -C "$w/r1" init -q && git -C "$w/r2" init -q && gc "$w/r1" --allow-empty -m hello
 out=$(init "$w") && grep -q '^1\. Task keys: session names, ws-<short-desc> ' <<<"$out" && grep -q '(none, workspace of 2 repos)' <<<"$out" &&
   grep -q '^3\. Files: CLAUDE.md, .claude/session-status-adapter, .claude/orchestration/pending.md' <<<"$out" || { echo "init (b) failed: $out"; exit 1; }
-[ "$(grep -v '^#' "$a/.git/info/exclude")" = "$(printf '/.claude/coordination/\n/.claude/coordination.local.json\n/.claude/coordination.local/\n/CLAUDE.local.md\n/.claude/session-status-adapter\n/.claude/orchestration/\n/.claude/rnd-brief.md')" ] || { echo "init excludes: $(cat "$a/.git/info/exclude")"; exit 1; }
+[ "$(grep -v '^#' "$a/.git/info/exclude")" = "$(printf '/.claude/coordination/\n/.claude/coordination.local.json\n/.claude/coordination.local/\n/CLAUDE.local.md\n/.claude/session-status-adapter\n/.claude/orchestration/\n/.claude/retro-brief.md')" ] || { echo "init excludes: $(cat "$a/.git/info/exclude")"; exit 1; }
 # Files the user had (an uncommitted CLAUDE.md, an adapter) stay visible to git; a non-executable adapter is named.
 u=$(mkdir -p "$tmp/init/u" && cd "$tmp/init/u" && pwd -P); git -C "$u" init -q && echo '# mine' > "$u/CLAUDE.md"
 mkdir "$u/.claude" && echo '#!/bin/sh' > "$u/.claude/session-status-adapter"
@@ -1434,7 +1438,7 @@ grep -qxF 'Kind: mechanical · Model: sonnet/medium · Est: 20K growth · Deps: 
   grep -qxF "**First:** read \`$pd/PROJ-123-chunk-rules.md\` (paths, setup, interface, landing). N = 2." <<<"$out" &&
   grep -qxF '**Touches:** `docs/*.md`.' <<<"$out" && grep -qxF '**Done when:** scrub ok' <<<"$out" &&
   [ "$(run --plan "$plan" --brief 9 2>&1)" = "no row 9 in $plan" ] || { echo "--plan --brief: $out"; exit 1; }
-# --plan --done N: row 2 (mechanical, default: sonnet/medium, 20K) with this session's act from rnd.py (growth: 20K + 35K,
+# --plan --done N: row 2 (mechanical, default: sonnet/medium, 20K) with this session's act from retro.py (growth: 20K + 35K,
 # the first request not counted). telemetry off: nothing logged, and why. usage refuses a malformed chunk line.
 rm -f "$tmp/state"   # the stub's state file from above: the usage log lives under it
 did=eeeeeeee-2222-3333-4444-555555555555 now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)

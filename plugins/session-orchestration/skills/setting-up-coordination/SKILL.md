@@ -66,7 +66,7 @@ by a parent. Configured adds:
   (its history would start over in an outside repo): say so and leave the hook.
 - **Optional briefs**, on the user's request (`--init` lists the missing ones, also once set up): `--write
   --review-brief` writes `<orch>/review-brief.md`; name it in each PR reviewer's first prompt (`Review
-  <repo>#<id> (<KEY>). Brief: <path>`). `--write --rnd-brief` writes `.claude/rnd-brief.md`, which the `rnd` skill
+  <repo>#<id> (<KEY>). Brief: <path>`). `--write --retro-brief` writes `.claude/retro-brief.md` (`--rnd-brief` still works, and --write renames an old `rnd-brief.md`), which the `retro` skill
   reads.
 
 ## Shared mode
@@ -125,7 +125,7 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `feedback.project_dir` | where this project's own feedback cases go (`feedback add --project`; `~` expanded, relative to the root; keep it out of git). A project key: never in the person-wide config.json | unset: `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<root, encoded>`; setup doesn't write it |
 | `pending.file` | the coordinator's handoff file, relative to the root (e.g. `docs/pending.md`): turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`) | unset; setup doesn't write it |
 | `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`) | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
-| `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `rnd.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
+| `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `retro.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
 | `plan.enabled` | `true` \| `false`: `session-status --plan` splits a design into chunks | `true`; setup doesn't write it |
 | `plan.max_parallel` | integer ≥ 1: chunks `session-status --plan` lets run at once | `3`; setup doesn't write it |
 | `fable.accounts` | JSON list of Claude config dirs (`~` expanded) whose account has the `fable` model; person only. Nothing tells reliably which accounts have fable, so the person lists them. An account at its weekly Fable limit (a session got "You've hit your Fable limit") counts as unlisted until the limit resets | empty: fable nowhere |

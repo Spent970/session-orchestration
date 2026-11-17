@@ -10,13 +10,13 @@
 #                                   delegation still in CLAUDE.md, a second account with features.accounts off, a
 #                                   terminal detected but not recorded)
 #   session-status --init           the proposal: what it found and what it would write, numbered for one reply
-#   session-status --init --write [--delegate] [--own] [--shared] [--trust=REL@SHA…] [--review-brief] [--rnd-brief]
+#   session-status --init --write [--delegate] [--own] [--shared] [--trust=REL@SHA…] [--review-brief] [--retro-brief]
 #                                 [KEY=VALUE…]
 #                                   writes the missing files from templates/ (never over an existing one; the
 #                                   CLAUDE.md section is appended to a CLAUDE.md/CLAUDE.local.md that lacks one),
 #                                   keeps new files out of git (.git/info/exclude), prints what it wrote. KEY=VALUE overrides an
 #                                   inferred fact (the names `--init` prints under "Facts"). The optional briefs (PR
-#                                   reviewer sessions, the R&D run's units) are written only when asked, also into a
+#                                   reviewer sessions, the retro's units) are written only when asked, also into a
 #                                   folder set up already. The config (lib.sh), each key only when it's unset:
 #                                   .claude/coordination/coordination.json (tracker, host, features.review_inbox) and
 #                                   .claude/coordination.local.json (features.accounts, terminal, approvals.delegate: true with
@@ -37,12 +37,12 @@ tpl=$here/templates
 . "$here/../../lib.sh" || exit 1
 root=$(pwd -P)
 
-mode=propose own= delegate= shared= review_brief= rnd_brief= over=() trust=() team_over=
+mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over=
 for a; do
   case $a in
     --check) mode=check ;; --write) mode=write ;; --own) own=1 ;; --delegate) delegate=1 ;; --shared) shared=1 ;;
     --trust=?*@?*) trust+=("${a#--trust=}") ;;
-    --review-brief) review_brief=1 ;; --rnd-brief) rnd_brief=1 ;;
+    --review-brief) review_brief=1 ;; --retro-brief|--rnd-brief) retro_brief=1 ;;
     team=?*) team_over=${a#team=}; over+=("$a") ;;
     *=*) over+=("$a") ;;
     *) echo "unknown argument: $a"; exit 2 ;;
@@ -236,7 +236,7 @@ cfg_host=$host cfg_note=   # the config's host: GitLab isn't one yet (TODO: GitL
 [ "$host" = gitlab ] && cfg_host=none cfg_note=" (host=none: GitLab support is a TODO)"
 repo_slug=$(sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@]+@[^:]+:##; s#^[A-Za-z0-9.-]+:##' <<<"$url")
 gh=; [ "$host" = github ] && command -v gh >/dev/null && gh=1
-# The briefs' commands: a PR merge and a review post, by code host; `rnd.py units` counts these by default
+# The briefs' commands: a PR merge and a review post, by code host; `retro.py units` counts these by default
 # (TODO: gitlab's are unchecked).
 case $host in
   github) merge_cmd="gh pr merge" post_cmd="gh pr review" ;;
@@ -325,7 +325,7 @@ done_rule="its session's done-when held (no command to count)"
 [ -n "$merge_cmd" ] && done_rule="its PR merged (the merge is the unit)"
 [ "$keys" = tracker ] && done_rule="its $key_example ticket moved to done (pass that command's regex as \`--done RX\`)"
 briefs=$( [ -n "$review_brief" ] || [ -e "$root/$orch/review-brief.md" ] || echo "--review-brief: a brief for PR reviewer sessions ($orch/review-brief.md)"
-          [ -n "$rnd_brief" ] || [ -e "$root/.claude/rnd-brief.md" ] || echo "--rnd-brief: what the weekly R&D run counts (.claude/rnd-brief.md)")
+          [ -n "$retro_brief" ] || [ -e "$root/.claude/retro-brief.md" ] || [ -e "$root/.claude/rnd-brief.md" ] || echo "--retro-brief: what the weekly retro counts (.claude/retro-brief.md)")
 # The repo file: the team's or the nearest committed one when there is one, else this folder's. A tracked one is the
 # repo's, never written here.
 cfg_repo=$root/.claude/coordination/coordination.json
@@ -397,7 +397,11 @@ plan+=("pending.md	$orch/pending.md")
 meminit=$(pm_dir)/skills/project-memory/memory-init || exit 1
 mem_args=("$orch" --root "$root" --topic coordinator.md "coordinating sessions" "acting as the coordinator, or messaging, resuming or handing work to another session")
 [ -z "$review_brief" ] || plan+=("review-brief.md	$orch/review-brief.md")
-[ -z "$rnd_brief" ] || plan+=("rnd-brief.md	.claude/rnd-brief.md")
+[ -z "$retro_brief" ] || plan+=("retro-brief.md	.claude/retro-brief.md")
+# The old brief name: --write moves it to the new one first (the alias period; the old name is read until then).
+if [ "$mode" = write ] && [ -e "$(at .claude/rnd-brief.md)" ] && [ ! -e "$(at .claude/retro-brief.md)" ]; then
+  mv "$(at .claude/rnd-brief.md)" "$(at .claude/retro-brief.md)" || exit 1; wrote_early=".claude/retro-brief.md"
+fi
 todo=()
 for p in ${plan[@]+"${plan[@]}"}; do
   t=${p#*	}
@@ -427,7 +431,7 @@ This folder isn't set up for coordination yet${adapter:+ (it has an adapter but 
 5. Worktrees: $worktree_cmd.
 ${extra}Reply "yes" to write all of this, "yes, delegate" to delegate approvals too, or corrections.
 Facts (correct one with KEY=VALUE): name=$name${team:+ team=$team} tracker=$tracker host=$cfg_host terminal=$term_found key_re=$key_re key_example=$key_example tracker_url=${tracker_url:--} default_branch=$default_branch branch_pattern=$branch_pattern section_file=$section_file orch=$orch worktree_cmd='$worktree_cmd' urls=${urls:--}$([ "$adapter_tpl" = github-adapter ] && printf ' repo_slug=%s' "$repo_slug") merge_cmd='${merge_cmd:--}' post_cmd='${post_cmd:--}'
-Write: session-status --init --write [--delegate]${own:+ --own}${shared:+ --shared}$([ "${#review[@]}" = 0 ] || printf ' [--trust=…]') [--review-brief] [--rnd-brief] [KEY=VALUE…]
+Write: session-status --init --write [--delegate]${own:+ --own}${shared:+ --shared}$([ "${#review[@]}" = 0 ] || printf ' [--trust=…]') [--review-brief] [--retro-brief] [KEY=VALUE…]
 EOF
   exit 0
 fi
@@ -450,7 +454,7 @@ fill() { # template, then flags: lines starting {{?FLAG}} kept when FLAG is set,
   done
   printf '%s' "$out"
 }
-wrote=()
+wrote=(${wrote_early:+"$wrote_early"})
 for p in ${todo[@]+"${todo[@]}"}; do
   t=${p%%	*} f=$(at "${p#*	}")
   mkdir -p "$(dirname "$f")" || exit 1

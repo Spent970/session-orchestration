@@ -1,7 +1,7 @@
 #!/usr/bin/env python3 -I
-"""R&D measurement over Claude Code transcripts. Read-only; prints short TSV rows, never transcript bodies.
+"""Retro measurement over Claude Code transcripts. Read-only; prints short TSV rows, never transcript bodies.
 
-usage: python3 -I rnd.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
+usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args]
   sessions [days=7]               one row per session: turns, peak context, compactions, tokens, USD, human msgs,
                                   denials, `!` handoffs, AskUserQuestion, tool errors, cross-session in/out, first prompt
   events [days=7]                 one row per event: deny (detail2: source/reasonType: the hook's or classifier's
@@ -798,7 +798,7 @@ def waits(days=7, min_minutes=5):
 
 def bgtasks(regex=None, days=7):
     if not regex:
-        sys.exit("usage: rnd.py bgtasks REGEX [days=7]")
+        sys.exit("usage: retro.py bgtasks REGEX [days=7]")
     window(days)
     RX = re.compile(regex)
     tot = {"launched": 0, "notified": 0, "silent": 0}
@@ -1062,8 +1062,8 @@ def doc_part(path):
 
 
 def kind_of(first, name, coord):
-    """context-watch.sh's session kinds from the first prompt (coordinator, chunk, review, task), with rnd and other
-    told apart; a session with neither a task nor rnd that opened the pane or ran the status command with --start,
+    """context-watch.sh's session kinds from the first prompt (coordinator, chunk, review, task), with retro and other
+    told apart; a session with neither a task nor retro that opened the pane or ran the status command with --start,
     --changes, --watch or --owner (lib.sh's coord_re) is a coordinator (a task that tests session-status stays a task)."""
     if re.search(r"^Act as a coordinator", first, re.M):
         return "coordinator"
@@ -1073,8 +1073,8 @@ def kind_of(first, name, coord):
         return "review"
     if re.match(r"\s*([Ww]ork on |[A-Z][A-Z0-9]+-\d+:)", first) or re.search(r"^Session task: ", first, re.M):
         return "task"
-    if re.search(r"R&D run|rnd-weekly|<command-name>/?(session-orchestration:)?rnd<", first) or name.startswith("rnd"):
-        return "rnd"
+    if re.search(r"R&D run|(rnd|retro)-weekly|<command-name>/?(session-orchestration:)?(rnd|retro)<", first) or name.startswith(("rnd", "retro-weekly")):
+        return "retro"
     return "coordinator" if coord else "other"
 
 
@@ -1360,7 +1360,7 @@ def inventory():
     slug = lambda s: re.sub(r"^-|-$", "", re.sub(r"[^a-z0-9]+", "-", s.lower()))
     inv = {("press", slug(s)) for s in labels}
     inv |= {("tool", t) for t in re.findall(r"tool\.register\(\{\s*name: '([a-z_]+)'", reg)}
-    inv |= {("skill", d) for d in os.listdir(f"{PLUGIN}/skills") if os.path.isfile(f"{PLUGIN}/skills/{d}/SKILL.md")}
+    inv |= {("skill", d) for d in os.listdir(f"{PLUGIN}/skills") if d != "rnd" and os.path.isfile(f"{PLUGIN}/skills/{d}/SKILL.md")}  # rnd: the old name, counted as retro
     inv |= {("doc", os.path.basename(f)) for f in glob.glob(f"{PLUGIN}/**/*.md", recursive=True)
             if os.path.basename(f) not in ("SKILL.md", "README.md")}
     ss = open(f"{PLUGIN}/skills/orchestrating-sessions/session-status", errors="replace").read()
@@ -1419,6 +1419,7 @@ def usage(days=30):
             c = (o.get("message") or {}).get("content")
             if o.get("type") == "user" and isinstance(c, str):  # a skill started by its slash command
                 for s in re.findall(r"<command-name>/?(?:[\w-]+:)?([\w-]+)</command-name>", c):
+                    s = "retro" if s == "rnd" else s  # the old name of the skill counts as retro
                     if ("skill", s) in count:
                         count[("skill", s)] += 1
             if o.get("type") != "assistant":
@@ -1431,7 +1432,7 @@ def usage(days=30):
                 if name.startswith("mcp__session-orchestration__"):
                     hit = [("tool", name.split("__")[-1])]
                 elif name == "Skill":
-                    hit = [("skill", str(inp.get("skill", "")).split(":")[-1])]
+                    hit = [("skill", {"rnd": "retro"}.get(sk := str(inp.get("skill", "")).split(":")[-1], sk))]
                 elif name == "Read":
                     hit = [("doc", d) for d in docs.findall(str(inp.get("file_path", "")))]
                 elif name == "Bash":
@@ -1480,7 +1481,7 @@ def search(text="", days=7):
     or the calling session. At most 3 hits a session and 30 lines, then how many more; exit 1 with no hit."""
     needle = " ".join(text.split()).lower()
     if not needle:
-        sys.exit("usage: rnd.py search TEXT [days=7]")
+        sys.exit("usage: retro.py search TEXT [days=7]")
     window(days)
     longest = max(needle.replace("~", " ").split() or [""], key=len)   # ~ is the masked home: the raw line has the path
     pre = "" if re.search(r'["\\]', longest) else longest   # raw-line prefilter where JSON keeps the text as is

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Self-check for rnd.py and rnd-weekly: synthetic transcripts in three accounts (~/.claude, ~/.claude-work sharing its
+# Self-check for retro.py and retro-weekly: synthetic transcripts in three accounts (~/.claude, ~/.claude-work sharing its
 # projects/ by symlink, ~/.claude-other with its own), a fixed --until window, and a stubbed claude for the launcher.
-# Run: bash rnd.test.sh  (prints "ok" or the failed check).
+# Run: bash retro.test.sh  (prints "ok" or the failed check).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -39,38 +39,38 @@ cat > "$b/bbbbbbbb-2222.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-10T09:00:01.000Z","requestId":"q1","message":{"usage":{"output_tokens":40000}}}
 EOF
 
-rnd() { TZ=UTC HOME=$home CLAUDE_CONFIG_DIR=$home/.claude-work python3 -I "$here/rnd.py" --until 2026-10-13T12:00:00 "$@"; }
+retro() { TZ=UTC HOME=$home CLAUDE_CONFIG_DIR=$home/.claude-work python3 -I "$here/retro.py" --until 2026-10-13T12:00:00 "$@"; }
 fail() { echo "FAIL: $1"; echo "$2"; exit 1; }
 row() { awk -F'\t' -v s="$1" '$2 == s' <<<"$out"; }
 
-out=$(rnd sessions 7)
+out=$(retro sessions 7)
 [ "$(wc -l <<<"$out")" -eq 4 ] || fail "sessions: header + 3 sessions, the shared tree read once" "$out"
 [ "$(row aaaaaaaa | cut -f1-9,12-16)" = $'-x-proj\taaaaaaaa\tworker\t2026-10-12T10:00\t2026-10-13T11:00\t3\t50005\t0\t1110\t0.09\t1\t1\t1\t0' ] \
   || fail "sessions: window, peak, usd, human, denial, bang" "$out"
 [ "$(row bbbbbbbb | cut -f6,9)" = $'1\t40000' ] || fail "sessions: the other account's tree" "$out"
 
-out=$(rnd events 7)
+out=$(retro events 7)
 for k in human bang self deny bash; do grep -q $'\t'"$k"$'\t' <<<"$out" || fail "events: a $k row" "$out"; done
 grep -q 'old prompt' <<<"$out" && fail "events: the 2020 line is outside the window" "$out"
 grep -q $'deny\tBash: gh pr merge 7\tclassifier/x' <<<"$out" || fail "events: deny row with source/reason" "$out"
 
-out=$(rnd waits 7 5)
+out=$(retro waits 7 5)
 grep -q $'aaaaaaaa\t2026-10-12T10:00\t20\tBash' <<<"$out" || fail "waits: the 20-minute refused call" "$out"
 
-out=$(rnd bgtasks pr-watch 7 2>&1)
+out=$(retro bgtasks pr-watch 7 2>&1)
 grep -q $'aaaaaaaa\t2026-10-12T10:21\tSILENT' <<<"$out" || fail "bgtasks: a notice after the window leaves the task silent" "$out"
 grep -q $'cccccccc\t2026-10-13T09:00\tcompleted/exit 0\t30m\tpr-watch 6' <<<"$out" \
   && grep -q $'cccccccc\t2026-10-13T09:00\tfailed/exit 1\t30m\tpr-watch 7' <<<"$out" || fail "bgtasks: batched notices read one by one" "$out"
 grep -q $'cccccccc\t2026-10-13T09:00\tNO NOTICE YET.*pr-watch 8' <<<"$out" || fail "bgtasks: a task in a live session isn't lost" "$out"
 grep -q "{'launched': 4, 'notified': 2, 'silent': 1, 'running': 1}" <<<"$out" || fail "bgtasks: totals" "$out"
-out=$(HOME=$home CLAUDE_CONFIG_DIR=$home/.claude-work python3 -I "$here/rnd.py" --until 2026-10-13T12:00:05 bgtasks pr-watch 7 2>&1)
+out=$(HOME=$home CLAUDE_CONFIG_DIR=$home/.claude-work python3 -I "$here/retro.py" --until 2026-10-13T12:00:05 bgtasks pr-watch 7 2>&1)
 grep -q $'aaaaaaaa\t2026-10-12T10:21\tcompleted/exit 0' <<<"$out" || fail "bgtasks: notified once the window covers it" "$out"
 
-out=$(rnd triggers aaaaaaaa 7)
+out=$(retro triggers aaaaaaaa 7)
 grep -q $'aaaaaaaa\tcron\twakes=1\trequests=1' <<<"$out" || fail "triggers: the cron wake" "$out"
 grep -q $'aaaaaaaa\thuman\twakes=1\trequests=2' <<<"$out" || fail "triggers: the human wake" "$out"
-[ "$(rnd triggers worker 7 | cut -f2,3)" = "$(cut -f2,3 <<<"$out")" ] || fail "triggers: by session name" "$(rnd triggers worker 7)"
-rnd triggers nobody 7 2>/dev/null && fail "triggers: an unknown session fails" ""
+[ "$(retro triggers worker 7 | cut -f2,3)" = "$(cut -f2,3 <<<"$out")" ] || fail "triggers: by session name" "$(retro triggers worker 7)"
+retro triggers nobody 7 2>/dev/null && fail "triggers: an unknown session fails" ""
 
 # Added after the checks above so their session counts stay put: a watcher notice line with no timestamp, a task
 # session that wrote its reply, and one that went idle without writing it (opened with /clear; it wrote only a
@@ -88,9 +88,9 @@ cat > "$a/eeeeeeee-5555.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-11T09:00:05.000Z","requestId":"e1","message":{"content":[{"type":"tool_use","id":"e2","name":"Write","input":{"file_path":"/p/replies/GHI-33.md"}}]}}
 {"type":"assistant","timestamp":"2026-10-13T12:30:00.000Z","requestId":"e3","message":{"content":[{"type":"tool_use","id":"e4","name":"Write","input":{"file_path":"/p/replies/GHI-3.md"}}]}}
 EOF
-out=$(rnd bgtasks pr-watch 7 2>&1)
+out=$(retro bgtasks pr-watch 7 2>&1)
 grep -q $'dddddddd\t2026-10-11T08:00\tcompleted/exit 0\t0m\tpr-watch 9' <<<"$out" || fail "bgtasks: a notice with no timestamp" "$out"
-out=$(rnd replies 7 2>&1)
+out=$(retro replies 7 2>&1)
 grep -q $'eeeeeeee\tGHI-3\t2026-10-11T09:00\tquiet' <<<"$out" || fail "replies: the lost one" "$out"
 grep -q 'DEF-2' <<<"$out" && fail "replies: a written reply isn't lost" "$out"
 grep -q "{'task': 2, 'wrote': 1, 'lost': 1, 'open': 0}" <<<"$out" || fail "replies: totals" "$out"
@@ -109,7 +109,7 @@ cat > "$a/rrrrrrrr-0003.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f5","message":{"content":[{"type":"tool_use","id":"f6","name":"Bash","input":{"command":"cp a b\ncat /p/replies/MNO-6.md"}}]}}
 {"type":"assistant","timestamp":"2026-10-11T08:00:06.000Z","requestId":"f7","message":{"content":[{"type":"tool_use","id":"f8","name":"Bash","input":{"command":"python3 -I x.py /p/replies/MNO-6.md"}}]}}
 EOF
-out=$(rnd replies 7 2>&1)
+out=$(retro replies 7 2>&1)
 grep -q 'JKL-' <<<"$out" && fail "replies: a reply written by sed -i or python3 isn't lost" "$out"
 grep -q $'\tMNO-6\t' <<<"$out" || fail "replies: a cp on another line or a python3 read isn't a write" "$out"
 grep -q "'wrote': 3," <<<"$out" || fail "replies: Bash writes count as written" "$out"
@@ -151,13 +151,13 @@ cat > "$a/llllllll-2222.jsonl" <<'EOF'
 EOF
 uu() { for i in 0 1 2 3 4 5 6 7 8 9; do printf '{"type":"user","uuid":"u%s","message":{"content":"x"}}\n' "$i"; done; }
 uu > "$a/iiiiiiii-9999.jsonl"; uu > "$a/jjjjjjjj-0000.jsonl"
-out=$(rnd events 7)
+out=$(retro events 7)
 grep -q $'ffffffff\t2026-10-12T08:00\tdeny\tBash: rm -rf x\tconfig/mode: denied\t-p' <<<"$out" || fail "events: a -p session's deny is tagged test" "$out"
 grep -q $'aaaaaaaa\t2026-10-12T10:20\tdeny\tBash: gh pr merge 7\tclassifier/x: denied\t$' <<<"$out" || fail "events: a real deny has an empty test column" "$out"
 grep -q $'gggggggg\t2026-10-12T09:05\tran\tplugin-release rnd-x' <<<"$out" || fail "events: a ran row for the user's ! command" "$out"
 grep -q $'hhhhhhhh\t2026-10-12T11:00\tdeny\tBash: npx bitbucketdc-cli@latest pr merge 12 --repo app\thook/hook: Background session: this compound command will wait' <<<"$out" ||
   fail "events: a deny row carries the hook's message" "$out"
-out=$(rnd units 7 2>&1)
+out=$(retro units 7 2>&1)
 grep -q $'^merge\tapp#11\thhhhhhhh\t2026-10-12T11:00' <<<"$out" || fail "units: the merge that ran" "$out"
 grep -qE $'^merge\t([^\t]*#)?7\t' <<<"$out" && fail "units: a denied merge (gh) doesn't count" "$out"
 grep -qE $'^merge\t([^\t]*#)?1[23]\t' <<<"$out" && fail "units: a denied merge or a heredoc mention doesn't count" "$out"
@@ -169,42 +169,42 @@ grep -q 'merge=3 .*post=2 per_post=2.5' <<<"$out" || fail "units: totals, per po
 # --merged: the adapter's `yesterday` merges of a session's key count, whoever merged; one a session ran isn't
 # counted twice (app#22 was run as a bare `merge 22`); another key's, or one before the window, isn't counted; another repo's same number (lib#21 beside acme/app#21) is.
 printf 'ABC-9\tIn Review\tt\n  1791804600\tapp#30 merged by Rev\n  1791804600\tapp#11 merged\n  1791804600\tapp#22 merged\n  1791804600\tlib#21 merged\n  1000\tapp#31 merged\nZZZ-1\tOpen\tt\n  1791804600\tapp#32 merged\n' > "$tmp/merged.txt"
-out=$(rnd units 7 --merged "$tmp/merged.txt" --keys "$tmp/keys.txt" 2>&1)
+out=$(retro units 7 --merged "$tmp/merged.txt" --keys "$tmp/keys.txt" 2>&1)
 grep -qw 'ABC-9' "$tmp/keys.txt" && [ "$(wc -l < "$tmp/keys.txt")" -eq 1 ] || fail "units: --keys writes the sessions' keys on one line" "$(cat "$tmp/keys.txt")"
 grep -q $'^merge\tapp#30\thost\t2026-10-12T11:30\tABC-9' <<<"$out" && grep -q $'^merge\tlib#21\thost' <<<"$out" && ! grep -qE $'^merge\tapp#(11|22|31|32)\thost' <<<"$out" &&
   grep -q 'merge=5 .* merge_ran=3$' <<<"$out" || fail "units: --merged counts reviewer merges once" "$out"
 # The hook's heredoc rule: a body is dropped only after a safe line that ends there.
 python3 -I -B - "$here" <<'PY' || fail "units: heredoc_text_dropped follows the hook" ""
-import sys; sys.path.insert(0, sys.argv[1]); from rnd import heredoc_text_dropped as d
+import sys; sys.path.insert(0, sys.argv[1]); from retro import heredoc_text_dropped as d
 assert d("cat > f <<'X'\nmerge\nX\ncat f") == "cat > f <<'X'\ncat f"
 for c in ("cat <<<X\nmerge\nX", "cat <<X |\nmerge\nX\nbash", "npx -p x sh <<X\nmerge\nX", "{ cat <<X\nmerge\nX\n} | bash",
           "/t/cat <<X\nmerge\nX", "cat > f <<X # c\nmerge\nX", "cat > f <<X\nmerge\nX\nrg --pre sh . f",
           "cat > .git/hooks/pre-commit <<X\nmerge\nX\ngit commit -m m", "A=1 cat <<X\nmerge\nX"):
     assert "merge" in d(c), c
 PY
-[ "$(rnd units 7 --project nomatch 2>&1 >/dev/null)" = 'usd=0 review_usd=0.0 merge=0 done=0 post=0 merge_ran=0' ] || fail "units: --project filters" "$(rnd units 7 --project nomatch 2>&1)"
-out=$(rnd context 7 2026-10-12T10:30 other)
+[ "$(retro units 7 --project nomatch 2>&1 >/dev/null)" = 'usd=0 review_usd=0.0 merge=0 done=0 post=0 merge_ran=0' ] || fail "units: --project filters" "$(retro units 7 --project nomatch 2>&1)"
+out=$(retro context 7 2026-10-12T10:30 other)
 grep -q $'^over\thhhhhhhh\t1\t50000\t250000' <<<"$out" || fail "context: the session over 200K" "$out"
 grep -q $'^fork\tiiiiiiii\tjjjjjjjj\t10' <<<"$out" || fail "context: the fork" "$out"
 grep -qE $'^all\t[0-9]+\t' <<<"$out" && grep -qE $'^since 2026-10-12T10:30\t3\t83333\t0\t1\t50000\t250000\t2$' <<<"$out" && grep -qE $'^project other\t1\t0\t0\t0\t0\t0\t1$' <<<"$out" \
   || fail "context: scopes" "$out"
 
 printf '# T\n\n| a | b |\n|---|---|\n| `x` | **y** |\n\n- one\n  - two\n\n1. first\n   more\n2. second\n\n```\na < b\n  c\n```\n' > "$tmp/r.md"
-rnd html "$tmp/r.md" "$tmp/r.html"
+retro html "$tmp/r.md" "$tmp/r.html"
 grep -q '<title>T</title>' "$tmp/r.html" && grep -q '<td><code>x</code></td><td><strong>y</strong></td>' "$tmp/r.html" \
   && grep -q '<ul><li>one<ul><li>two</li></ul></li></ul>' "$tmp/r.html" \
   && grep -q '<ol><li>first more</li><li>second</li></ol>' "$tmp/r.html" \
   && grep -q '<pre><code>a &lt; b' "$tmp/r.html" || fail "html" "$(cat "$tmp/r.html")"
 # a line starting with `#` that isn't a heading: once looped forever
 printf 'see PRs\n#3879 and #4490\n\n#3879 alone\n' > "$tmp/h.md"
-rnd html "$tmp/h.md" "$tmp/h.html"
+retro html "$tmp/h.md" "$tmp/h.html"
 grep -q '<p>see PRs #3879 and #4490</p><p>#3879 alone</p>' "$tmp/h.html" || fail "html: # line in a paragraph" "$(cat "$tmp/h.html")"
 
 # usage: a press in the window counts; one there since 09-01 with none is unused; a 2026-01-01 line is trimmed.
 st=$tmp/state/session-orchestration; mkdir -p "$st/inventory"
 echo '[["press","attach"],["press","compact"]]' > "$st/inventory/2026-09-01.json"
 printf '%s\n' '{"t":1791799200,"k":"press","what":"attach"}' '{"t":1767225600,"k":"press","what":"compact"}' 'junk' > "$st/usage.jsonl"
-out=$(XDG_STATE_HOME=$tmp/state rnd usage)
+out=$(XDG_STATE_HOME=$tmp/state retro usage)
 grep -qx $'press\tattach\t1\t2026-09-01\t' <<<"$out" && grep -qx $'press\tcompact\t0\t2026-09-01\tunused' <<<"$out" \
   && grep -q $'^press\tcopy-command\t0\t'"$(date -u +%F)"$'\t$' <<<"$out" && grep -q $'^flag\t--peek\t.*[0-9-]\t$' <<<"$out" \
   && [ "$(wc -l < "$st/usage.jsonl" | tr -d ' ')" = 1 ] && [ -e "$st/inventory/$(date -u +%F).json" ] || fail "usage" "$out"
@@ -250,12 +250,12 @@ cat > "$a/oooooooo-3333.jsonl" <<'EOF'
 EOF
 printf '%s\n' '{"t":1791814200,"k":"chunk","what":"build","model":"opus","effort":"medium","est":50,"act":35}' \
   '{"t":1791795600,"k":"chunk","what":"build","model":"opus","effort":"medium","est":20,"act":20}' >> "$st/usage.jsonl"
-out=$(XDG_STATE_HOME=$tmp/state rnd chunks 7)
+out=$(XDG_STATE_HOME=$tmp/state retro chunks 7)
 [ "$(grep -v '^key' <<<"$out")" = $'PROJ-1\t1\tbuild/opus/medium\t50\t35\t60000\t20000\t0\t0.93\t6\t1\tafter\t60\nratio\tbuild\t0.85\tn=2' ] \
   || fail "chunks: two sessions summed, the log line matched, handoff after a compaction, ratio" "$out"
-out=$(rnd chunks 7 --session nnnnnnnn)
+out=$(retro chunks 7 --session nnnnnnnn)
 grep -q $'^-\tnnnnnnnn\t?/opus/?\t?\t35\t60000\t' <<<"$out" || fail "chunks --session: summed over its Supersedes: chain, no log" "$out"
-out=$(rnd trial 7)
+out=$(retro trial 7)
 # The off arm also has the `Work on ABC-n` sessions above (ABC-1, ABC-9 with merge 11; kkkkkkkk has no requests).
 for m in $'tasks\t1\t3' $'units\t1\t2' $'usd_per_unit_median\t0.93\t3.12' $'usd_per_unit_total\t0.93\t' $'compacts_per_session\t0.5\t' \
   $'handoffs_after\t1\t0' $'findings_per_unit\t3.0\t0.0' $'reviews_per_unit\t1.0\t0.0' $'stepins_per_unit\t2.0\t'; do
@@ -280,11 +280,11 @@ cat > "$a/qqqqqqqq-1111.jsonl" <<'EOF'
 EOF
 printf '%s\n' '{"t":1791821400,"k":"chunk","what":"scan","model":"opus","effort":"low","est":11,"act":30}' \
   '{"t":1791822600,"k":"chunk","what":"scan","model":"opus","effort":"low","est":22,"act":10}' >> "$st/usage.jsonl"
-out=$(XDG_STATE_HOME=$tmp/state rnd chunks 7)
+out=$(XDG_STATE_HOME=$tmp/state retro chunks 7)
 grep -q $'^PROJ-3\t1\tscan/opus/low\t11\t10\t' <<<"$out" && grep -q $'^PROJ-3\t2\tscan/opus/low\t22\t30\t' <<<"$out" ||
   fail "chunks: each log line on the chunk whose --done printed it" "$out"
 echo '{"t":1791822700,"k":"escalate","what":"chunk","model":"opus","effort":"high","sess":"abcdefabcdef"}' >> "$st/usage.jsonl"
-[ "$(XDG_STATE_HOME=$tmp/state rnd chunks 7 | tail -1)" = $'escalations\t1' ] || fail "chunks: escalations line" "$(XDG_STATE_HOME=$tmp/state rnd chunks 7 | tail -2)"
+[ "$(XDG_STATE_HOME=$tmp/state retro chunks 7 | tail -1)" = $'escalations\t1' ] || fail "chunks: escalations line" "$(XDG_STATE_HOME=$tmp/state retro chunks 7 | tail -2)"
 
 # kinds: start lines joined by sha256(name)[:12]. kind-worker (17:00, build) ran in dddddd01 (a nudge, a done reply
 # the gate refused) and its successor dddddd02 (done at 17:30); dddddd00, an older session of that name, isn't it.
@@ -319,10 +319,10 @@ printf '%s\n' "{\"t\":1791824400,\"k\":\"start\",\"what\":\"build\",\"model\":\"
   '{"t":1791824400,"k":"start","what":"build","model":"opus","effort":"medium"}' \
   "{\"t\":1791825000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" \
   "{\"t\":1791820000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" >> "$st/usage.jsonl"
-out=$(XDG_STATE_HOME=$tmp/state rnd kinds 7)
+out=$(XDG_STATE_HOME=$tmp/state retro kinds 7)
 [ "$(grep -v '^kind' <<<"$out")" = $'build\topus\tmedium\t2\t1\t10.0\t10.0\t1.00\t1\t1\t30\t1\nscan\thaiku\tlow\t1\t1\t1.0\t1.0\t0.00\t0\t0\t-\t0' ] ||
   fail "kinds: join by hashed name and Supersedes:, haiku rates, done, handovers, nudges, minutes, escalations after the start" "$out"
-out=$(RATES=1,1,1,1 XDG_STATE_HOME=$tmp/state rnd kinds 7)
+out=$(RATES=1,1,1,1 XDG_STATE_HOME=$tmp/state retro kinds 7)
 grep -q $'^build\topus\tmedium\t2\t1\t2.0\t' <<<"$out" || fail "kinds: RATES prices every model alike" "$out"
 # kind-scan started again at 18:00 (review) in dddddd04, on claude-opus-4-1 ($15 for 1M input) with 1M 5-minute cache
 # writes ($6.25 at 1.25x input): the 17:00 start keeps only dddddd03, the 18:00 one gets dddddd04.
@@ -333,7 +333,7 @@ cat > "$a/dddddd04-1111.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-12T18:00:12.000Z","requestId":"d5","message":{"model":"claude-opus-4-5-20251101","usage":{"cache_creation_input_tokens":1000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000}}}}
 EOF
 echo "{\"t\":1791828000,\"k\":\"start\",\"what\":\"review\",\"model\":\"opus\",\"effort\":\"xhigh\",\"sess\":\"$(h kind-scan)\",\"size\":\"L\"}" >> "$st/usage.jsonl"
-out=$(XDG_STATE_HOME=$tmp/state rnd kinds 7)
+out=$(XDG_STATE_HOME=$tmp/state retro kinds 7)
 grep -q $'^scan\thaiku\tlow\t1\t1\t1.0\t' <<<"$out" && grep -q $'^review:L\topus\txhigh\t1\t1\t21.25\t' <<<"$out" ||
   fail "kinds: a reused name joins the later start only; older opus and 5-minute cache-write rates" "$out"
 
@@ -353,7 +353,7 @@ printf '# REC-4: history\n\n- 2026-10-07 10:00 (u) REC-4: on you\n- 2026-10-08 1
 printf '# REC-4: history\n\n- 2026-10-09 10:00 (u) REC-4: on you again\n- 2026-10-14 10:00 (u) REC-4: after the window\n' > "$hr/n/p/REC-4.history.md"
 jq -nc '{type: "assistant", timestamp: "2026-10-12T09:01:00.000Z", message: {content: [{type: "tool_use", id: "h2", name: "Bash", input: {command: "session-status --pending-history REC-4 --last 5"}}]}}' >> "$home/.claude/projects/-x-hroot/cccccccc-1.jsonl"
 jq -nc '{type: "user", timestamp: "2026-10-12T09:01:01.000Z", toolUseResult: {stdout: "01234567"}, message: {content: [{type: "tool_result", tool_use_id: "h2"}]}}' >> "$home/.claude/projects/-x-hroot/cccccccc-1.jsonl"
-out=$(TZ=UTC rnd handoff 7 2> "$tmp/handoff.err")
+out=$(TZ=UTC retro handoff 7 2> "$tmp/handoff.err")
 ! grep -q OLD-3 <<<"$out" && [ "$(grep -c REC-4 <<<"$out")" = 1 ] &&
   grep -q $'^hroot\topen\tREC-4\t2026-10-07\t\t5.1\tuser decision\t0\t2\t\t0\t[0-9]*\t1\t2\tcccccccc$' <<<"$out" || fail "handoff window and rounds" "$out"
 grep -q $'^hroot\topen\tOPEN-1\t2026-10-10\t\t3.1\tuser decision\t1\t1\t\t8\t[0-9]*\t1\t10\tcccccccc$' <<<"$out" &&
@@ -398,10 +398,10 @@ cat > "$a/rrrrrrrr-1111.jsonl" <<EOF
 {"type":"user","timestamp":"2026-10-12T18:10:04.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"v4a","content":"sent"},{"type":"tool_result","tool_use_id":"v4b","content":"w"}]}}
 {"type":"assistant","timestamp":"2026-10-12T18:10:05.000Z","requestId":"v5","message":{"usage":{"input_tokens":31500}}}
 EOF
-out=$(rnd start 7)
+out=$(retro start 7)
 [ "$(grep -v '^session' <<<"$out")" = $'ssssssss\t2026-10-12T17:00\t6\t40000\t53900\t6000\t2925\t0\t2000\t1000\t1475\t500\nmedian\tn=1\t6\t40000\t53900\t6000\t2925\t0\t2000\t1000\t1475\t500' ] ||
   fail "start: the coordinator's Start by part, ended by the watcher" "$out"
-out=$(rnd loads 7)
+out=$(retro loads 7)
 grep -q $'^review\t1\t1\t2\t1\t0\t0\t1\t1\t0\t1\t0\t1\t-\t800\t300$' <<<"$out" &&
   grep -q $'^coordinator\t1\t0\t0\t0\t1\t0\t0\t0\t1\t0\t0\t0\t6000\t-\t-$' <<<"$out" || fail "loads: per kind" "$out"
 
@@ -422,33 +422,45 @@ EOF
 mkdir -p "$home/.claude-other/projects/-x-proj"
 printf '%s\n' '{"type":"user","timestamp":"2026-10-12T08:30:00.000Z","message":{"content":"zebra plan, second login"}}' > "$home/.claude-other/projects/-x-proj/eeeeeeee-5555.jsonl"
 printf '%s\n' '{"type":"user","timestamp":"2026-10-12T08:00:00.000Z","message":{"content":"zebra plan from the caller"}}' > "$a/ffffffff-6666.jsonl"
-out=$(rnd search llama 7)
+out=$(retro search llama 7)
 [ "${out%, *}" = "searcher (eeeeeeee) · 2026-10-12 09:06 · claude: llama: aws <masked> gcp <masked>, Bearer <masked>; kept: basic configuration, the bearer of news, author: Bob, context tokens: 45000" ] && [[ ${out##*, } == *home2/y && ${out##*, } != '~'* ]] ||
   fail "search: keys masked, plain words kept" "$out"
-[ "$(rnd search '~/x/docs' 7 | cut -c1-38)" = "searcher (eeeeeeee) · 2026-10-12 09:00" ] || fail "search: ~ finds the home path" ""
-out=$(CLAUDE_CODE_SESSION_ID=ffffffff-6666 rnd search 'Zebra  PLAN' 7)
+[ "$(retro search '~/x/docs' 7 | cut -c1-38)" = "searcher (eeeeeeee) · 2026-10-12 09:00" ] || fail "search: ~ finds the home path" ""
+out=$(CLAUDE_CODE_SESSION_ID=ffffffff-6666 retro search 'Zebra  PLAN' 7)
 exp="searcher (eeeeeeee) · 2026-10-12 09:05 · claude: zebra plan again
 searcher (eeeeeeee) · 2026-10-12 09:04 · claude: …$(printf 'x%.0s' {1..79}) zebra plan done, sha <masked> $(printf 'y%.0s' {1..110})
 searcher (eeeeeeee) · 2026-10-12 09:03 · msg: <cross-session-message from=\"x\">the Zebra Plan is approved</cross-session-message>
 … 2 more (sessions: 1): narrow TEXT or days, or --peek ID"
 [ "$out" = "$exp" ] || fail "search: newest first, 3 a session, masked, no caller" "$out"
-out=$(rnd search 'chose the zebra' 7)
+out=$(retro search 'chose the zebra' 7)
 [ "$out" = "searcher (eeeeeeee) · 2026-10-12 09:00 · you: We chose the zebra plan; mail <email>, token=<masked>, key <masked>, in ~/x/docs/orchestration/replies/rnd-competitors-2026-11-04.md, a basic idea" ] ||
   fail "search: a prompt, masked" "$out"
-rnd search hunter2xyz 7 >/dev/null && fail "search: a masked secret isn't found" ""
-[ "$(rnd search 'no such words' 7)" = "no hits for 'no such words' in 7 days" ] || fail "search: no hits" ""
-[ "$(rnd search 'second login' 7)" = "searcher (eeeeeeee) · 2026-10-12 08:30 · you: zebra plan, second login" ] ||
-  fail "search: a session's second account" "$(rnd search "other account" 7)"
+retro search hunter2xyz 7 >/dev/null && fail "search: a masked secret isn't found" ""
+[ "$(retro search 'no such words' 7)" = "no hits for 'no such words' in 7 days" ] || fail "search: no hits" ""
+[ "$(retro search 'second login' 7)" = "searcher (eeeeeeee) · 2026-10-12 08:30 · you: zebra plan, second login" ] ||
+  fail "search: a session's second account" "$(retro search "other account" 7)"
 rm -r "$a/eeeeeeee-5555.jsonl" "$a/ffffffff-6666.jsonl" "$home/.claude-other/projects/-x-proj"
 
-# The stub in ~/.local/bin (HOME=$tmp below): rnd-weekly puts that first on its PATH, so the real claude never runs.
+# The stub in ~/.local/bin (HOME=$tmp below): retro-weekly puts that first on its PATH, so the real claude never runs.
 mkdir -p "$tmp/.local/bin"
 printf '#!/bin/sh\necho "$@" > %q\n' "$tmp/claude.args" > "$tmp/.local/bin/claude"; chmod +x "$tmp/.local/bin/claude"
-out=$(HOME=$tmp RND_LOG=$tmp/log "$here/rnd-weekly" "$tmp" --dry-run)
-grep -q 'claude --bg --model opus --effort xhigh -n rnd-weekly-' <<<"$out" && grep -qx "$tmp/.local/bin/claude" <<<"$out" && [ ! -e "$tmp/claude.args" ] ||
-  fail "rnd-weekly --dry-run starts nothing, and finds the stub" "$out"
-HOME=$tmp RND_LOG=$tmp/log "$here/rnd-weekly" "$tmp"
-grep -q 'session-orchestration:rnd' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log" || fail "rnd-weekly starts the run" "$(cat "$tmp/log")"
-HOME=$tmp RND_LOG=$tmp/log "$here/rnd-weekly" "$tmp/nope" && fail "rnd-weekly: a missing root fails" ""
-grep -q "no project root $tmp/nope" "$tmp/log" || fail "rnd-weekly logs a missing root" "$(cat "$tmp/log")"
+out=$(HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp" --dry-run)
+grep -q 'claude --bg --model opus --effort xhigh -n retro-weekly-' <<<"$out" && grep -qx "$tmp/.local/bin/claude" <<<"$out" && [ ! -e "$tmp/claude.args" ] ||
+  fail "retro-weekly --dry-run starts nothing, and finds the stub" "$out"
+HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp"
+grep -q 'session-orchestration:retro' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log" || fail "retro-weekly starts the run" "$(cat "$tmp/log")"
+HOME=$tmp RETRO_LOG=$tmp/log "$here/retro-weekly" "$tmp/nope" && fail "retro-weekly: a missing root fails" ""
+grep -q "no project root $tmp/nope" "$tmp/log" || fail "retro-weekly logs a missing root" "$(cat "$tmp/log")"
+# the old entry points: the rnd-weekly shim (a crontab line names it) starts the same run; /rnd is a stub for retro
+rm -f "$tmp/claude.args"
+out=$(HOME=$tmp RND_LOG=$tmp/log2 "$here/../rnd/rnd-weekly" "$tmp" --dry-run)
+grep -q 'claude --bg --model opus --effort xhigh -n retro-weekly-' <<<"$out" || fail "rnd-weekly shim --dry-run" "$out"
+HOME=$tmp RND_LOG=$tmp/log2 "$here/../rnd/rnd-weekly" "$tmp"
+grep -q 'session-orchestration:retro' "$tmp/claude.args" && grep -q "start in $tmp" "$tmp/log2" || fail "rnd-weekly shim starts the run" "$(cat "$tmp/log2")"
+grep -q '^name: rnd$' "$here/../rnd/SKILL.md" && grep -q 'session-orchestration:retro' "$here/../rnd/SKILL.md" || fail "/rnd stub points at retro" ""
+# usage counts the old name's slash command as a retro use
+printf '%s\n' '{"type":"user","timestamp":"2026-10-12T09:00:00.000Z","message":{"content":"<command-name>/session-orchestration:rnd</command-name>"}}' > "$a/rrrrrrrr-7777.jsonl"
+out=$(XDG_STATE_HOME=$tmp/state retro usage)
+grep -q $'^skill\tretro\t1\t' <<<"$out" && ! grep -q $'^skill\trnd\t' <<<"$out" || fail "usage: /rnd counts as retro" "$(grep '^skill' <<<"$out")"
+rm "$a/rrrrrrrr-7777.jsonl"
 echo ok
