@@ -476,9 +476,16 @@ cat > "$a/rrrrrrrr-1111.jsonl" <<EOF
 {"type":"user","timestamp":"2026-10-12T18:10:04.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"v4a","content":"sent"},{"type":"tool_result","tool_use_id":"v4b","content":"w"}]}}
 {"type":"assistant","timestamp":"2026-10-12T18:10:05.000Z","requestId":"v5","message":{"usage":{"input_tokens":31500}}}
 EOF
+sed -i.bak '1s/"type":"user",/"type":"user","entrypoint":"claude-desktop",/' "$a/ssssssss-1111.jsonl"; rm "$a/ssssssss-1111.jsonl.bak"
 out=$(retro start 7)
-[ "$(grep -v '^session' <<<"$out")" = $'ssssssss\t2026-10-12T17:00\t6\t40000\t53900\t6000\t2925\t0\t2000\t1000\t1475\t500\nmedian\tn=1\t6\t40000\t53900\t6000\t2925\t0\t2000\t1000\t1475\t500' ] ||
+[ "$(grep -v '^session' <<<"$out")" = $'ssssssss\t2026-10-12T17:00\tclaude-desktop\t6\t40000\t53900\t13900\t6000\t2925\t0\t2000\t1000\t1475\t500\nmedian\tn=1\tall\t6\t40000\t53900\t13900\t6000\t2925\t0\t2000\t1000\t1475\t500' ] ||
   fail "start: the coordinator's Start by part, ended by the watcher" "$out"
+# A cli coordinator (base 10K lower): medians per entrypoint too.
+sed 's/"claude-desktop"/"cli"/; s/"input_tokens":\([0-9]*\)/"input_tokens":\1-10000/' "$a/ssssssss-1111.jsonl" |
+  python3 -c 'import re,sys; print(re.sub(r"(\d+)-10000", lambda m: str(int(m[1]) - 10000), sys.stdin.read()), end="")' > "$a/tttttttt-1111.jsonl"
+out=$(retro start 7); rm "$a/tttttttt-1111.jsonl"
+grep -q $'^median\tn=2\tall\t' <<<"$out" && grep -q $'^median\tn=1\tclaude-desktop\t6\t40000\t53900\t13900\t' <<<"$out" &&
+  grep -q $'^median\tn=1\tcli\t6\t30000\t43900\t13900\t' <<<"$out" || fail "start: medians per entrypoint" "$out"
 out=$(retro loads 7)
 grep -q $'^review\t1\t1\t2\t1\t0\t0\t1\t1\t0\t1\t0\t1\t-\t800\t300$' <<<"$out" &&
   grep -q $'^coordinator\t1\t0\t0\t0\t1\t0\t0\t0\t1\t0\t0\t0\t6000\t-\t-$' <<<"$out" || fail "loads: per kind" "$out"

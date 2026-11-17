@@ -51,9 +51,10 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project
                                   wait, blocker bucket, rewordings, rounds, reason, detail/history bytes, reads of
                                   its files in the window (tokens, sessions); stderr: totals, wait per bucket, and
                                   entries whose history a session read against the rest
-  start [days=7]                  one row per coordinator started in the window: its Start's requests, context at the
-                                  first request and after Start, and Start's tokens by part (skill, coord_docs,
-                                  feature_docs, project_docs, schemas, status, rest); then the medians
+  start [days=7]                  one row per coordinator started in the window: its entrypoint, Start's requests, context
+                                  at the first request (base) and after Start, Start's increment, and its tokens by
+                                  part (skill, coord_docs, feature_docs, project_docs, schemas, status, rest); then the
+                                  medians, per entrypoint too
   loads [days=7]                  one row per session kind (sessions started in the window): messages (mid-turn too),
                                   skill loads and re-injects, worker.md reads, reply cards, SendMessage and reply
                                   schema loads and calls, median tokens of a skill load, a card and a reply schema
@@ -1199,13 +1200,14 @@ def scan(f):
     request after the status watcher was armed, and whether it's a `-p` run."""
     reqs, items, pending, calls, bg, seen, n = [], [], [], {}, set(), set(), {}
     first = name = ""
-    coord, typed, watch, test = False, None, None, False
+    coord, typed, watch, test, entry = False, None, None, False, ""
     add = lambda part, chars, what="": pending.append([part, chars, what])
     count = lambda k, v=1: n.__setitem__(k, n.get(k, 0) + v)
     for _, o in lines(f):
         if o.get("isSidechain"):
             continue
         test = test or o.get("entrypoint") == "sdk-cli"
+        entry = entry or o.get("entrypoint") or ""
         t, a, m = o.get("type"), o.get("attachment") or {}, o.get("message") or {}
         c = m.get("content")
         if t == "agent-name":
@@ -1294,7 +1296,7 @@ def scan(f):
         i = it[3]
         grow = reqs[i][0] - reqs[i - 1][0] - reqs[i - 1][1] if i > 0 else 0
         it.append(round(grow * it[1] / tot[i]) if grow > 0 and tot[i] else 0)
-    return dict(kind=kind_of(first, name, coord), reqs=reqs, items=items, n=n, typed=typed, watch=watch, test=test)
+    return dict(kind=kind_of(first, name, coord), reqs=reqs, items=items, n=n, typed=typed, watch=watch, test=test, entry=entry or "-")
 
 
 def started(days):
@@ -1310,11 +1312,12 @@ START_PARTS = ["skill", "coord_docs", "feature_docs", "project_docs", "schemas",
 
 
 def start(days=7):
-    """One row per coordinator that started in the window: its Start's requests, the context at the first request and
-    after Start, and what Start added by part (tokens; rest: model output, small reads, hook text); then the medians.
+    """One row per coordinator that started in the window: its entrypoint (claude-desktop, cli: the harness base
+    differs), its Start's requests, the context at the first request (base) and after Start, Start's own increment
+    (after_start - base), and what Start added by part (tokens; rest: model output, small reads, hook text); then the medians.
     Start ends at the request after the status watcher was armed, or the one before the first typed prompt after the
-    first if that comes sooner; with neither, at request 15."""
-    print("session\tstarted\treqs\tbase\tafter_start\t" + "\t".join(START_PARTS) + "\trest")
+    first if that comes sooner; with neither, at request 15. Medians: over all, then per entrypoint when several."""
+    print("session\tstarted\tentry\treqs\tbase\tafter_start\tincrement\t" + "\t".join(START_PARTS) + "\trest")
     rows = []
     for sid, s in started(days):
         if s["kind"] != "coordinator":
@@ -1323,11 +1326,14 @@ def start(days=7):
         ends = [e for e in (s["watch"], s["typed"]) if e is not None and e >= 1]
         end = min(min(ends) if ends else 14, len(reqs) - 1)
         parts = [sum(x[4] for x in s["items"] if x[0] == p and x[3] <= end) for p in START_PARTS]
-        row = [end + 1, reqs[0][0], reqs[end][0]] + parts + [reqs[end][0] - reqs[0][0] - sum(parts)]
-        rows.append(row)
-        print("\t".join(map(str, [sid, reqs[0][2][:16]] + row)))
+        row = [end + 1, reqs[0][0], reqs[end][0], reqs[end][0] - reqs[0][0]] + parts + [reqs[end][0] - reqs[0][0] - sum(parts)]
+        rows.append((s["entry"], row))
+        print("\t".join(map(str, [sid, reqs[0][2][:16], s["entry"]] + row)))
     med = lambda xs: sorted(xs)[len(xs) // 2] if xs else 0
-    print("\t".join(map(str, ["median", f"n={len(rows)}"] + [med([r[i] for r in rows]) for i in range(len(START_PARTS) + 4)])))
+    entries = sorted({e for e, _ in rows})
+    for e in ["all"] + (entries if len(entries) > 1 else []):
+        rs = [r for x, r in rows if e in ("all", x)]
+        print("\t".join(map(str, ["median", f"n={len(rs)}", e] + [med([r[i] for r in rs]) for i in range(len(START_PARTS) + 5)])))
 
 
 LOADS = ["msgs", "mid_turn", "skill_load", "skill_reinject", "worker_md", "card", "sendmessage_schema", "reply_schema",
