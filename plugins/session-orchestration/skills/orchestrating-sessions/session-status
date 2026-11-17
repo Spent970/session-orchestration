@@ -1182,7 +1182,8 @@ fi
 # A resume of a session holding over SESSION_STATUS_MAX_RESUME (200000) tokens of context is refused (exit 4): a small
 # follow-up would re-read all of it; start a fresh session with the task's replies file as its brief instead.
 # Checks every 30s, for at most SESSION_STATUS_WAIT_S (86400); a failed listing is retried, never read as "not
-# listed". Exit 2: still busy then, or no such session.
+# listed". Exit 2: still busy then, or no such session. Exit 5: superseded (a later handover's `Supersedes: ID` owns
+# its task now; an event or a note naming the old id would wake a stopped predecessor): it names the newest successor.
 if [ -n "$SEND" ]; then
   too_big() {  # TRANSCRIPT NAME ID
     local c max=${SESSION_STATUS_MAX_RESUME:-200000}
@@ -1192,6 +1193,15 @@ if [ -n "$SEND" ]; then
   here=; [ "${1:-}" != --here ] || { here=1; shift; }
   want=${1:-}; text=${2:-}
   [ "${#want}" -ge 8 ] && [ -n "$text" ] || { echo "usage: session-status --send-when-idle [--here] ID TEXT (ID: 8+ characters)"; exit 2; }
+  # Its transcript in any project folder (a worktree's too); successors in the root's (--handover starts them there)
+  # and its own, newest first.
+  set -- "$CUR"/projects/*/"$want"*.jsonl
+  if [ $# = 1 ] && [ -e "$1" ]; then
+    old=$(basename "$1" .jsonl) s=$(basename "$1" .jsonl) i=0
+    pairs=$(ls -t "$TRANSCRIPTS"/*.jsonl "${1%/*}"/*.jsonl 2>/dev/null | supersedes)
+    while [ $i -lt 50 ] && n=$(awk -v id="$s" '$1 == id {print $2; exit}' <<<"$pairs") && [ -n "$n" ] && [ "$n" != "$old" ]; do s=$n i=$((i + 1)); done
+    [ "$s" = "$old" ] || { echo "${old:0:8} is superseded by ${s:0:8}, which owns its task now: send to that one (--send-when-idle ${here:+--here }${s:0:8} TEXT); nothing sent"; exit 5; }
+  fi
   # The account a resume runs under, and the name it keeps there: --here moves one from another account to this one.
   to() { if [ -n "$here" ]; then echo claude; else echo "$pre"; fi; }
   moved() { [ -n "$here" ] && [ "$pre" != claude ]; }
