@@ -3,7 +3,8 @@
 # Setup with defaults, then the check line, the status command and the config, as a coordinator would run them.
 # Nothing the coordinator reads may name us (the deny pattern below, its private part from scrub-check.sh's
 # SCRUB_DENY or ~/.config/scrub-deny; CLAUDE_CONFIG_DIR is core and allowed), and
-# outside the repo only ~/.cache/session-status/ and the plugin's state folder (left empty) may be written.
+# outside the repo only ~/.cache/session-status/ and, in the plugin's state folder, the project's own folder
+# (projects/<root>/: setup's memory and handoff file) may be written.
 # Prints "ok" or the failures.
 set -u
 # The private part of the deny pattern, as scrub-check.sh reads it (before HOME moves): kept out of the repo.
@@ -22,8 +23,9 @@ fail() { echo "FAIL $*"; fails=$((fails + 1)); }
 out=$T/out; : > "$out"
 { bash "$SS" --init; bash "$SS" --init --write; } >> "$out" 2>&1 || fail "setup: $(tail -3 "$out")"
 # Setup's project memory (project-memory's memory-init): the index with the coordinator's row, and its topic files.
-m=$(find "$T/repo" -name memory.md -not -path '*/memory/*' | head -1)
-[ -n "$m" ] && [ -f "${m%.md}/coordinator.md" ] && [ -f "${m%.md}/misc.md" ] && grep -qF '| `coordinator.md` | Acting as the coordinator' "$m" &&
+sp=$HOME/.local/state/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$(pwd -P)")   # lib.sh proj_dir
+m=$sp/memory.md
+[ -f "$m" ] && [ -f "${m%.md}/coordinator.md" ] && [ -f "${m%.md}/misc.md" ] && grep -qF '| `coordinator.md` | Acting as the coordinator' "$m" &&
   grep -qF "projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$(pwd -P)")*/" "$m" || fail "setup's memory: ${m:-none} $(cat "$m" 2>/dev/null | head -30)"
 c=$(bash "$SS" --init --check 2>&1); echo "$c" >> "$out"
 [[ $c == configured* ]] || fail "check: $c"
@@ -34,14 +36,14 @@ bash "$SS" --config terminal >> "$out" 2>&1
 # the docs the check's feature lines name (`  <name>: … Read <doc> when …`).
 docs=("$P/skills/orchestrating-sessions/"*.md "$P/hooks/reply-card.txt" "$P/skills/setting-up-coordination/SKILL.md" "$P/README.md")
 while IFS= read -r d; do docs+=("$(find "$P" -path "*/$d" | head -1)"); done < <(grep -oE '[a-z-]+/[a-z-]+\.md' <<<"$c")
-written=$(git ls-files -o --exclude-standard; git ls-files -o -i --exclude-standard)
+written=$(git ls-files -o --exclude-standard; git ls-files -o -i --exclude-standard; find "$sp" -type f 2>/dev/null)
 deny="${private:+$private|}~/bin|(^|[^[:alnum:]_])ghostty([^[:alnum:]_]|\$)"
 hits=$(grep -HinE "$deny" "$out" "${docs[@]}" $written 2>/dev/null | grep -v CLAUDE_CONFIG_DIR)
 [ -z "$hits" ] || fail "personal strings: $hits"
 
 # Writes outside the repo.
-outside=$(cd "$T" && find home tmp -type f | grep -vE '^home/\.cache/session-status/' | grep -v '^tmp/')
+outside=$(cd "$T" && find home tmp -type f | grep -vE '^home/\.cache/session-status/' | grep -v '^tmp/' |
+  grep -vF "home/.local/state/session-orchestration/projects/${sp##*/}/")
 [ -z "$outside" ] || fail "written outside the repo: $outside"
-[ -z "$(find "$HOME/.local/state/session-orchestration" -type f 2>/dev/null)" ] || fail "state folder not empty"
 
 [ "$fails" = 0 ] && echo ok || { echo "$fails failed"; exit 1; }
