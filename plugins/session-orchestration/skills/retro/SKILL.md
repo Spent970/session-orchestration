@@ -174,8 +174,10 @@ and no heading.
      project memory index has a graduation rule and the brief has no graduation check of its own, run
      project-memory's `graduate` skill's Gather and Propose steps (no Apply) and put its numbered list in as one
      proposal outside the 5 below.
-   - `protocol`, against its targets: from `start.tsv`'s median row, the context after Start (≤ 65K), its requests
-     (≤ 6), skill + coord_docs (≤ 6.5K), feature_docs (≤ 0.5K), project_docs (≤ 6K), schemas (≤ 2.6K) and status +
+   - `protocol`, against its targets: from `start.tsv`'s median rows (all, and per entrypoint when there are
+     several: the app's harness base runs ~30K above the CLI's), the base (first request; the harness's, not the
+     protocol's: report it, no target), Start's own increment (after_start − base, ≤ 23K: the part targets below
+     summed), its requests (≤ 6), skill + coord_docs (≤ 6.5K), feature_docs (≤ 0.5K), project_docs (≤ 6K), schemas (≤ 2.6K) and status +
      rest (≤ 7K); from `loads.tsv`, workers' (task, chunk, review) skill loads (0 to reply: the card replaces them)
      and the reply cost, card_tok + reply_tok (≤ 1K). Name the part furthest over its target.
    - `features`: each `unused` row of `usage.tsv` (0 uses in 30 days, there all window) is a candidate to drop or
