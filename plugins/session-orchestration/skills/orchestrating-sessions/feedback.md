@@ -81,7 +81,10 @@ the retro hands them on and never starts an apply session:
   plugin coordinator runs under another account, SendMessage can't reach it: ask the user to tell it there.
 - The retro's report lists the open cases as the plugin coordinator's, with no apply offer.
 
-Never apply without the user's yes for that batch.
+Never apply without the user's yes for that batch. The one standing yes: in the coordinator that may start apply
+sessions (the plugin coordinator where there is one, else any), `session-status --config start.kinds.feedback_apply`
+printing `at_once` (SKILL.md, Starting a session) means start them, then tell the user in one line per session; the
+footer's `— apply?` is then answered already.
 
 ## Applying (an apply session)
 

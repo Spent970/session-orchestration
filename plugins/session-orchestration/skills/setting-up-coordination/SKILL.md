@@ -1,6 +1,6 @@
 ---
 name: setting-up-coordination
-description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, approvals.pr_create, terminal, features.accounts, features.accounts_weekly_switch, features.review_inbox, features.notify).
+description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, approvals.pr_create, start.mode, start.kinds.feedback_apply, terminal, features.accounts, features.accounts_weekly_switch, features.review_inbox, features.notify).
 ---
 
 # Setting up coordination
@@ -13,7 +13,7 @@ coordinator has nothing to read. `open_pane` checks (`session-status --init --ch
 
 `session-status --init --check`, from the folder: one line, exit 0 configured, 1 unconfigured or partial, 3 covered
 by a parent. Configured adds:
-- `active: tracker=… host=… delegate=on|off pr_create=on|off terminal=… messages=… features=…|none`: the config in effect, then an
+- `active: tracker=… host=… delegate=on|off pr_create=on|off start=…[,feedback_apply:…] terminal=… messages=… features=…|none`: the config in effect, then an
   indented line per doc of the terminal, the messages module and each feature that's on: `  <name>: <start step> Read
   <doc> when <events>`, from the doc's `> **Start**:` and `> **Read when**:` lines (`  <name>: read <doc> now` when
   it has none). `session-status --start` shows them to the coordinator. With review_inbox on, `  review_inbox url:
@@ -92,7 +92,7 @@ Two JSON files, each the nearest one up from the cwd within the project (a folde
 walk, so a subproject never reads its parent's), merged key by key (the person's file wins); a session in a worktree
 below reads the project's:
 - `.claude/coordination/coordination.json`, the repo's: `tracker`, `host`, `key_pattern`, `features.review_inbox`;
-- `.claude/coordination.local.json`, the person's: `approvals.*`, `terminal`, `messages` and its module's block
+- `.claude/coordination.local.json`, the person's: `approvals.*`, `start.*`, `terminal`, `messages` and its module's block
   (e.g. `msgraph`), `features.accounts`, `features.accounts_weekly_switch`, `features.notify`, `trusted`, `team`, `feedback` (ignored in the repo file: a
   committed file never delegates or trusts for anyone, and the terminal, messages, accounts, notifications and feedback
   are the person's own);
@@ -114,6 +114,8 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `key_pattern` | an extended regex matching a task key | not written by setup (your override); unset: the adapter's `key-pattern`, else `[A-Z][A-Z0-9]+-[0-9]+` |
 | `approvals.delegate` | `true` \| `false` | `false` |
 | `approvals.pr_create` | `true` \| `false`: a session opens its own task's PR (`gh pr create`) without an ask; issues and fork PRs still ask (`../orchestrating-sessions/worker.md`, Approvals) | `true` in the plugin coordinator's project (`feedback.repo_dir`'s), else `false`; person-only; setup doesn't write it |
+| `start.mode` | `read_only` \| `propose` \| `at_once`: when the coordinator starts a session for new work without the user's yes (`../orchestrating-sessions/SKILL.md`, Starting a session) | `read_only`; person-only; `--write` doesn't write it: edit the file when the user names a start mode (below) |
+| `start.kinds.feedback_apply` | the same values, for a plugin feedback apply session (`features/plugin-coordinator.md`) | `start.mode`'s value; person-only; `--write` doesn't write it: edit the file (below). An apply session pushes, so `read_only` proposes it like `propose` |
 | `terminal` | a terminal module's name: `plain` (the pane copies commands), one the plugin ships (`terminals/<name>.md` beside its module), or your own (status-reference.md, Modules) | `plain`; setup proposes a shipped module when it runs in that terminal (in tmux: `plain`, with a note) |
 | `messages` | `none`, `msgraph` (Teams and Outlook; its config block and routing in `messages/msgraph.md`) or your own messages module (status-reference.md, Modules) | `none`; setup doesn't write it: set it by hand per the module's doc |
 | `features.accounts` | `true` \| `false`: ask every Claude account sharing this one's transcripts (`features/accounts.md`) | `false`; setup writes `true` when it finds a second account |
@@ -138,7 +140,10 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 A value outside its set falls back to the default, with one warning line. A GitLab remote gives `host=none` and a
 Linear tracker `tracker=none`, each with a warning or a note in the proposal: neither is supported yet.
 
-To change a value, edit the file (keep it one JSON object). A plain `--write` in a folder set up already adds only
+To change a value, edit the file (keep it one JSON object). A start mode the user names ("start apply sessions at
+once, propose the rest") goes in the person's file of that project, merged into what's there:
+`{"start":{"mode":"propose","kinds":{"feedback_apply":"at_once"}}}`. It is a person key, so in a shared project
+each person's coordinator follows their own; the next `--start` prints it. A plain `--write` in a folder set up already adds only
 the keys a file lacks, never changing one that's there. To turn delegation on in a folder set up already:
 `session-status --init --write --delegate`. A plain `--write` in a folder whose `CLAUDE.md` still delegates in
 words leaves the key unset (and `--check` keeps naming it), so it never revokes a delegation unasked. What stays reserved even with delegation on is the `CLAUDE.md`
