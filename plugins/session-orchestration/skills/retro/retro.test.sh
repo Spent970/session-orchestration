@@ -487,7 +487,7 @@ out=$(retro start 7); rm "$a/tttttttt-1111.jsonl"
 grep -q $'^median\tn=2\tall\t' <<<"$out" && grep -q $'^median\tn=1\tclaude-desktop\t6\t40000\t53900\t13900\t' <<<"$out" &&
   grep -q $'^median\tn=1\tcli\t6\t30000\t43900\t13900\t' <<<"$out" || fail "start: medians per entrypoint" "$out"
 out=$(retro loads 7)
-grep -q $'^review\t1\t1\t2\t1\t0\t0\t1\t1\t0\t1\t0\t1\t-\t800\t300$' <<<"$out" &&
+grep -q $'^review\t1\t1\t2\t1\t0\t0\t1\t1\t0\t1\t0\t1\t-\t25\t300$' <<<"$out" &&
   grep -q $'^coordinator\t1\t0\t0\t0\t1\t0\t0\t0\t1\t0\t0\t0\t6000\t-\t-$' <<<"$out" || fail "loads: per kind" "$out"
 
 # search: prompts, cross-session messages and own text, masked and capped; not tool calls, subagents, old lines or the

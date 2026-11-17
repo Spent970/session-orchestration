@@ -157,8 +157,8 @@ CARD=1 expect card1 "$task" 1000 '' UserPromptSubmit   # its first prompt classi
 waitkind card1
 CARD=1 expect card1 "$task" 1000 "$c"
 CARD=1 expect card1 "$task" 1000 ''
-out=$(CARD=1 fire card2 "$chunk" 1000); grep -qF "no such tool: ${here%/hooks}/skills/orchestrating-sessions/worker.md's Replying" <<<"$out" &&
-  grep -qF "${here%/hooks}/skills/orchestrating-sessions/worker.md says" <<<"$out" && ! grep -qF '{dir}' <<<"$out" || fail "card paths: $out"
+out=$(CARD=1 fire card2 "$chunk" 1000); grep -qF "worker.md: ${here%/hooks}/skills/orchestrating-sessions/worker.md." <<<"$out" &&
+  grep -qF "no such tool: worker.md's Replying" <<<"$out" && ! grep -qF '{dir}' <<<"$out" || fail "card paths: $out"
 CARD=1 expect card3 'Session task: PROJ-123 review' 1000 "$c"
 CARD=1 expect card4 "$coord" 1000 ''
 CARD=1 expect card1 "$task" 1000 "$c" SessionStart

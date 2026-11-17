@@ -1295,7 +1295,10 @@ def scan(f):
     for it in items:
         i = it[3]
         grow = reqs[i][0] - reqs[i - 1][0] - reqs[i - 1][1] if i > 0 else 0
-        it.append(round(grow * it[1] / tot[i]) if grow > 0 and tot[i] else 0)
+        share = round(grow * it[1] / tot[i]) if grow > 0 and tot[i] else 0
+        # The card rides on a task's early tool call, whose growth carries context no line records (reminders,
+        # attachments): its share took that too (3.6K for a ~0.7K card). Capped at its size (≥ 3 chars a token).
+        it.append(min(share, it[1] // 3) if it[2] == "card" else share)
     return dict(kind=kind_of(first, name, coord), reqs=reqs, items=items, n=n, typed=typed, watch=watch, test=test, entry=entry or "-")
 
 
