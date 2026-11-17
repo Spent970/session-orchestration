@@ -116,6 +116,16 @@ export async function readBody($: EngineInterface, path: string): Promise<AskBod
 // question can't pose as the answer. Keep in sync with approvals.md and worker.md.
 export const answerText = (a: Ask, option: string) =>
   `Approval pane answer for ${a.key}: ${oneLine(option)}. Asked: ${oneLine(a.question)}`
+// The asks an "Approve all merges" press answers, each with its yes: the whole question is the hook's merge action
+// (`merge app#271`, a `(KEY)` and `?` allowed), exactly one option starts "Yes", and nothing more needs reading
+// (no details), nor rechecking (OLD, stale). Anything else waits for its own click.
+export const bulkMerges = (list: Ask[], now: number, stale: Map<string, string>): [Ask, string][] =>
+  list.flatMap((a): [Ask, string][] => {
+    const yes = a.options.filter(o => /^yes\b/i.test(o.trim()))
+    const ok = /^merge \S+#\d+( \([^()]*\))?\??$/i.test(oneLine(a.question).trim()) && yes.length === 1 && !a.details &&
+      !isOld(a, now) && !stale.has(a.id) && a.sending === undefined
+    return ok && yes[0] ? [[a, yes[0]]] : []
+  })
 // An item's Ask button. Never starts "Approval pane answer for ", so verify-approval.sh never takes it.
 export const askText = (about: string) => `Coordinator pane: where does ${about} stand, and what's next? Answer briefly.`
 // The question dialog's "Chat about this": the user wants to talk the ask over first. Never starts "Approval pane answer
@@ -1869,6 +1879,43 @@ export const register: Register = on => {
       const words = oneLine(clean(said)).trim()
       if (words) await answer(a, words)()
     }
+    // One press answers every waiting merge ask, after a confirm naming each: one ordinary answer line per ask, as
+    // if each Yes were clicked, so each relay still verifies for its own key.
+    // Rechecked after the confirm (an ask may have gone OLD, stale or been withdrawn meanwhile), then all claimed in
+    // one write, so no second press or click sends one twice.
+    const approveAll = (merges: [Ask, string][]) => async () => {
+      const yes = `Yes, approve all ${merges.length} merges`
+      const said = await $.ui.ask(`Approve ${merges.map(([a]) => `${a.key} (${oneLine(a.question)})`).join(', ')}?`,
+        { options: [yes, 'No'], header: 'Approval' }).catch(() => '')
+      if (said !== yes) return
+      const now = await $.clock.now()
+      const bNow = await read($, board)
+      const staleNow = staleOf(bNow ? parseStatus(bNow.status) : undefined).asks
+      const same = (x: Ask, a: Ask) => x.id === a.id && x.key === a.key && x.question === a.question
+      let claimed: [Ask, string][] = []
+      await setAsks($, l => {
+        const still = bulkMerges(l, now, staleNow)
+        claimed = merges.filter(([a]) => still.some(([x]) => same(x, a)))
+        return l.map((x): Ask => (claimed.some(([a]) => same(x, a)) ? { ...x, sending: now } : x))
+      })
+      logPress($, 'Approval answer all')
+      await syncStatus($)
+      const sent: Ask[] = [], failed: string[] = []
+      for (const [a, y] of claimed) {
+        const r = await $.prompt.submit({ text: answerText(a, y), asUser: true })
+          .catch((e: unknown) => ({ drop: e instanceof Error ? e.message : String(e) }))
+        if (r.drop === undefined) sent.push(a)
+        else failed.push(`${a.key} (${r.drop})`)
+      }
+      // Not delivered: answerable again in its place.
+      if (failed.length) await setAsks($, l => l.map(x => (claimed.some(([a]) => same(x, a)) && !sent.some(a => same(x, a)) ? unsent(x) : x)))
+      await dropAsks($, x => sent.some(a => same(x, a)))
+      await syncStatus($)
+      const left = merges.length - claimed.length
+      if (failed.length || left) $.ui.toast([`Sent ${sent.length} of ${merges.length} merge answers.`,
+        failed.length ? `Not sent, back in the pane: ${failed.join(', ')}.` : '',
+        left ? `${left} changed meanwhile (answered, withdrawn, OLD or stale): answer it on its own.` : ''].filter(Boolean).join(' '))
+    }
 
     // Item actions.
     // A Peek or Diff closes once its card does.
@@ -1933,6 +1980,7 @@ export const register: Register = on => {
 
     const st = b ? parseStatus(b.status) : undefined
     const stale = staleOf(st)
+    const merges = bulkMerges(list, now, stale.asks)
     // Each task's facts and group, worked out once per drawing.
     const factsBy = new Map(st?.tasks.map(t => [t, facts(t)]))
     const factsOf = (t: Task) => factsBy.get(t) ?? facts(t)
@@ -2480,6 +2528,7 @@ export const register: Register = on => {
               <Text {...solid('permission')}> ⚑ APPROVE {list.length} </Text>
               {fresh > 0 && <Text bold color="permission"> {fresh} new</Text>}
             </Text>
+            {merges.length > 1 && <Button key="asks-merge-all" label={`Approve all ${merges.length} merges…`} onPress={approveAll(merges)} />}
             {[...asksBy].map(([key, as]) => {
               const gOpen = groupOpen(key)
               const nNew = as.filter(isNew).length

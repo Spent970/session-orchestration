@@ -67,6 +67,11 @@ user a command).
     again before you act on its answer. When the decision no longer applies (a PR
     merged first, the task closed), cancel it, and for a review finding note `Dropped` in the review's file header
     and tell the reviewer session.
+  - **Several merges at once**: a chat line naming no key ("I approve all the merges from the pane") verifies for
+    none of them. Point the user at the APPROVE box's **Approve all N merges…**: it records one answer line per ask,
+    each relayed on its own. It takes only asks whose question is the hook's action alone (`merge app#271`) with one
+    "Yes" option and no `details` (not OLD or stale), so queue merge asks that way and put any caveat in `details`,
+    which keeps that one to its own click ([Approval asks](status-reference.md#approval-asks)).
   - `features.notify` (`../../features/notify.md`) may show a local "N decisions waiting" notification for asks left
     unseen; the answer is still the pane click. Ask the same way either way.
   - Plain text only when the pane isn't on screen (the tool says so: a narrow terminal, the agent view, a background
