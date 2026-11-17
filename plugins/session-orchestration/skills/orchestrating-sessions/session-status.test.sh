@@ -1130,7 +1130,7 @@ git -C "$a" add CLAUDE.md && gc "$a" -m 'ACME-1: init' && gc "$a" --allow-empty 
 out=$(init "$a") && grep -q '^1\. Task keys: ACME-123 (in 66% ' <<<"$out" && grep -q "^2\. Code host: git@github.com:acme/app.git (github, one repo), gh installed → GitHub adapter: " <<<"$out" &&
   grep -q '^3\. Files: CLAUDE.local.md, .claude/session-status-adapter, ' <<<"$out" || { echo "init (a) failed: $out"; exit 1; }
 init "$a" --check >/dev/null && { echo "init (a) --check exited 0 before --write"; exit 1; }
-out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s (acme-coordinator)\nactive: tracker=jira host=github delegate=off pr_create=off terminal=plain messages=none features=none' "$a")" ] && [ -z "$(git -C "$a" status --short)" ] &&
+out=$(init "$a" --write) && [ "$(init "$a" --check)" = "$(printf 'configured: %s (acme-coordinator)\nactive: tracker=jira host=github delegate=off pr_create=off start=read_only terminal=plain messages=none features=none' "$a")" ] && [ -z "$(git -C "$a" status --short)" ] &&
   grep -q '^- Replies folder (status reports, plans, review reports): `/[^`]*/session-orchestration/replies/[^`]*-init-acme/`\.$' "$a/CLAUDE.local.md" &&
   grep -qF '`approvals.delegate` in' "$a/CLAUDE.local.md" && [ "$(jq -c . "$a/.claude/coordination.local.json")" = '{"features":{"accounts":false},"approvals":{"delegate":false}}' ] &&
   [ "$(jq -c . "$a/.claude/coordination/coordination.json")" = '{"tracker":"jira","host":"github","features":{"review_inbox":false}}' ] && [ "$(cd "$a" && .claude/session-status-adapter urls)" = 'pr https://github.com/acme/{repo}/pull/{id}' ] &&
@@ -1193,7 +1193,7 @@ grep -x 'warning: config tracker=trello is not valid: using the default' <<<"$(i
 mv "$tmp/cfg.json" "$a/.claude/coordination/coordination.json"
 rc=0; cfg "$a" nope 2>/dev/null || rc=$?; [ $rc = 2 ] || { echo "config: an unknown key didn't exit 2"; exit 1; }
 init "$a" --write --delegate >/dev/null && [ "$(cfg "$a/sub" approvals.delegate)" = true ] &&
-  grep -x 'active: .* delegate=on pr_create=off terminal=plain messages=none features=none' <<<"$(init "$a" --check)" >/dev/null || { echo "init --delegate: $(init "$a" --check)"; exit 1; }
+  grep -x 'active: .* delegate=on pr_create=off start=read_only terminal=plain messages=none features=none' <<<"$(init "$a" --check)" >/dev/null || { echo "init --delegate: $(init "$a" --check)"; exit 1; }
 # messages: a module that exists is active with its doc; one that doesn't falls back to none with a warning. The
 # repo file can't set it.
 cp "$a/.claude/coordination.local.json" "$tmp/person.json"
@@ -1290,6 +1290,20 @@ echo '{"approvals":{"pr_create":true}}' > "$a/.claude/coordination.local.json"
 echo '{"approvals":{"pr_create":true}}' > "$b/.claude/coordination/coordination.json"
 [ "$(cfg "$a" approvals.pr_create)" = true ] && [ "$(cfg "$b" approvals.pr_create)" = false ] ||
   { echo "config approvals.pr_create: $(cfg "$a" approvals.pr_create) $(cfg "$b" approvals.pr_create)"; exit 1; }
+# start.*: a person key; feedback_apply falls back to start.mode and shows in the active line only where it differs.
+echo '{"start":{"mode":"propose","kinds":{"feedback_apply":"at_once"}}}' > "$a/.claude/coordination.local.json"
+echo '{"start":{"mode":"at_once"}}' > "$b/.claude/coordination/coordination.json"
+[ "$(cfg "$a" start.mode)" = propose ] && [ "$(cfg "$a" start.kinds.feedback_apply)" = at_once ] &&
+  [ "$(cfg "$b" start.mode)" = read_only ] && [ "$(cfg "$b" start.kinds.feedback_apply)" = read_only ] &&
+  grep -qx 'active: .* start=propose,feedback_apply:at_once terminal=.*' <<<"$(init "$a" --check)" ||
+  { echo "config start: $(cfg "$a" start.mode) $(cfg "$a" start.kinds.feedback_apply) $(cfg "$b" start.mode) $(init "$a" --check)"; exit 1; }
+echo '{"start":{"mode":"soon"}}' > "$a/.claude/coordination.local.json"
+[ "$(cfg "$a" start.kinds.feedback_apply 2>/dev/null)" = read_only ] || { echo "config start bad value"; exit 1; }
+# a mistyped override is named by --check, not dropped silently
+echo '{"start":{"kinds":{"feedback_apply":"atonce"}}}' > "$a/.claude/coordination.local.json"
+grep -qx 'warning: config start.kinds.feedback_apply=atonce is not valid: using the default' <<<"$(init "$a" --check)" ||
+  { echo "check start override warning: $(init "$a" --check)"; exit 1; }
+echo '{"approvals":{"pr_create":true}}' > "$b/.claude/coordination/coordination.json"   # as the block above left it
 # terminal: Ghostty found by TERM_PROGRAM is proposed, named by --check until recorded, then active with its doc; tmux
 # is noted and plain.
 echo '{"features":{"accounts":true}}' > "$a/.claude/coordination.local.json"

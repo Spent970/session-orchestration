@@ -8,7 +8,7 @@
 #                                            (excluded from git until shared mode commits it; read from the team
 #                                            repo's when the person file names one, see shared_dir)
 #   .claude/coordination.local.json          person keys: approvals.delegate, approvals.pr_create, features.accounts,
-#                                            features.accounts_weekly_switch, features.notify, terminal, messages
+#                                            features.accounts_weekly_switch, features.notify, start.*, terminal, messages
 #                                            (and its module's block, e.g. msgraph), trusted, team, feedback.mode,
 #                                            feedback.repo_dir, feedback.project_dir, telemetry, handoff.*, compact.window (always excluded;
 #                                            the repo file can't set them)
@@ -70,7 +70,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -209,6 +209,10 @@ detect_host() {
 #                       Bitbucket or Forgejo (TODO: GitHub support)     default false
 #   features.notify     integer minutes, 0 = off: one local macOS notification when an ask has waited unseen this
 #                       long (features/notify.md; person only)          default 0
+#   start.mode          read_only | propose | at_once: when the coordinator starts a session for new work without the
+#                       user's yes (orchestrating-sessions SKILL.md, Starting a session; person only)   default read_only
+#   start.kinds.feedback_apply  the same values, for a plugin feedback apply session (person only)
+#                       default start.mode's value
 #   terminal            plain | ghostty | your own module's name (find_module terminals NAME): where the pane's
 #                       Attach in tab and Logs in split open             default plain
 #   messages            none | msgraph | your own module's name (find_module messages NAME): the chat and mail
@@ -309,10 +313,10 @@ last_model() {
 config() {
   local key=${1:-} v ok=
   case $key in
-    tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
+    tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|start.mode|start.kinds.feedback_apply|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
@@ -326,6 +330,7 @@ config() {
     esac ;;
     terminal) [[ $v =~ ^[A-Za-z0-9_-]+$ ]] && find_module terminals "$v" >/dev/null && ok=1 ;;
     messages) [ "$v" = none ] && ok=1 || { [[ $v =~ ^[A-Za-z0-9_-]+$ ]] && find_module messages "$v" >/dev/null && ok=1; } ;;
+    start.*) case $v in read_only|propose|at_once) ok=1 ;; esac ;;
     feedback.mode) case $v in auto|pr|fork-pr|issue|local) ok=1 ;; esac ;;
     telemetry) case $v in local|off) ok=1 ;; esac ;;
     pending.file) [[ $v == *.md && $v != /* && $v != *..* ]] && ok=1 ;;
@@ -345,6 +350,7 @@ config() {
     tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;;
     approvals.pr_create) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && echo true || echo false ;;
     approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
+    start.mode) echo read_only ;; start.kinds.feedback_apply) config start.mode ;;
     feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts) ;; telemetry) echo off ;;
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
     plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;

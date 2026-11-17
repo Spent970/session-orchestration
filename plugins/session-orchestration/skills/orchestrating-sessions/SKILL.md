@@ -165,20 +165,24 @@ or blocked.'`
   task keys only when needed: each mention counts toward `session-status`'s `maybe` guess. If the user's default
   mode is plan, add `--permission-mode default`.
 
-**Propose first, or start at once.** How you start new work is a mode the user sets; keep it in the coordinator
-topic file so the next coordinator follows it. A follow-up for a task that already has a session goes to that
-session in any mode.
-- **Read-only at once** (the default): a session that only reads and writes local files (a PR review into the review
+**Propose first, or start at once.** How you start new work is the person key `start.mode` (`start=` on `--start`'s
+`active:` line; `session-status --config start.mode`), with `start.kinds.feedback_apply` overriding it for plugin
+feedback apply sessions (`,feedback_apply:<mode>` after it when it differs). When the user names a mode, set it
+through the setting-up-coordination skill (its Config), not in memory, so the next coordinator follows it. Being a
+person key, it is never read from a committed file: in a shared project each person's coordinator follows their
+own. A start mode still written in a memory topic file: the key wins; set the key to it on the user's yes, then
+delete the line. A per-kind rule no key holds (e.g. "reviews at once") stays a memory line until it's a key. A
+follow-up for a task that already has a session goes to that session in any mode.
+- **Read-only at once** (`read_only`, the default): a session that only reads and writes local files (a PR review into the review
   inbox, an investigation, a draft) starts at once, then you tell the user in one line;
   one that would push, post, send, spend (a paid service, a large batch) or change settings is proposed, as below.
   A session whose work is unclear is proposed.
-- **Propose first** ("ask before starting"): when the user gives you work that needs new sessions, list the sessions
+- **Propose first** (`propose`, "ask before starting"): when the user gives you work that needs new sessions, list the sessions
   you'd start, one per line (the task key or a 3–5 word name, what it does, its done-when, its kind and why), then stop
   and wait. "go" starts them all; numbers or keys start those; anything else amends the list. Never start one the user
   hasn't named.
-- **Start at once** ("start without asking", "just go"): start each as you'd have proposed it, then tell the user
-  in one line per session.
-- The mode can differ by kind of work (keep that in the topic file too).
+- **Start at once** (`at_once`, "start without asking", "just go"): start each as you'd have proposed it, then tell
+  the user in one line per session.
 
 ## Handoff file
 
@@ -214,8 +218,9 @@ to it; you prune it.
 - **A lesson the user gives you** that comes from a missing plugin step is filed with `feedback add`, and from a
   missing project-script step with `feedback add --project`, in addition to any memory line. When it's unclear which
   of plugin feedback, project feedback or memory it is, queue one `ask_approval` with those three before writing.
-- When the user tells you to remember something for the project, or a preference about how you coordinate (e.g. the
-  mode above), append it to the coordinator topic file (a flat file: append there).
+- When the user tells you to remember something for the project, or a preference about how you coordinate, append
+  it to the coordinator topic file (a flat file: append there). A preference a config key holds (the start mode
+  above) goes in that key instead.
 - Prune in passing: delete an entry that is wrong, superseded, about a task state that has since resolved, or
   already in a `CLAUDE.md`, a doc or a skill, and merge two about the same trap. Splitting a flat file, `[team]`
   lines, graduation and retro follow-ups: [memory-rules.md](memory-rules.md).

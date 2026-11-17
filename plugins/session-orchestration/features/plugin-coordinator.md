@@ -29,12 +29,15 @@ already. Other coordinators use both.
   `dropped` only on their word.
 
 **Batches.** Put cases that change the same file or step into one batch. Every other case is a batch of its own,
-most seen first. Propose the batches the way your mode says to start sessions ([SKILL.md](../skills/orchestrating-sessions/SKILL.md),
-Starting a session): one line per apply session, with its session name, its cases' titles, the done-when, and its
+most seen first. Start or propose the batches as `session-status --config start.kinds.feedback_apply` says
+(`read_only`, `propose` or `at_once`; [SKILL.md](../skills/orchestrating-sessions/SKILL.md), Starting a session): an
+apply session pushes and opens a PR, so `read_only` proposes it, and `at_once` starts it, then one line to the user
+per session. Either way, one line per apply session, with its session name, its cases' titles, the done-when, and its
 kind with the reason, sized per batch with the `choosing-model-effort` skill (a one-file doc fix is `mechanical`, a new
 feature `design`), never one kind for all.
 
-**Apply sessions.** Start one per batch the user names, from this root. Run `session-status --kind <its kind> <name>`
+**Apply sessions.** Start one per batch the user names (with `at_once`, per batch), from this root. Run
+`session-status --kind <its kind> <name>`
 first (`<name>`: a task name the project's key pattern matches, of letters, digits, `.`, `_` and `-`, at most 80), then `claude --bg -n <name>` as SKILL.md says, with this
 brief, which starts with the name so the status shows its owner: `Work on <name>: Apply plugin feedback: <case file paths>. Follow feedback.md,
 Applying, for these cases only, and this repo's CLAUDE.md release checks. <PR line> Why: <what the cases say goes
@@ -52,8 +55,9 @@ user. Once the release is on the repo's main (check it yourself, and take the ve
 3. Tell the user that other running coordinators keep the old version until they call `reload_plugins` themselves.
 
 **New cases while you run.** The watcher prints each new open case under `Feedback (feedback list --plugin)`.
-Triage it, then add it to a batch you've proposed or propose a new one. When another coordinator messages you a
-case's path because the user wants it applied now, propose that case's batch at once, ahead of the rest.
+Triage it, then add it to a batch you've proposed or propose a new one (with `at_once`: start it as its own batch).
+When another coordinator messages you a case's path because the user wants it applied now, propose that case's batch
+at once, ahead of the rest (with `at_once`: start it).
 
 **When you aren't running.** Nothing is lost: cases wait in the store, and your next Start lists all of them. In
 other coordinators, the once-a-day footer reads `plugin feedback: N open (M seen ≥2×), for the plugin coordinator,
