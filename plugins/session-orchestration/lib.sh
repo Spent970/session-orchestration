@@ -8,7 +8,8 @@
 #                                            (excluded from git until shared mode commits it; read from the team
 #                                            repo's when the person file names one, see shared_dir)
 #   .claude/coordination.local.json          person keys: approvals.delegate, approvals.pr_create, features.accounts,
-#                                            features.accounts_weekly_switch, features.notify, start.*, terminal, messages
+#                                            features.accounts_weekly_switch, features.notify, features.retro, retro.*, start.*,
+#                                            terminal, messages
 #                                            (and its module's block, e.g. msgraph), trusted, team, feedback.mode,
 #                                            feedback.repo_dir, feedback.project_dir, telemetry, handoff.*, compact.window (always excluded;
 #                                            the repo file can't set them)
@@ -70,7 +71,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start, .retro$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -221,6 +222,15 @@ detect_host() {
 #                       user's yes (orchestrating-sessions SKILL.md, Starting a session; person only)   default read_only
 #   start.kinds.feedback_apply  the same values, for a plugin feedback apply session (person only)
 #                       default start.mode's value
+#   features.retro      true | false: scheduled retro runs and their coordinator doc (features/retro.md; person only)
+#                                                                       default false
+#   retro.scope         project | plugin | both: whose sessions a retro run reads (person only)   default project
+#   retro.schedule      DAY HH:MM, local time, DAY mon…sun (e.g. mon 12:00): when the launcher starts a run (person
+#                       only)                                           default empty: by hand only
+#   retro.account       a Claude config dir (~ expanded) a scheduled run starts under (person only)
+#                                                                       default the current one
+#   retro.sections      JSON list of section names (units context waste feedback coordinator memory protocol features
+#                       sizing), printed one per line (person only)     default empty: every section of the scope
 #   terminal            plain | ghostty | your own module's name (find_module terminals NAME): where the pane's
 #                       Attach in tab and Logs in split open             default plain
 #   messages            none | msgraph | your own module's name (find_module messages NAME): the chat and mail
@@ -243,10 +253,11 @@ detect_host() {
 #                       only; no reliable check exists, so the person lists them)          default empty: none
 #   plan.models.KIND    MODEL/EFFORT (effort low|medium|high|xhigh|max; fable only under an account fable.accounts
 #                       lists, else the default), KIND design | build | mechanical | review
-#                       | release | scan | coordinator     default opus/xhigh, opus/medium, sonnet/medium, opus/xhigh,
-#                       sonnet/medium, haiku/low, opus/medium (coordinator: what coord_start, the feature doc's
-#                       start and --successor fall back to when the predecessor's transcript names none; fable/medium
-#                       under an account fable.accounts lists; design, review: fable/xhigh there)
+#                       | release | scan | coordinator | retro | research     default opus/xhigh, opus/medium,
+#                       sonnet/medium, opus/xhigh, sonnet/medium, haiku/low, opus/medium, opus/xhigh, opus/high
+#                       (coordinator: what coord_start, the feature doc's start and --successor fall back to when the
+#                       predecessor's transcript names none; fable/medium under an account fable.accounts lists;
+#                       design, review, retro: fable/xhigh there)
 #   handoff.at.KIND     integer tokens, 0 = off: context where hooks/context-watch.sh asks a session to hand off,
 #                       KIND chunk | task | coordinator (person only)   default 125000, 145000, 145000 (a task's
 #                       successor starts at ~45K: at 120K, handed-over review rounds handed off again within minutes)
@@ -322,16 +333,24 @@ config() {
   local key=${1:-} v ok=
   case $key in
     tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|start.mode|start.kinds.feedback_apply|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
-    plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator) ;;
+    features.retro|retro.scope|retro.schedule|retro.account|retro.sections) ;;
+    plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator|plan.models.retro|plan.models.research) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
     tracker) case $v in none|github|jira) ok=1 ;; esac ;;
     host) case $v in github|bitbucket|forgejo|none) ok=1 ;; esac ;;
     key_pattern) { grep -qE -- "$v" </dev/null; [ $? -le 1 ]; } 2>/dev/null && ok=1 ;;
-    approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
+    approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.retro|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
+    retro.scope) case $v in project) ok=1 ;; plugin|both) local pr; ok=1
+      # plugin scope has one home: feedback.repo_dir's root when that is set, so all-project numbers are measured once
+      pr=$(plugin_root) && [ "$pr" != "$(find_root)" ] &&
+        { echo "warning: retro.scope=$v runs only from feedback.repo_dir's root ($pr): project" >&2; echo project; return 0; } ;; esac ;;
+    retro.schedule) [[ $v =~ ^(mon|tue|wed|thu|fri|sat|sun)\ ([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && ok=1 ;;
+    retro.account) [[ $v == '~'/* ]] && v=$HOME/${v#'~/'}; [[ $v == /* ]] && [ -d "$v" ] && ok=1 ;;   # absolute: the launcher runs from elsewhere
+    retro.sections) local l; l=$(jq -r 'if type == "array" and length > 0 and all(.[]; IN("units", "context", "waste", "feedback", "coordinator", "memory", "protocol", "features", "sizing")) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
     features.review_inbox) case $v in false) ok=1 ;;
       true) case $(config host 2>/dev/null) in bitbucket|forgejo) ok=1 ;; esac; [ -n "$ok" ] ||
               { echo "warning: features.review_inbox needs host=bitbucket or forgejo (GitHub support is a TODO): off" >&2; echo false; return 0; } ;;
@@ -359,12 +378,13 @@ config() {
     approvals.pr_create) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && echo true || echo false ;;
     approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     start.mode) echo read_only ;; start.kinds.feedback_apply) config start.mode ;;
-    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts) ;; telemetry) echo off ;;
+    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts|retro.schedule|retro.sections) ;;
+    retro.scope) echo project ;; retro.account) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;; telemetry) echo off ;;
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
     plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;
-        mechanical|release) v=sonnet/medium ;; scan) v=haiku/low ;; esac
+        mechanical|release) v=sonnet/medium ;; scan) v=haiku/low ;; retro) v=opus/xhigh ;; research) v=opus/high ;; esac
       # the kinds that default to fable where the account has it (fable_ok), at the same effort; today's model elsewhere
-      case ${key#plan.models.} in design|review|coordinator) ! fable_ok || v=fable/${v#*/} ;; esac
+      case ${key#plan.models.} in design|review|coordinator|retro) ! fable_ok || v=fable/${v#*/} ;; esac
       echo "$v" ;;
     handoff.at.chunk) echo 125000 ;; handoff.at.task) echo 145000 ;; handoff.at.coordinator) echo 145000 ;;
     handoff.hard_after) echo 25000 ;; handoff.stop_room) echo 15000 ;; compact.window) echo 220000 ;;

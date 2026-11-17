@@ -167,7 +167,7 @@ set -uo pipefail
 if [ "${1:-}" = --kind ]; then
   k=${2:-} sz=; [[ $k =~ ^(.+):([SML])$ ]] && { k=${BASH_REMATCH[1]}; sz=${BASH_REMATCH[2]}; }
   { { [ $# = 2 ] && [ -z "$sz" ]; } || { [ $# = 3 ] && [[ $3 =~ ^[A-Za-z0-9._-]{1,80}$ ]]; }; } && me=$(config "plan.models.$k" 2>/dev/null) ||
-    { echo "usage: session-status --kind design|build|mechanical|review|release|scan|coordinator[:S|M|L] [SESSION-NAME]" >&2; exit 2; }
+    { echo "usage: session-status --kind design|build|mechanical|review|release|scan|coordinator|retro|research[:S|M|L] [SESSION-NAME]" >&2; exit 2; }
   m=${me%%/*} e=${me#*/}
   case $sz in S) e=$(effort_step "$e" -1) ;; L) e=$(effort_step "$e" 1) ;; esac
   usage "$k" start "$m" "$e" ${3:+"$3"} ${sz:+"$sz"}

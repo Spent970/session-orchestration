@@ -1292,6 +1292,32 @@ echo '{"features":{"notify":"soon"}}' > "$a/.claude/coordination.local.json"
 [ "$(cfg "$a" features.notify 2>&1)" = "$(printf 'warning: config features.notify=soon is not valid: using the default\n0')" ] || { echo "notify bad value: $(cfg "$a" features.notify 2>&1)"; exit 1; }
 echo '{"features":{"notify":5}}' > "$b/.claude/coordination/coordination.json"
 [ "$(cfg "$b" features.notify)" = 0 ] || { echo "config: the repo file set features.notify"; exit 1; }
+# retro: features.retro and the retro block, each with its default; set in the person's file, with its doc line; a bad
+# value warns and falls back; plugin scope only from feedback.repo_dir's root; the repo file can set none of them.
+echo '{}' > "$a/.claude/coordination.local.json"
+[ "$(cfg "$a" features.retro):$(cfg "$a" retro.scope):$(cfg "$a" retro.schedule):$(cfg "$a" retro.sections)" = 'false:project::' ] &&
+  [ "$(cd "$a" && CLAUDE_CONFIG_DIR=$tmp/cfg "$here/session-status" --config retro.account)" = "$tmp/cfg" ] &&
+  ! grep -qE 'features=.*retro|^  retro:' <<<"$(init "$a" --check)" || { echo "retro defaults: $(init "$a" --check)"; exit 1; }
+echo "{\"features\":{\"retro\":true},\"feedback\":{\"repo_dir\":\"$a\"},\"retro\":{\"scope\":\"both\",\"schedule\":\"sun 09:30\",\"account\":\"$tmp/cfg\",\"sections\":[\"units\",\"waste\"]}}" > "$a/.claude/coordination.local.json"
+c=$(init "$a" --check)
+[ "$(cfg "$a" features.retro):$(cfg "$a" retro.scope):$(cfg "$a" retro.schedule):$(cfg "$a" retro.account)" = "true:both:sun 09:30:$tmp/cfg" ] &&
+  [ "$(cfg "$a" retro.sections)" = "$(printf 'units\nwaste')" ] && grep -x 'active: .* features=retro,plugin_coordinator' <<<"$c" >/dev/null &&
+  grep -x "  retro: nothing to do: a retro run reports to you when it ends\. Read $(cd "$here/../.." && pwd)/features/retro.md when .*" <<<"$c" >/dev/null ||
+  { echo "retro on: $c"; exit 1; }
+echo "{\"feedback\":{\"repo_dir\":\"$b\"},\"retro\":{\"scope\":\"plugin\"}}" > "$a/.claude/coordination.local.json"
+[ "$(cfg "$a" retro.scope 2>&1)" = "$(printf 'warning: retro.scope=plugin runs only from feedback.repo_dir'"'"'s root (%s): project\nproject' "$b")" ] ||
+  { echo "retro.scope away from the plugin root: $(cfg "$a" retro.scope 2>&1)"; exit 1; }
+echo '{"features":{"retro":"yes"},"retro":{"scope":"all","schedule":"monday 12:00","account":"~/no-such-dir-x9","sections":["units","bogus"]}}' > "$a/.claude/coordination.local.json"
+for k in features.retro:false retro.scope:project retro.schedule: retro.sections:; do
+  w=$(cfg "$a" "${k%%:*}" 2>&1 >/dev/null); [ "$(cfg "$a" "${k%%:*}" 2>/dev/null)" = "${k#*:}" ] && [[ $w == "warning: config ${k%%:*}="*" is not valid: using the default" ]] ||
+    { echo "retro bad value ${k%%:*}: $w"; exit 1; }
+done
+[[ $(cfg "$a" retro.account 2>&1) == "warning: config retro.account=$HOME/no-such-dir-x9 is not valid: using the default"* ]] || { echo "retro.account bad: $(cfg "$a" retro.account 2>&1)"; exit 1; }
+echo '{"retro":{"account":".","sections":[]}}' > "$a/.claude/coordination.local.json"
+[[ $(cfg "$a" retro.account 2>&1) == "warning: config retro.account=. is not valid"* && $(cfg "$a" retro.sections 2>&1) == "warning: config retro.sections=[] is not valid"* ]] ||
+  { echo "retro relative account, empty sections: $(cfg "$a" retro.account 2>&1) $(cfg "$a" retro.sections 2>&1)"; exit 1; }
+echo '{"features":{"retro":true},"retro":{"scope":"both","schedule":"mon 12:00"}}' > "$b/.claude/coordination/coordination.json"
+[ "$(cfg "$b" features.retro):$(cfg "$b" retro.scope):$(cfg "$b" retro.schedule)" = 'false:project:' ] || { echo "config: the repo file set retro"; exit 1; }
 # plugin coordinator: on in the root feedback.repo_dir names, with its doc line; off in any other root.
 echo "{\"feedback\":{\"repo_dir\":\"$a\"}}" > "$a/.claude/coordination.local.json"
 c=$(init "$a" --check); grep -x 'active: .* pr_create=on .* features=.*plugin_coordinator' <<<"$c" >/dev/null &&
@@ -1558,8 +1584,9 @@ n0=$(wc -l < "$tmp/state/session-orchestration/usage.jsonl")
 # start line; a bad kind is refused, and usage refuses a malformed start line.
 echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low", "review": "sonnet/high"}}}' > "$tmp/.config/session-orchestration/config.json"
 [ "$(run --kind build)" = '--model opus --effort medium' ] && [ "$(run --kind scan 2>/dev/null)" = '--model haiku --effort low' ] &&
-  [ "$(run --kind review)" = '--model sonnet --effort high' ] &&
-  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = '{"t":T,"k":"start","what":"review","model":"sonnet","effort":"high"}' ] &&
+  [ "$(run --kind review)" = '--model sonnet --effort high' ] && [ "$(run --kind research)" = '--model opus --effort high' ] &&
+  [ "$(run --kind retro)" = '--model opus --effort xhigh' ] &&
+  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = '{"t":T,"k":"start","what":"retro","model":"opus","effort":"xhigh"}' ] &&
   [ "$(run --kind mechanical claude-plugins-fix-doc)" = '--model sonnet --effort medium' ] &&
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = "{\"t\":T,\"k\":\"start\",\"what\":\"mechanical\",\"model\":\"sonnet\",\"effort\":\"medium\",\"sess\":\"96bb4fcd0a71\"}" ] &&
   ! run --kind build 'two words' 2>/dev/null && ! run --kind build a b 2>/dev/null &&
@@ -1570,6 +1597,7 @@ echo '{"fable": {"accounts": ["~/elsewhere"]}, "plan": {"models": {"scan": "fabl
 echo '{"fable": {"accounts": ["~/elsewhere", "~/cfg"]}, "plan": {"models": {"scan": "fable/low"}}}' > "$tmp/.config/session-orchestration/config.json"
 [ "$(run --kind scan)" = '--model fable --effort low' ] && [ "$(run --kind coordinator)" = '--model fable --effort medium' ] &&
   [ "$(run --kind design)" = '--model fable --effort xhigh' ] && [ "$(run --kind review)" = '--model fable --effort xhigh' ] &&
+  [ "$(run --kind retro)" = '--model fable --effort xhigh' ] && [ "$(run --kind research)" = '--model opus --effort high' ] &&
   [ "$(run --kind build)" = '--model opus --effort medium' ] || { echo "--kind fable"; exit 1; }
 # The account's Fable limit reached, its overall limit not: no fable until the limit's resetsAt, then fable again.
 u=$tmp/.cache/session-status/usage; mkdir -p "$u"; fsid=ffffffff-1111-2222-3333-444444444444
