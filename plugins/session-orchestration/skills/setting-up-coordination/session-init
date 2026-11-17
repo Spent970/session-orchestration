@@ -29,7 +29,8 @@
 #                                   New files go to the project's state folder (lib.sh proj_dir, P), not the checkout.
 #   session-status --init --write --move [--link]
 #                                   an older setup's replies, memory, handoff (with its archive), briefs and
-#                                   .claude/tasks/ moved into P, the section's path lines and pending.file rewritten,
+#                                   .claude/tasks/ moved into P, the section's path lines, the adapter's quoted
+#                                   paths and pending.file rewritten,
 #                                   then the plain --write; all or nothing when a target exists. --link: a .coordinator
 #                                   symlink to P in the root, kept out of git.
 # Configured: the nearest adapter (.claude/session-status-adapter, as session-status finds the root) is in this
@@ -43,7 +44,7 @@ tpl=$here/templates
 . "$here/../../lib.sh" || exit 1
 root=$(pwd -P)
 
-mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=() wrote_early=()
+mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=() wrote_early=
 for a; do
   case $a in --move) move=1; continue ;; --link) link=1; continue ;; esac
   rest+=("$a")
@@ -275,7 +276,8 @@ if [ -n "$move$link" ]; then
   if [ -n "$hand" ]; then
     hb=${hand%.md}; items+=("line	$hand" "file	$hb" "file	$hb-archive" "file	$hb-archive.md")
   fi
-  for b in "$named_brief" "$(at "${mem:-.claude/orchestration}")/review-brief.md" "${hand:+$(dirname "$hand")/review-brief.md}" \
+  mb=$(at "${mem:-.claude/orchestration}")
+  for b in "$named_brief" "$mb/review-brief.md" "${hand:+$(dirname "$hand")/review-brief.md}" "$mb/retro-brief.md" "$mb/rnd-brief.md" \
            "$root/.claude/retro-brief.md" "$root/.claude/rnd-brief.md" "$root/.claude/tasks"; do [ -z "$b" ] || items+=("file	$b"); done
   moves=() conflicts=() relines=() lrel=() left=() seen=$'\n' claimed=$'\n'
   rl() { relines+=("$s	$d"); [ "$k" = file ] || lrel+=("$s	$d"); }   # lrel: the section lines' own (line, mem)
@@ -310,16 +312,17 @@ if [ -n "$move$link" ]; then
   done
   # The section files: CLAUDE.local.md, and CLAUDE.md unless git tracks it (a tracked one is never written).
   map=$(printf '%s\n' ${relines[@]+"${relines[@]}"})
-  rew() { # FILE [check]: FILE with each backticked path at or under a moved source pointing into P; check: the lines it'd change
-    MAP=$map ROOT=$root CHECK=${2:-} awk '
-      BEGIN { n = split(ENVIRON["MAP"], m, "\n"); for (i = 1; i <= n; i++) { split(m[i], kv, "\t"); src[i] = kv[1]; dst[i] = kv[2] } }
+  rew() { # FILE [check]: FILE with each backticked path (RQ: that quote instead) at or under a moved source pointing into P; check: the lines it'd change
+    MAP=$map ROOT=$root CHECK=${2:-} Q=${RQ:-'`'} awk '
+      BEGIN { n = split(ENVIRON["MAP"], m, "\n"); for (i = 1; i <= n; i++) { split(m[i], kv, "\t"); src[i] = kv[1]; dst[i] = kv[2] }
+              q = ENVIRON["Q"]; qre = q "[^" q "]+" q }
       { out = ""; s = $0; hit = 0
-        while (match(s, /`[^`]+`/)) {
+        while (match(s, qre)) {
           tok = substr(s, RSTART + 1, RLENGTH - 2); pre = substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
           r = tok; sl = (r ~ /\/$/); sub(/\/+$/, "", r)
           if (r ~ /^~\//) r = ENVIRON["HOME"] substr(r, 2); else if (r !~ /^\//) r = ENVIRON["ROOT"] "/" r
           for (i = 1; i <= n; i++) if (src[i] != "" && (r == src[i] || index(r, src[i] "/") == 1)) { tok = dst[i] substr(r, length(src[i]) + 1) (sl ? "/" : ""); hit = 1; break }
-          out = out pre "`" tok "`"
+          out = out pre q tok q
         }
         if (ENVIRON["CHECK"] != "") { if (hit) print; next }
         print out s }' "$1"
@@ -330,6 +333,13 @@ if [ -n "$move$link" ]; then
       tl=$(map=$(printf '%s\n' ${lrel[@]+"${lrel[@]}"}); rew "$root/CLAUDE.md" check)   # the section's lines only, not prose
       [ -z "$move" ] || [ -z "$tl" ] || { echo "refused: the committed CLAUDE.md holds coordinator path lines; move them to CLAUDE.local.md first, then run this again:"; sed 's/^/  /' <<<"$tl"; exit 1; }
     else secs+=("$root/CLAUDE.md"); fi
+  fi
+  # The adapter's quoted paths: its pending line cats the handoff, which would otherwise read a moved file.
+  ad=$root/.claude/session-status-adapter; ads=
+  if [ -f "$ad" ] && [ -n "$(RQ="'" rew "$ad" check)" ]; then
+    if git -C "$root" ls-files --error-unmatch .claude/session-status-adapter >/dev/null 2>&1; then
+      [ -z "$move" ] || { echo "refused: the committed .claude/session-status-adapter names files this would move; point it into $P first, then run this again:"; RQ="'" rew "$ad" check | sed 's/^/  /'; exit 1; }
+    else ads=1; fi
   fi
   if [ -n "$move" ] && [ "${#conflicts[@]}" -gt 0 ]; then   # --link alone moves nothing: nothing to refuse
     echo "refused: these are in $P already, so nothing was moved (move or merge them by hand, then run this again):"
@@ -349,6 +359,9 @@ if [ -n "$move$link" ]; then
         [ -n "$(rew "$f" check)" ] || continue
         rew "$f" > "$f.tmp" && mv "$f.tmp" "$f" || exit 1; echo "  lines in ${f#"$root"/} rewritten"
       done
+      if [ -n "$ads" ]; then
+        RQ="'" rew "$ad" > "$ad.tmp" && chmod +x "$ad.tmp" && mv "$ad.tmp" "$ad" || exit 1; echo "  paths in .claude/session-status-adapter rewritten"
+      fi
       # config pending.file: the new path, in the person file (it wins over the repo file key by key)
       if [ -n "$(cd "$root" && config pending.file 2>/dev/null)" ]; then
         np=$(rew <(printf '`%s`\n' "$hand") | tr -d '`')
@@ -493,11 +506,13 @@ bd=$orch; [ -z "$hand" ] || bd=$(dirname "$hand")
 done_rule="its session's done-when held (no command to count)"
 [ -n "$merge_cmd" ] && done_rule="its PR merged (the merge is the unit)"
 [ "$keys" = tracker ] && done_rule="its $key_example ticket moved to done (pass that command's regex as \`--done RX\`)"
-# A brief the section names counts as present; the retro brief of older setups is .claude/retro-brief.md (or rnd-brief.md).
+# The retro brief the retro skill reads: beside the memory (not one left outside), else .claude/ (older setups); the
+# old name rnd-brief.md when there's no retro-brief.md.
+rbd=("$orch" .claude); [ -z "$mem_out" ] || rbd=(.claude)
+rb=$(for n in retro rnd; do for d in "${rbd[@]}"; do [ -e "$(at "$d")/$n-brief.md" ] && { echo "$d/$n-brief.md"; exit; }; done; done)
+# A brief the section names counts as present.
 briefs=$( [ -n "$review_brief$named_brief" ] || [ -e "$(at "$bd")/review-brief.md" ] || echo "--review-brief: a brief for PR reviewer sessions ($bd/review-brief.md)"
-          [ -n "$retro_brief" ] || [ -e "$root/.claude/retro-brief.md" ] || [ -e "$root/.claude/rnd-brief.md" ] ||
-            [ -e "$(at "$orch")/retro-brief.md" ] || [ -e "$(at "$orch")/rnd-brief.md" ] ||
-            echo "--retro-brief: what the weekly retro counts ($orch/retro-brief.md)")
+          [ -n "$retro_brief$rb" ] || echo "--retro-brief: what the weekly retro counts ($orch/retro-brief.md)")
 # The repo file: the team's or the nearest committed one when there is one, else this folder's. A tracked one is the
 # repo's, never written here.
 cfg_repo=$root/.claude/coordination/coordination.json
@@ -569,13 +584,11 @@ adapter_tpl=session-status-adapter; [ -n "$gh" ] && [ "${#repos[@]}" = 1 ] && ad
 meminit=$(pm_dir)/skills/project-memory/memory-init || exit 1
 mem_args=("$orch" --root "$root" --topic coordinator.md "coordinating sessions" "acting as the coordinator, or messaging, resuming or handing work to another session")
 [ -z "$review_brief" ] || [ -n "$named_brief" ] || plan+=("review-brief.md	$bd/review-brief.md")
-# The old brief name: --write moves it to the new one first, where it is (the alias period; the old name is read until then).
-for d in .claude "$orch"; do
-  if [ "$mode" = write ] && [ -e "$(at "$d")/rnd-brief.md" ] && [ ! -e "$(at "$d")/retro-brief.md" ]; then
-    mv "$(at "$d")/rnd-brief.md" "$(at "$d")/retro-brief.md" || exit 1; wrote_early+=("$d/retro-brief.md")
-  fi
-done
-[ -z "$retro_brief" ] || [ -e "$root/.claude/retro-brief.md" ] || [ -e "$root/.claude/rnd-brief.md" ] || plan+=("retro-brief.md	$orch/retro-brief.md")
+# The old brief name: --write renames the one the retro reads, where it is (the alias period; the old name is read until then).
+if [ "$mode" = write ] && [ "${rb##*/}" = rnd-brief.md ]; then
+  mv "$(at "$rb")" "$(at "${rb%/*}")/retro-brief.md" || exit 1; wrote_early=${rb%/*}/retro-brief.md
+fi
+[ -z "$retro_brief" ] || [ -n "$rb$mem_out" ] || plan+=("retro-brief.md	$orch/retro-brief.md")
 todo=()
 for p in ${plan[@]+"${plan[@]}"}; do
   t=${p#*	}
@@ -629,7 +642,7 @@ fill() { # template, then flags: lines starting {{?FLAG}} kept when FLAG is set,
   done
   printf '%s' "$out"
 }
-wrote=(${wrote_early[@]+"${wrote_early[@]}"})
+wrote=(${wrote_early:+"$wrote_early"})
 for p in ${todo[@]+"${todo[@]}"}; do
   t=${p%%	*} f=$(at "${p#*	}")
   mkdir -p "$(dirname "$f")" || exit 1
