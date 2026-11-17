@@ -44,7 +44,8 @@ and swaps the index in with one `mv`, so no worker's append is lost.
   session runs project-memory's `graduate` skill (`/graduate`), which also resolves open project cases and
   deferred task files (in the folder `cases tasks` prints).
 - **A retro only measures and proposes** (the `retro` skill). When the user approves some of its proposals, start a
-  fresh followups session for them (`claude --bg -n rnd-<N>-followups`, N the run's number; brief: that run's report
-  in the replies folder plus the approved numbers, reporting in `replies/rnd-<N>-followups.md`). Never resume the
+  fresh followups session for them (`claude --bg -n retro-<scope>-<N>-followups`, from the report's name `retro-<scope>-<N>`;
+  brief: that report in the replies folder plus the approved numbers, reporting in
+  `replies/retro-<scope>-<N>-followups.md`). Never resume the
   retro session for it. A proposal built from project feedback cases names them: the followups session marks each
   `feedback mark FILE fixed '<what changed>'` once its fix lands ([feedback.md](feedback.md)).

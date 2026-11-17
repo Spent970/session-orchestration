@@ -463,4 +463,40 @@ printf '%s\n' '{"type":"user","timestamp":"2026-10-12T09:00:00.000Z","message":{
 out=$(XDG_STATE_HOME=$tmp/state retro usage)
 grep -q $'^skill\tretro\t1\t' <<<"$out" && ! grep -q $'^skill\trnd\t' <<<"$out" || fail "usage: /rnd counts as retro" "$(grep '^skill' <<<"$out")"
 rm "$a/rrrrrrrr-7777.jsonl"
+# --project: a project run reads one project's sessions only. The same task session (a human prompt, a 10-minute
+# wait, a silent watcher, no reply) in this project's worktree, in another project and in a lookalike folder.
+for d in .claude/projects/-x-proj--worktrees-w:wt000001 .claude-other/projects/-x-other:ot000001 .claude/projects/-x-proj-archive:lk000001; do
+  mkdir -p "$home/${d%:*}"
+  cat > "$home/${d%:*}/${d#*:}-0001.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-11T08:00:00.000Z","message":{"content":"Work on OTH-9"}}
+{"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"p1","message":{"usage":{"output_tokens":5},"content":[{"type":"tool_use","id":"p2","name":"Bash","input":{"command":"pr-watch 1","run_in_background":true}},{"type":"tool_use","id":"p3","name":"Bash","input":{"command":"make"}}]}}
+{"type":"user","timestamp":"2026-10-11T08:00:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"p2","content":"with ID: bgp"}]}}
+{"type":"user","timestamp":"2026-10-11T08:10:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"p3","content":"done"}]}}
+EOF
+done
+all=$(retro sessions 7)
+for s in wt000001 ot000001 lk000001; do grep -q $'\t'$s$'\t' <<<"$all" || fail "sessions: without --project, every project ($s)" "$all"; done
+for c in "sessions 7" "events 7" "waits 7 5" "bgtasks pr-watch 7" "replies 7"; do
+  # shellcheck disable=SC2086
+  out=$(retro $c --project /x/proj 2>&1)
+  grep -q wt000001 <<<"$out" && { [ "$c" = "replies 7" ] || grep -q aaaaaaaa <<<"$out"; } && ! grep -qE 'ot000001|lk000001|bbbbbbbb' <<<"$out" ||
+    fail "$c --project /x/proj: the project and its worktree, not another project or a lookalike" "$out"
+  # shellcheck disable=SC2086
+  out=$(retro $c --project x-other 2>&1)
+  grep -q ot000001 <<<"$out" && ! grep -qE 'wt000001|lk000001|aaaaaaaa' <<<"$out" || fail "$c --project RX" "$out"
+done
+# a session started in a subfolder of the root counts by its cwd; a lookalike root's cwd doesn't
+mkdir -p "$home/.claude/projects/-x-proj-sub" "$home/.claude/projects/-x-proj-old"
+head -2 "$home/.claude/projects/-x-proj--worktrees-w/wt000001-0001.jsonl" | sed 's/"type":"user",/"type":"user","cwd":"\/x\/proj\/sub",/' > "$home/.claude/projects/-x-proj-sub/sb000001-0001.jsonl"
+head -2 "$home/.claude/projects/-x-proj--worktrees-w/wt000001-0001.jsonl" | sed 's/"type":"user",/"type":"user","cwd":"\/x\/proj-old",/' > "$home/.claude/projects/-x-proj-old/ol000001-0001.jsonl"
+out=$(retro sessions 7 --project /x/proj)
+grep -q sb000001 <<<"$out" && ! grep -q ol000001 <<<"$out" || fail "--project: a subfolder's session by its cwd, not a lookalike root's" "$out"
+retro sessions 7 --project 2>/dev/null && fail "--project without a value fails" ""
+
+# sections: a plugin run writes no project-only section, a project run no plugin-only one; retro.sections narrows them
+[ "$(retro sections plugin | tr '\n' ' ')" = "units context waste feedback protocol features sizing " ] || fail "sections plugin" "$(retro sections plugin)"
+[ "$(retro sections project | tr '\n' ' ')" = "units context waste feedback coordinator memory " ] || fail "sections project" "$(retro sections project)"
+out=$(retro sections plugin memory units sizing 2>&1)
+[ "$out" = $'skipped: memory (not a plugin section)\nunits\nsizing' ] || fail "sections: the listed ones the scope has" "$out"
+retro sections both 2>/dev/null && fail "sections: one scope per run" ""
 echo ok
