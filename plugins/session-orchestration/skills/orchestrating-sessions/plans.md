@@ -9,7 +9,7 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
 1. **Split.** One chunk per step with a done-when, an est and a clean stop point (everything committed, nothing running).
    The est is growth in context, kept within `handoff.at.chunk` − ~60K; a chunk with more than 3 separate pieces is split.
    Size classes: S ≤ 22K, M ≤ 43K, L ≤ 65K. Multiply a `build` chunk's first guess by 1.35 (measured: build chunks
-   grew 1.35× their est, n=8); other kinds stay at 1.0 until `rnd.py chunks` has enough samples to say otherwise.
+   grew 1.35× their est, n=8); other kinds stay at 1.0 until `retro.py chunks` has enough samples to say otherwise.
    The 1.35 is a median of two groups (five chunks at 1.0–1.4×, three at ~2.5×), so it under-sizes the second: a
    chunk past 2× its est at a handoff counts as a failure for SKILL.md's "same failure twice" rule (step 5).
 2. **Write the plan** as a table under `## Plan` in `<replies>/PROJ-123.md`, and run `session-status --plan FILE --check`.
@@ -17,11 +17,11 @@ A multi-step task becomes chunks run by separate sessions, so none outgrows its 
    `PROJ-123-chunk-rules.md` (paths, setup, interface, checks, landing by fast-forward). Keep plans in the replies folder.
 3. **Start** what `--plan FILE --next` prints; a chunk it lists again died or handed off: start it, or take its
    handoff. With `plan.enabled: false` run the task without a plan. **While the planner is evaluated**, odd task
-   starts get a plan and even ones run as before, with `plan: off` in the brief (`rnd.py trial` compares the two).
+   starts get a plan and even ones run as before, with `plan: off` in the brief (`retro.py trial` compares the two).
 4. **Models** by kind, from `plan.models` (`default` in the table); `fable` only under an account config `fable.accounts` lists.
 5. **A `handoff ready: PROJ-123 cN` message**: `session-status --handover <id> -- '<next step>'`,
    which takes the chunk's model and effort from its plan row; a chunk with `## cN: done` gets none. A chunk that
    handed off past 2× its est, or failed the same way twice: add `--escalate` (one rung up from the row's). **A `handoff ready: PROJ-123` message** (a task): `session-status
    --handover <id> -- '<next step>'`, the next step from `## Handoff` in its replies file. Message and attach the
    successor's plain name; a `-prev-K` name is a finished predecessor.
-6. **Recalibrate** with `rnd.py chunks` (its ratio line, act against est) and size the next ests by it.
+6. **Recalibrate** with `retro.py chunks` (its ratio line, act against est) and size the next ests by it.

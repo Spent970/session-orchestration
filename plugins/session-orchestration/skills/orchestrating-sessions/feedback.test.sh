@@ -103,11 +103,11 @@ pc=$("$FB" add features 'Sign-in to the dev host expires hourly' --where /opt/x/
   [ "$("$FB" list | wc -l | tr -d ' ')" = 2 ] || fail "list scopes: $("$FB" list)"
 [ "$("$FB" count)" = "1 open (0 seen ≥2×); project: 1 open (0 seen ≥2×)" ] || fail "count both: $("$FB" count)"
 rm -f "$D/.footer-shown"
-[ "$("$FB" footer)" = "plugin feedback: 1 open (0 seen ≥2×) — apply? (feedback.md) · project feedback: 1 open (0 seen ≥2×), for the next R&D run" ] ||
+[ "$("$FB" footer)" = "plugin feedback: 1 open (0 seen ≥2×) — apply? (feedback.md) · project feedback: 1 open (0 seen ≥2×), for the next retro" ] ||
   fail "footer both: $(rm -f "$D/.footer-shown" "$P/.footer-shown"; "$FB" footer)"
 # Each part once a day: the project's stamp is its own, so another project's footer doesn't hide it.
 rm -f "$P/.footer-shown"
-[ "$("$FB" footer)" = "project feedback: 1 open (0 seen ≥2×), for the next R&D run" ] || fail "project footer stamp: $("$FB" footer)"
+[ "$("$FB" footer)" = "project feedback: 1 open (0 seen ≥2×), for the next retro" ] || fail "project footer stamp: $("$FB" footer)"
 [ -z "$("$FB" footer)" ] || fail "project footer twice"
 "$FB" mark "$pc" fixed 'the login doc says to refresh first' && grep -qx -- '- status: fixed the login doc says to refresh first' "$pc" &&
   [ -z "$("$FB" count --project)" ] && [ "$("$FB" count)" = "1 open (0 seen ≥2×)" ] || fail "mark fixed: $(grep status "$pc")"

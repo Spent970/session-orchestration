@@ -359,7 +359,7 @@ config() {
 # path no transcript shows) or chunk (session-status --plan --done: NAME is the chunk's kind, then its model, effort,
 # est and act in K of context growth; act may be left out) or start (session-status --kind: a plain task start, NAME
 # its kind, then its model, effort and optionally the -n session name, logged as sess: the first 12 hex of its sha256,
-# so rnd can join a start to its session by hashing session names; the name isn't in clear, but someone who knows or
+# so retro can join a start to its session by hashing session names; the name isn't in clear, but someone who knows or
 # guesses a name can confirm it; then optionally its size S, M or L, logged as size) or escalate (session-status
 # --handover --escalate: NAME task or chunk, then the successor's model and effort and the old session's name, as
 # sess). NAME is a fixed word (lowercase, digits, -), never a key,

@@ -13,7 +13,7 @@ What you get:
 - through [project-memory](../project-memory/README.md), installed with it: project memory read by every session,
   a `/graduate` pass into the docs, project friction cases, deferred tasks, and guards that keep background
   sessions from stalling on a prompt nobody can answer;
-- optional: a review inbox for proposed PR comments, an `rnd` skill that measures how efficiently the sessions work and scans similar tools for ideas (web searches with no personal details).
+- optional: a review inbox for proposed PR comments, a `retro` skill that measures how efficiently the sessions work and scans similar tools for ideas (web searches with no personal details).
 
 **GitHub works out of the box** (tracker `github`, `gh`). Jira, Bitbucket and Forgejo need your own adapter and CLI
 (`skills/orchestrating-sessions/status-reference.md`, the adapter contract): with tracker `jira`, the adapter setup
@@ -125,5 +125,5 @@ plugin depends on.
   for a session that receives messages (`hooks/reply-card.txt` is its short form); `status-reference.md`: the status
   command, the adapter contract, writing your own terminal module.
 - `skills/choosing-model-effort/SKILL.md`: sizing work into a `plan.models` kind, for a session start, a subagent or
-  an R&D run.
+  a retro.
 - Tests: every `*.test.sh` prints `ok`.

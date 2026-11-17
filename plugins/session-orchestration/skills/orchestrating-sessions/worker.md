@@ -247,5 +247,5 @@ your own (a refused or retried command, guessed CLI usage, a skipped rule, misre
 `session-status`; [feedback.md](feedback.md) has the format, in the plugin's terms only), or `feedback seen FILE`
 when it lists the same case open. Friction from the project itself (its hosts, sign-ins, docs, scripts) goes in the
 project's store with `feedback add --project`, in its own terms. Don't fix the plugin from your task; carry on with
-it. The coordinator and the R&D run offer the plugin's cases upstream, with the user's yes; the R&D run turns the
+it. The coordinator and the retro offer the plugin's cases upstream, with the user's yes; the retro turns the
 project's into fixes.

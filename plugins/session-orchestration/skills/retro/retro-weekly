@@ -1,0 +1,26 @@
+#!/bin/bash
+# Weekly retro launcher for cron or launchd: starts a background session in a project root that follows the
+# retro skill (SKILL.md beside this file, plus the project's .claude/retro-brief.md). Edit those, not the schedule line.
+# usage: retro-weekly PROJECT_ROOT [--dry-run]     log: $RETRO_LOG (default retro-weekly.log in ~/Library/Logs on macOS,
+# else in ${XDG_STATE_HOME:-~/.local/state})
+# PATH: where claude is installed (cron's PATH is minimal); put anything else the session needs in the schedule line.
+set -euo pipefail
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+root=${1:?usage: retro-weekly PROJECT_ROOT [--dry-run]}
+if [ "$(uname)" = Darwin ]; then logdir=$HOME/Library/Logs; else logdir=${XDG_STATE_HOME:-$HOME/.local/state}; fi
+LOG=${RETRO_LOG:-${RND_LOG:-$logdir/retro-weekly.log}}
+mkdir -p "$(dirname "$LOG")"
+ss=$(cd "$(dirname "$0")" && pwd)/../orchestrating-sessions/session-status   # before the cd: $0 may be relative
+cd "$root" 2>/dev/null || { echo "$(date '+%F %T') no project root $root" >> "$LOG"; exit 1; }
+name=retro-weekly-$(date +%F)
+# model and effort: the review kind's (config plan.models.review), logged as a start line like any task start
+if [ "${2:-}" = "--dry-run" ]; then   # --config: no start line for a run that starts nothing
+  me=$(bash "$ss" --config plan.models.review) && me="--model ${me%%/*} --effort ${me#*/}"
+else me=$(bash "$ss" --kind review "$name"); fi || me=
+read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
+cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "Session task: weekly retro run. Use the session-orchestration:retro skill and follow it.")
+if [ "${2:-}" = "--dry-run" ]; then
+  printf '%q ' "${cmd[@]}"; echo; command -v claude; exit 0
+fi
+echo "$(date '+%F %T') start in $root" >> "$LOG"
+"${cmd[@]}" >> "$LOG" 2>&1

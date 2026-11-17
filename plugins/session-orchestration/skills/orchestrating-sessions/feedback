@@ -8,7 +8,7 @@
 # Project cases (--project): friction from the project itself (its hosts, sign-ins, docs, scripts), in the same format
 # and layout, in this project's store: config feedback.project_dir (relative: to the project root), else
 # ${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<project root, encoded>. Never committed,
-# scrubbed or sent: the R&D run turns them into project fixes.
+# scrubbed or sent: the retro turns them into project fixes.
 # The case files themselves (add, seen, list, count, mark) are project-memory's `cases`, given the store and the
 # origin line; this script adds the plugin's scope, its footer, scrub and the ways a case goes upstream.
 #
@@ -107,7 +107,7 @@ footer)
   ! due "$P/.footer-shown" || { q=$("$0" count --project); [ -z "$q" ] || shown "$P/.footer-shown"; }
   [ -n "$p$q" ] || exit 0
   l=${p:+plugin feedback: $p$ask}
-  [ -z "$q" ] || l="${l:+$l · }project feedback: $q, for the next R&D run"
+  [ -z "$q" ] || l="${l:+$l · }project feedback: $q, for the next retro"
   echo "$l" ;;
 mark) [ -f "${2:-}" ] || die "usage: feedback mark FILE sent URL | fixed WHAT | dropped"; shift; cases mark "$@" ;;
 mode)
