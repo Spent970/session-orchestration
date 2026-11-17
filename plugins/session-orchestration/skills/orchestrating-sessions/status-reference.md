@@ -242,7 +242,8 @@ watcher or opened the pane), `Session task: KEY review` a review (no messages), 
 - **Window mismatch**: the thresholds assume `compact.window`. The session's actual window is `$CLAUDE_CODE_AUTO_COMPACT_WINDOW`,
   else `autoCompactWindow` in the project's `.claude/settings.local.json`, its `.claude/settings.json`, then the user's
   `settings.json` (SOURCE `env`, `project`, `settings`); when it differs, one line (`This session's window is W from SOURCE; expected X.`)
-  is added to the first message.
+  is added to the first message. When none of them sets it (SOURCE `config`), that line says no `autoCompactWindow` is
+  set: the marks are a guess, and a 1M-context model compacts near 1M.
 - **After a compaction**, chunks only: "you were compacted mid-chunk": write the handoff from what's on disk and stop, once
   per session. A compaction or resume clears the soft and hard stamps, and a resume the cached thresholds too.
 - **Skipped**: a session with no `Session task:` line that isn't a coordinator, a subagent's calls, and a kind with its

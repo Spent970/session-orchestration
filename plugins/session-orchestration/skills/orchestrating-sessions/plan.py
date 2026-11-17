@@ -75,7 +75,9 @@ def overlap(x, y):
     return x == y or x.startswith(y.rstrip("/") + "/") or y.startswith(x.rstrip("/") + "/")
 
 if mode == "--check":
-    if os.environ["PLAN_W"] != os.environ["PLAN_WANT"]:   # info, not a problem (stderr: stdout is one line per problem)
+    if os.environ["PLAN_WFROM"] == "config":   # info, not a problem (stderr: stdout is one line per problem)
+        print(f"window: no autoCompactWindow set; the marks assume {os.environ['PLAN_W']}", file=sys.stderr)
+    elif os.environ["PLAN_W"] != os.environ["PLAN_WANT"]:
         print(f"window {os.environ['PLAN_W']} from {os.environ['PLAN_WFROM']}; expected {os.environ['PLAN_WANT']}", file=sys.stderr)
     out, seen =[f"row {c[0]}: {len(c)} cells, not 8" for c in bad] + [f"c{n}: two rows" for n in dup], set()
     for n, r in R.items():

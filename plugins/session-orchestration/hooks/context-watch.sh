@@ -16,7 +16,8 @@
 #   at = min(handoff.at.KIND, hard - 10000). handoff.at.KIND = 0: off. A window <= 0 is unknown (no clamp); one with
 #   ceiling - stop_room < 20000 gets at = 60% and hard = 80% of the ceiling (of the window when ceiling <= 0).
 # - Past at: one additionalContext (reach the stop point, write the handoff, hand over by itself (a coordinator: start its successor));
-#   past hard: one more (stop now). A window other than compact.window adds one line to the first one.
+#   past hard: one more (stop now). A window other than compact.window, or one no setting gives (config), adds one
+#   line to the first one.
 # - SessionStart after a compaction, chunk sessions only: write the handoff from what's on disk and stop. A
 #   compaction or resume also clears the stamps (a resume may bring another window: the thresholds too, and the
 #   compacted-mid-chunk stamp).
@@ -96,6 +97,8 @@ thresholds() {   # at, hard and note for $kind, cached
   fi
   (( at > 0 && hard - 10000 < at && !small )) && at=$(( hard - 10000 ))
   note=; [ "$w" = "$expect" ] || note="This session's window is $w from $from; expected $expect."
+  # config = nothing set it: the real window is the model's own (1M on a 1M model), so the marks are a guess
+  [ "$from" != config ] || note="No autoCompactWindow is set: these marks assume compact.window $w, but this session compacts at its model's own window (a 1M model's is 1M). Set autoCompactWindow in Claude Code settings (setting-up-coordination)."
   [ -z "$small" ] || note="${note:+$note }It is too small for handoff.stop_room: hand off at 60% of the $small before compaction, stop at 80%."
   mkdir -p "$d" && printf '%s %s %s %s %s %s\n%s' "$kind" "$key" "${n:--}" "$at" "$hard" "$note" "${re:+$re
 }" > "$s.kind.$$" && mv -f "$s.kind.$$" "$s.kind"   # whole or not at all: a writer may be killed

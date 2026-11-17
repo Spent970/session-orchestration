@@ -76,6 +76,10 @@ expect cw "$coord" 153000 'Stop now'
 grep -q window <<<"$(fire cw2 "$coord" 160000)" || fail 'window line on a first firing that is the hard one'
 out=$(fire cw3 "$chunk" 126000); fire cw3 "$chunk" 151000 | grep -q window && fail 'window line twice'
 unset CLAUDE_CODE_AUTO_COMPACT_WINDOW
+# No autoCompactWindow anywhere (config's guess; a 1M model compacts far later): the note says so, marks unchanged.
+mv "$CLAUDE_CONFIG_DIR/settings.json" "$t/settings.bak"
+expect nw "$coord" 146000 'at 146K: hand off.*No autoCompactWindow is set: these marks assume compact.window 220000'
+mv "$t/settings.bak" "$CLAUDE_CONFIG_DIR/settings.json"
 
 # Not coordinated (no Session task line), or a subagent's tool call: nothing. Keyless: the transcript isn't read again.
 expect plain 'Fix the bug.' 190000 ''
