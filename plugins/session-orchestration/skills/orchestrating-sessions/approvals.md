@@ -23,7 +23,10 @@ Source: <your sessionId> <your cwd>
 Your `sessionId`, `cwd` and name: your entry in `claude agents --json`, matched on the name `ListAgents` shows for
 you right now (names change when a session is resumed). The session checks the block with `verify-approval.sh`
 ([worker.md](worker.md), Relayed approvals). Its checks decide what you can relay: the Quote must be words the user
-gave you in one of the ways below, naming the task key or answering your last message, which named it. Two relays
+gave you in one of the ways below, naming the task key or answering your last message, which named it. As a
+successor, words the user gave the coordinator you succeed count as yours (Source stays you): the check finds them in
+its transcript through your first prompt's `You succeed "NAME" (ID8)`, still within 24h. Relay them once you hold
+`NAME`: a relay sent as `NAME-next` fails when the worker reads it after your rename. Two relays
 it always rejects: one from a background coordinator (only an interactive one can relay), and one to a session whose
 cwd is neither your own cwd, inside it, nor a folder containing it (that session hands the user the command instead: [worker.md](worker.md), Handing the
 user a command).
