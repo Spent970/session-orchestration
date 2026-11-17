@@ -1187,6 +1187,12 @@ rc=0; out=$(init "$u" --check) || rc=$?
 chmod +x "$u/.claude/session-status-adapter"; init "$u" --write >/dev/null
 [ "$(git -C "$u" status --short)" = "$(printf '?? .claude/\n?? CLAUDE.md')" ] && grep -q '^# mine$' "$u/CLAUDE.md" && grep -q 'Replies folder' "$u/CLAUDE.md" ||
   { echo "init untracked CLAUDE.md: $(git -C "$u" status --short)"; exit 1; }
+# A fresh setup with config pending.file set: written there, and the section and the adapter name it.
+pf=$(mkdir -p "$tmp/init/pf/.claude" && cd "$tmp/init/pf" && pwd -P); git -C "$pf" init -q
+echo '{"pending":{"file":"docs/pending.md"}}' > "$pf/.claude/coordination.local.json"; init "$pf" --write >/dev/null
+[ -f "$pf/docs/pending.md" ] && grep -qF "Coordinator handoff file: \`$pf/docs/pending.md\`." "$pf/CLAUDE.md" &&
+  grep -qF "pending) cat '$pf/docs/pending.md'" "$pf/.claude/session-status-adapter" ||
+  { echo "init pending.file: $(grep -h -e 'handoff file' -e 'pending)' "$pf/CLAUDE.md" "$pf/.claude/session-status-adapter")"; exit 1; }
 mkdir -p "$a/sub"; rc=0; out=$(init "$a/sub" --check) || rc=$?
 [ "$rc:$out" = "3:covered by a parent: $a (acme-coordinator) covers this folder" ] || { echo "init (c) failed: $rc:$out"; exit 1; }
 # --config: read from a subfolder (walking up to the config), a bad value falls back with a warning, --delegate turns

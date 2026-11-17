@@ -486,6 +486,8 @@ replies_dir=$P/replies
 [ -z "$replies" ] || replies_dir=${replies%/}
 # A memory folder outside this project and not P (a parent project's) isn't written: --move gives it its own.
 mem_out=; case $(at "$orch")/ in "$root"/*|"$P"/*) ;; *) mem_out=1 ;; esac
+# The handoff file the section and adapter name: the one config or the section names, else beside the memory.
+handoff=${hand:-$orch/pending.md}
 # The briefs' folder: the handoff file's, else the memory's (orch).
 bd=$orch; [ -z "$hand" ] || bd=$(dirname "$hand")
 done_rule="its session's done-when held (no command to count)"
@@ -562,7 +564,7 @@ plan=()   # "template<TAB>target"
 adapter_tpl=session-status-adapter; [ -n "$gh" ] && [ "${#repos[@]}" = 1 ] && adapter_tpl=github-adapter
 [ -n "$adapter$noexec" ] || plan+=("$adapter_tpl	.claude/session-status-adapter")
 # The handoff file: the one config or the section names, else beside the memory (not in a memory folder left outside).
-if [ -n "$hand" ]; then plan+=("pending.md	$hand"); elif [ -z "$mem_out" ]; then plan+=("pending.md	$orch/pending.md"); fi
+[ -n "$hand" ] || [ -z "$mem_out" ] && plan+=("pending.md	$handoff")
 # The project memory (index and topic files): project-memory's memory-init writes what's missing.
 meminit=$(pm_dir)/skills/project-memory/memory-init || exit 1
 mem_args=("$orch" --root "$root" --topic coordinator.md "coordinating sessions" "acting as the coordinator, or messaging, resuming or handing work to another session")
@@ -622,7 +624,7 @@ fill() { # template, then flags: lines starting {{?FLAG}} kept when FLAG is set,
     fi
     out+=$line$'\n'
   done < "$tpl/$1"
-  for v in name orch replies_dir default_branch key_example key_re branch_pattern worktree_cmd enc_root urls repo_slug merge_cmd post_cmd done_rule; do
+  for v in name orch handoff replies_dir default_branch key_example key_re branch_pattern worktree_cmd enc_root urls repo_slug merge_cmd post_cmd done_rule; do
     out=${out//"{{$v}}"/${!v:-}}
   done
   printf '%s' "$out"
