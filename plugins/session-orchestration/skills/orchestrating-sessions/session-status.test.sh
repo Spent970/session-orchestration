@@ -1120,6 +1120,7 @@ out=$(run)
 # --init (session-init): (a) a GitHub repo with ACME keys and a tracked CLAUDE.md, proposed then written; (b) a
 # workspace of 2 repos with no keys; (c) a folder under an adapter; (d) a configured folder. Outside $root's adapter.
 rm -rf "$tmp/.claude-work"   # one account until the accounts case below
+rm -f "$tmp/state"   # the stub's state file from above: XDG_STATE_HOME (setup's state folders, the usage log) lives under it
 # The terminal it runs in: none, unless T_PROG (TERM_PROGRAM) or T_MUX (TMUX) says.
 init() { (cd "$1" && shift && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
 # pof ROOT: ROOT's state folder (lib.sh proj_dir), where setup puts the replies, memory, handoff and briefs
@@ -1529,7 +1530,6 @@ grep -qxF 'Kind: mechanical · Model: sonnet/medium · Est: 20K growth · Deps: 
   [ "$(run --plan "$plan" --brief 9 2>&1)" = "no row 9 in $plan" ] || { echo "--plan --brief: $out"; exit 1; }
 # --plan --done N: row 2 (mechanical, default: sonnet/medium, 20K) with this session's act from retro.py (growth: 20K + 35K,
 # the first request not counted). telemetry off: nothing logged, and why. usage refuses a malformed chunk line.
-rm -f "$tmp/state"   # the stub's state file from above: the usage log lives under it
 did=eeeeeeee-2222-3333-4444-555555555555 now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 { jq -nc --arg t "$now" '{type: "user", timestamp: $t, message: {content: "Session task: PROJ-123\nChunk: PROJ-123/2\nGo."}}'
   for c in 1:10000 2:30000 3:25000 4:60000; do
