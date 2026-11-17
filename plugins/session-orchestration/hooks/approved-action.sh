@@ -7,7 +7,8 @@
 # merge or a bodiless approval. A forgejo-cli REPO is its --repo OWNER/REPO. A gh REPO is OWNER/REPO (HOST/OWNER/REPO off github.com), from -R/--repo or the PR's
 # URL (never guessed from a remote: gh picks its base repo by rules of its own). A relay whose Action names no tracker key (a project with
 # session-name keys) is verified with REPO's last part #ID as the key; a merge's Action may instead end "(<this session's name>)",
-# verified with that name (approving the task covers its landing). Then: allow, once per relay
+# verified with that name (approving the task covers its landing), or "(<this session's name>, approved under KEY)",
+# verified with KEY (a yes under another task's key that started this session with its landing). Then: allow, once per relay
 # (~/.cache/session-status/approved/). The command must be that one CLI call alone. Anything else on
 # those commands: deny, with the exact action to report. A `gh api` call with a write method or fields, a
 # `forgejo-cli raw` call with a write method, or gh reached through a variable or $(…), is denied (asked, when
@@ -41,7 +42,7 @@
 # doesn't see. It posts only review-inbox rows the user approved on the page, each checked by verify-row.sh.
 input=$(cat)
 # (The raw JSON: a newline before gh is the two characters \n.)
-pre='bitbucketdc-cli|forgejo-cli|jiradc-cli|msgraph|\$[^[:space:]]*[[:space:]]+(message|mail|calendar|file)[[:space:]]|(^|[^A-Za-z0-9_.-]|\\[nrt])gh([^A-Za-z0-9_.-]|$)'
+pre='session-status[[:space:]]+--land|bitbucketdc-cli|forgejo-cli|jiradc-cli|msgraph|\$[^[:space:]]*[[:space:]]+(message|mail|calendar|file)[[:space:]]|(^|[^A-Za-z0-9_.-]|\\[nrt])gh([^A-Za-z0-9_.-]|$)'
 [[ $input =~ $pre ]] || exit 0
 
 done=
@@ -87,6 +88,16 @@ coordinated() {
   [ -z "$c" ] || echo "$sz" > "$c"; return 1
 }
 coordinated || pass
+# A landing by fast-forward (session-status --land BRANCH, worker.md) is gated as a merge: its action is "merge
+# BRANCH", relayed as "merge BRANCH (<this session's name>)". Seen where a command starts; it must run alone.
+lpre='(^|[;&|(]|'$'\n'')[[:space:]]*(bash[[:space:]]+)?([^[:space:]]*/)?session-status[[:space:]]+--land([[:space:]]|$)'
+lone='^[[:space:]]*(bash[[:space:]]+)?([^[:space:];&|<>`$]*/)?session-status[[:space:]]+--land[[:space:]]+([A-Za-z0-9._/-]+)[[:space:]]*$'
+landing=
+if [[ $raw =~ $lpre ]]; then
+  [[ $raw =~ $lone ]] || decide deny "Blocked: run session-status --land BRANCH alone, as its own command, so the approval hook can name it."
+  landing=${BASH_REMATCH[3]}
+fi
+if [ -z "$landing" ]; then   # (not indented: the rest of the command parsing, up to the relays)
 # Text given to a command is text, not calls, only when every command in sight is one that never runs what it's
 # given and the call writes no file (no > but to /dev/null or &N; a file written could be run by what comes next:
 # a git hook, a config) and sets no variable (GIT_EDITOR=bash git commit, X=bash; …, printf -v). An allowlist, so
@@ -451,6 +462,9 @@ else
   else action="post comment $bodyfile on $what (sha256 $sha)"; fi
 fi
 
+else
+  kind=merge what=$landing target=$landing short= host= fj= action="merge $landing"
+fi
 # The relays this session received: peer messages from another session (not a subagent's hand-back), newest
 # first: sender name, quote, action, source sessionId, source cwd, the transcript it came in (tab-free JSON lines).
 # A handover's successor (`Supersedes: ID` in its first prompt, ID's transcript beside its own) also has the relays
@@ -498,10 +512,16 @@ while IFS= read -r r; do
   a=$act; [ "$kind" != send ] || a=${act/"$action"/}
   key=$target; [ "$kind" = jirapost ] || key=$(grep -oE '[A-Z][A-Z0-9]+-[0-9]+' <<<"$a" | head -1)
   # A merge is the task's landing, which approving the task covers: with session-name keys, an Action ending
-  # "(<this session's name>)" is verified with that name, so the user's yes to the task itself verifies.
-  if [ -z "$key" ] && [ "$kind" = merge ] && [[ $act =~ \(([A-Za-z0-9][A-Za-z0-9._-]*)\)[[:space:]]*$ ]]; then
+  # "(<this session's name>)" is verified with that name, so the user's yes to the task itself verifies. A yes given
+  # under another key whose answer started this session with its landing (a design task's pane ask): "(<this
+  # session's name>, approved under <that key>)", verified with that key.
+  if [ -z "$key" ] && [ "$kind" = merge ] && [[ $act =~ \(([A-Za-z0-9][A-Za-z0-9._-]*)(,[[:space:]]*approved[[:space:]]+under[[:space:]]+([A-Za-z0-9][A-Za-z0-9._-]*))?\)[[:space:]]*$ ]]; then
+    nm=${BASH_REMATCH[1]} under=${BASH_REMATCH[3]}
     [ -n "$me" ] || me=$(jq -r 'select(.type == "agent-name") | .agentName // empty' "$tp" 2>/dev/null | tail -1)
-    [ "${BASH_REMATCH[1]}" != "$me" ] || key=$me
+    # Under another key, the yes itself must speak of the landing: a yes to start some task approves no merge.
+    if [ -n "$under" ] && ! jq -r .quote <<<"$r" | grep -qiE 'land|merg'; then
+      tried="the quote approved under $under doesn't speak of landing or merging"; continue; fi
+    [ "$nm" != "$me" ] || key=${under:-$me}
   fi
   # No tracker key (session-name keys): the user's words must name the target itself (REPO#ID; OWNER/ may precede).
   [ -n "$key" ] || key=$short
