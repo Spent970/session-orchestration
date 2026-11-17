@@ -1,0 +1,219 @@
+#!/bin/bash
+# Retro launcher: starts one background session per retro scope in a project root, when a run is due.
+#   retro-run ROOT [--scope project|plugin|both] [--now] [--dry-run]
+#                         start the scope's session(s) (retro.scope; both = one session each) whose run is due: its
+#                         stamp (last start) is older than retro.schedule's most recent due time. --now skips the
+#                         check; retro.schedule unset: no check (the caller is the schedule, e.g. an old cron line).
+#                         --dry-run prints the verdict and the start line and starts nothing.
+#   retro-run --install ROOT     write and load the LaunchAgent (features.retro true, retro.schedule set); run it again
+#                                after changing retro.schedule or retro.account
+#   retro-run --uninstall ROOT   unload and delete it
+#   retro-run --status [ROOT]    label, loaded, schedule, account, last start and next due (no ROOT: every agent)
+# The agent calls `retro-run --scheduled ROOT` at its calendar time (launchd starts a time missed in sleep at wake) and
+# at each login (RunAtLoad: catches a time missed while off or logged out); the due check makes the extra calls no-ops.
+# Its first stamp is the newest report's time (retro-<scope>-<N>.md, rnd-run-<N>.md), else now: a missed run starts at
+# once, a new project waits for its first time.
+# Log: $RETRO_LOG (default retro-run.log in ~/Library/Logs on macOS, else in ${XDG_STATE_HOME:-~/.local/state}).
+# Tests: RETRO_NOW (epoch seconds) stands in for the clock.
+set -euo pipefail
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+here=$(cd "$(dirname "$0")" && pwd)
+ss=$here/../orchestrating-sessions/session-status
+. "$here/../../lib.sh"
+if [ "$(uname)" = Darwin ]; then logdir=$HOME/Library/Logs; else logdir=${XDG_STATE_HOME:-$HOME/.local/state}; fi
+LOG=${RETRO_LOG:-$logdir/retro-run.log}
+agents=$HOME/Library/LaunchAgents
+usage="usage: retro-run ROOT [--scope project|plugin|both] [--now] [--dry-run] | --install ROOT | --uninstall ROOT | --status [ROOT]"
+log() { mkdir -p "$(dirname "$LOG")"; echo "$(date '+%F %T') $*" >> "$LOG"; }
+
+mode=run root= scope= now= dry= sched=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --install|--uninstall|--status) mode=${1#--} ;;
+    --scheduled) sched=1 ;; --now) now=1 ;; --dry-run) dry=1 ;;
+    --scope) scope=${2:?$usage}; shift ;;
+    -*) echo "$usage" >&2; exit 2 ;;
+    *) root=$1 ;;
+  esac
+  shift
+done
+case $scope in ''|project|plugin|both) ;; *) echo "$usage" >&2; exit 2 ;; esac
+[ -n "$root" ] || [ "$mode" = status ] || { echo "$usage" >&2; exit 2; }
+if [ -n "$root" ]; then
+  r=$(cd "$root" 2>/dev/null && pwd -P) || { log "no project root $root"; echo "no project root $root" >&2; exit 1; }
+  root=$r
+fi
+
+cfg() { (cd "$root" && config "$1"); }
+# The account a run starts under, exported so the model default (fable_ok) and claude see it; ~/.claude stays unset.
+use_account() {
+  local a; a=$(cfg retro.account) || a=
+  if [ -n "$a" ] && [ "$a" != "$HOME/.claude" ]; then export CLAUDE_CONFIG_DIR=$a; else unset CLAUDE_CONFIG_DIR; fi
+}
+label() { printf 'session-orchestration.retro.%s-%06x' "$(slug "$(basename "$1")")" $(( $(printf %s "$1" | cksum | cut -d' ' -f1) % 16777216 )); }
+stamp() { echo "$(proj_dir "$root")/retro-$1.stamp"; }
+replies() { local r; r=$(replies_path "$root"); echo "${r:-$(proj_dir "$root")/replies}"; }
+# times SCHEDULE [FILE…]: "LAST_DUE NEXT_DUE NEWEST_MTIME" in epoch seconds, local time (DST included); no FILE: 0.
+times() {
+  python3 -I - "$@" <<'EOF'
+import os, sys, time, datetime as d
+day, hm = sys.argv[1].split(); h, m = map(int, hm.split(":"))
+now = d.datetime.fromtimestamp(int(os.environ.get("RETRO_NOW") or time.time()))
+t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+t -= d.timedelta(days=(now.weekday() - ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].index(day)) % 7)
+if t > now: t -= d.timedelta(days=7)
+print(int(t.timestamp()), int((t + d.timedelta(days=7)).timestamp()), int(max([os.path.getmtime(f) for f in sys.argv[2:]] or [0])))
+EOF
+}
+fmt() { python3 -I -c 'import sys,time; print(time.strftime("%Y-%m-%d %H:%M", time.localtime(int(sys.argv[1]))))' "$1"; }
+clock() { echo "${RETRO_NOW:-$(date +%s)}"; }
+# due SCOPE SCHEDULE: 0 when due; sets last next st (the stamp, written on first use from the newest report, else now).
+due() {
+  local f r x fs=(); f=$(stamp "$1"); r=$(replies)
+  for x in "$r"/retro-"$1"-[0-9]*.md "$r"/rnd-run-[0-9]*.md; do [ -e "$x" ] && fs+=("$x"); done
+  read -r last next newest < <(times "$2" ${fs[@]+"${fs[@]}"})
+  if [ ! -s "$f" ]; then
+    st=$newest; [ "$st" -gt 0 ] || st=$(clock)
+    [ -n "$dry" ] || { mkdir -p "$(dirname "$f")"; echo "$st" > "$f"; }
+  else st=$(cat "$f"); fi
+  [ "$st" -lt "$last" ]
+}
+unlock() { [ -z "${lock:-}" ] || rmdir "$lock" 2>/dev/null || true; lock=; }
+scopes() {
+  local s=${scope:-$(cfg retro.scope)} pr
+  # plugin scope has one home (lib.sh config retro.scope): a --scope given here obeys it too
+  if [ "$s" != project ] && pr=$(cd "$root" && plugin_root) && [ "$pr" != "$root" ]; then
+    echo "warning: --scope $s runs only from feedback.repo_dir's root ($pr): project" >&2; s=project
+  fi
+  [ "$s" = both ] && echo project plugin || echo "$s"
+}
+
+case $mode in
+run)
+  use_account
+  s=$(cfg retro.schedule) || s=
+  if [ -n "$sched" ]; then   # the LaunchAgent: only while the feature is on and has a schedule
+    [ "$(cfg features.retro)" = true ] && [ -n "$s" ] ||
+      { log "skip $root: features.retro off or retro.schedule unset (retro-run --uninstall $root)"; exit 0; }
+  fi
+  lock=; trap 'unlock' EXIT
+  for sc in $(scopes); do
+    f=$(stamp "$sc"); mkdir -p "$(dirname "$f")"
+    # one start per due time: a second call at the same minute (a leftover cron line, a wake with RunAtLoad) waits here
+    # and then sees the first one's stamp. A lock older than a minute is a crashed call's.
+    if [ -z "$dry" ]; then
+      for _ in 1 2 3 4 5 6 7 8 9 10; do mkdir "$f.lock" 2>/dev/null && lock=$f.lock && break
+        [ -z "$(find "$f.lock" -mmin +1 2>/dev/null)" ] || rmdir "$f.lock" 2>/dev/null || true; sleep 1; done
+      [ -n "$lock" ] || { log "busy: $sc in $root"; continue; }
+    fi
+    if [ -z "$now" ] && [ -n "$s" ]; then
+      if ! due "$sc" "$s"; then
+        msg="not due: $sc in $root, last start $(fmt "$st"), next $(fmt "$next")"
+        if [ -n "$dry" ]; then echo "$msg"; else log "$msg"; unlock; fi
+        continue
+      fi
+    fi
+    name=retro-$sc-$(date +%F)
+    task="Session task: retro run, scope $sc. Use the session-orchestration:retro skill and follow it."
+    if [ -n "$dry" ]; then   # --config: no start line for a run that starts nothing
+      me=$(cfg plan.models.retro) && me="--model ${me%%/*} --effort ${me#*/}" || me=
+    else me=$(cd "$root" && bash "$ss" --kind retro "$name") || me=; fi
+    read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
+    cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "$task")
+    if [ -n "$dry" ]; then echo "due: $sc"; printf '%q ' "${cmd[@]}"; echo; command -v claude || true; continue; fi
+    log "start $name in $root${CLAUDE_CONFIG_DIR:+ under $CLAUDE_CONFIG_DIR}"
+    old=$(cat "$f" 2>/dev/null) || old=
+    clock > "$f"; unlock   # claimed before the start; given back when it fails
+    (cd "$root" && "${cmd[@]}") >> "$LOG" 2>&1 || { log "failed: $name"; if [ -n "$old" ]; then echo "$old" > "$f"; else rm -f "$f"; fi; }
+  done ;;
+
+install)
+  command -v launchctl >/dev/null || { echo "no launchctl: --install is macOS only; on Linux use a cron line (the retro skill's Scheduling)" >&2; exit 1; }
+  [ "$(cfg features.retro)" = true ] || { echo "features.retro isn't true in $root's .claude/coordination.local.json" >&2; exit 1; }
+  s=$(cfg retro.schedule); [ -n "$s" ] || { echo "retro.schedule is unset in $root's .claude/coordination.local.json (e.g. \"mon 12:00\")" >&2; exit 1; }
+  use_account
+  acct=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  read -r day hm <<<"$s"
+  case $day in sun) wd=0 ;; mon) wd=1 ;; tue) wd=2 ;; wed) wd=3 ;; thu) wd=4 ;; fri) wd=5 ;; sat) wd=6 ;; esac   # launchd's Weekday
+  x() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<<"$1"; }
+  # From the versioned install cache, resolve the plugin's current installPath at each start: a plist naming the
+  # cache path would run that version forever. From a checkout, name it.
+  case $here in
+    */plugins/cache/*/*/*/skills/retro)
+      p=${here%/skills/retro}; v=${p%/*}; pl=${v##*/}; mk=${v%/*}; mk=${mk##*/}
+      prog=(/bin/bash -c "d=\$(jq -r --arg k '$pl@$mk' '.plugins[\$k][0].installPath // empty' \"\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/plugins/installed_plugins.json\") && [ -n \"\$d\" ] && exec \"\$d/skills/retro/retro-run\" \"\$@\"; echo \"retro-run: $pl@$mk not installed\" >&2; exit 1" retro-run) ;;
+    *) prog=("$here/retro-run") ;;
+  esac
+  lb=$(label "$root"); pf=$agents/$lb.plist
+  mkdir -p "$agents" "$(dirname "$LOG")"
+  {
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0">'
+    echo '<dict>'
+    echo "  <key>Label</key><string>$lb</string>"
+    echo '  <key>ProgramArguments</key>'
+    echo '  <array>'
+    for a in "${prog[@]}" --scheduled "$root"; do echo "    <string>$(x "$a")</string>"; done
+    echo '  </array>'
+    echo '  <key>EnvironmentVariables</key>'
+    echo '  <dict>'
+    echo "    <key>PATH</key><string>$(x "$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")</string>"
+    [ "$acct" = "$HOME/.claude" ] || echo "    <key>CLAUDE_CONFIG_DIR</key><string>$(x "$acct")</string>"
+    [ -z "${XDG_STATE_HOME:-}" ] || echo "    <key>XDG_STATE_HOME</key><string>$(x "$XDG_STATE_HOME")</string>"   # stamps, replies
+    echo "    <key>RETRO_LOG</key><string>$(x "$LOG")</string>"
+    echo '  </dict>'
+    echo "  <key>StartCalendarInterval</key><dict><key>Weekday</key><integer>$wd</integer><key>Hour</key><integer>$((10#${hm%:*}))</integer><key>Minute</key><integer>$((10#${hm#*:}))</integer></dict>"
+    echo '  <key>RunAtLoad</key><true/>'
+    echo "  <key>StandardOutPath</key><string>$(x "$LOG")</string>"
+    echo "  <key>StandardErrorPath</key><string>$(x "$LOG")</string>"
+    echo '</dict>'
+    echo '</plist>'
+  } > "$pf"
+  launchctl bootout "gui/$(id -u)/$lb" 2>/dev/null || true
+  # bootout returns before the old agent is gone; bootstrap then fails with error 5 for a moment
+  for i in 1 2 3 4 5; do launchctl bootstrap "gui/$(id -u)" "$pf" && break
+    [ "$i" -lt 5 ] || { echo "launchctl bootstrap failed: $pf is written, not loaded" >&2; exit 1; }; sleep 1; done
+  echo "installed $lb: $s under $acct ($pf)"
+  crontab -l 2>/dev/null | awk -v r="$root" '/(rnd|retro)-weekly/ { for (i = 1; i <= NF; i++) if ($i == r) { print; next } }' |
+  while IFS= read -r l; do
+    echo "A cron line still starts the old launcher for this root; the agent replaces it. Remove it with:"
+    echo "  crontab -l | grep -vxF -- $(printf %q "$l") | crontab -"
+  done ;;
+
+uninstall)
+  lb=$(label "$root")
+  command -v launchctl >/dev/null && launchctl bootout "gui/$(id -u)/$lb" 2>/dev/null || true
+  rm -f "$agents/$lb.plist"
+  echo "uninstalled $lb" ;;
+
+status)
+  if [ -n "$root" ]; then roots=("$root")
+  else   # every agent's root: the line after --scheduled in its ProgramArguments
+    roots=()
+    for pf in "$agents"/session-orchestration.retro.*.plist; do
+      [ -f "$pf" ] || continue
+      r=$(grep -A1 '<string>--scheduled</string>' "$pf" | tail -1 | sed -E 's/.*<string>(.*)<\/string>.*/\1/; s/&lt;/</g; s/&gt;/>/g; s/&amp;/\&/g')
+      roots+=("$r")
+    done
+    [ ${#roots[@]} -gt 0 ] || { echo "no retro agents in $agents"; exit 0; }
+  fi
+  for root in "${roots[@]}"; do
+    lb=$(label "$root")
+    if [ ! -f "$agents/$lb.plist" ]; then ld="not installed"
+    elif launchctl print "gui/$(id -u)/$lb" >/dev/null 2>&1; then ld=loaded; else ld="not loaded"; fi
+    [ -d "$root" ] || { echo "$lb · $root · $ld · root missing"; continue; }
+    (
+      use_account
+      s=$(cfg retro.schedule) || s=
+      echo "$lb · $root · $ld · schedule ${s:-unset} · account ${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+      for sc in $(scopes); do
+        if [ -z "$s" ]; then echo "  $sc: no schedule"; continue; fi
+        dry=1   # status writes no stamp
+        if due "$sc" "$s"; then nd="now (missed $(fmt "$last"))"; else nd=$(fmt "$next"); fi
+        [ -s "$(stamp "$sc")" ] && ls="$(fmt "$st")" || ls="none (counts from $(fmt "$st"))"
+        echo "  $sc: last start $ls · next due $nd"
+      done
+    )
+  done ;;
+esac

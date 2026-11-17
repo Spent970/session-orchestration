@@ -1,4 +1,4 @@
 #!/bin/bash
 # Old entry point of the weekly retro run (a crontab line may still name this path): same arguments, now the
-# retro launcher beside it. Removed one release after the alias period.
+# retro launcher's shim beside it. Removed one release after the alias period.
 exec "$(cd "$(dirname "$0")" && pwd)/../retro/retro-weekly" "$@"

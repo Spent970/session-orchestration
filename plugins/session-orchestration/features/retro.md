@@ -34,7 +34,10 @@ A value outside its set falls back to the default with one warning line.
 - **The user approves proposals**: start one fresh followups session for them, as
   [memory-rules.md](../skills/orchestrating-sessions/memory-rules.md) says. Never resume the retro session for it.
   A proposal the retro filed as a plugin feedback case is the plugin coordinator's, not yours.
+- **The schedule**: `retro.schedule` takes effect once the plugin's `skills/retro/retro-run --install ROOT` loaded
+  its LaunchAgent (macOS; setup proposes it, and the retro skill's Scheduling has Linux). It starts one session per
+  scope when a run is due, a time missed in sleep or while off included; `retro-run --status ROOT` shows the agent and
+  each scope's next due time.
 - **An overdue run**: with `retro.schedule` set, the newest retro report in the replies folder is over
-  8 days old. Tell the user once, with the start line (`claude --bg $(session-status --kind retro retro-<date>)
-  -n retro-<date> "Session task: retro run. Use the session-orchestration:retro skill and follow it."` from the root)
-  and start it on their yes.
+  8 days old. Tell the user once, with `retro-run --status ROOT`'s lines (an agent not loaded is the usual cause), and
+  on their yes start it with `retro-run ROOT --now` from the plugin's `skills/retro/`.

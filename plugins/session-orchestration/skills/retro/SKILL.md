@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Retro run over the multi-session setup, one scope per run — a project's own sessions, or the plugin's view over every project — measuring how efficiently Claude Code sessions turn tokens into finished work (cost per merged PR, finished ticket and review, context size, waste counts, time to done), checking whether last run's proposals landed, and ranking the next changes. Use when invoked as /retro [project|plugin|both] (or its old name /rnd), when started as the weekly retro (retro-weekly), or when asked to measure how the sessions perform.
+description: Retro run over the multi-session setup, one scope per run — a project's own sessions, or the plugin's view over every project — measuring how efficiently Claude Code sessions turn tokens into finished work (cost per merged PR, finished ticket and review, context size, waste counts, time to done), checking whether last run's proposals landed, and ranking the next changes. Use when invoked as /retro [project|plugin|both] (or its old name /rnd), when started as a scheduled retro (retro-run), or when asked to measure how the sessions perform.
 ---
 
 # retro
@@ -12,7 +12,7 @@ weekly total stays flat.
 
 This file is the default brief. A project adds to it in `retro-brief.md` beside its project memory file (its units'
 CLI commands, its own checks; a setup from before the state folder: `.claude/retro-brief.md`); where the two
-disagree, the project's brief wins. The brief applies to project scope only. Started by `retro-weekly` (cron) or by
+disagree, the project's brief wins. The brief applies to project scope only. Started by `retro-run` (launchd) or by
 hand as `/retro`: same steps either way. It's opt-in: nothing runs until someone invokes it or schedules it.
 
 ## Scope
@@ -23,7 +23,8 @@ A run measures **one scope**, and the scope sets whose sessions are read and whi
   settings, memory).
 - `plugin`: every project and account, and only what the plugin can change.
 
-`/retro project` or `/retro plugin` picks one. `/retro` alone takes `session-status --config retro.scope` (run from
+`/retro project` or `/retro plugin` picks one, as does `scope project` or `scope plugin` in the first prompt (how
+`retro-run` starts each scope's session). `/retro` alone takes `session-status --config retro.scope` (run from
 the project root; default `project`). `both` (an argument or the setting) runs the project scope and then the plugin
 scope, one after the other in this session, each a whole run with its own report: never one report for two scopes.
 
@@ -213,22 +214,30 @@ scanned" line, and the coordinator message is sent or skipped for a stated reaso
 
 ## Scheduling the weekly run
 
-`retro-weekly`, next to this file, starts `claude --bg -n retro-weekly-<date>` in a project root with this
-skill as its brief (scope: `retro.scope`), and logs to `retro-weekly.log` in `~/Library/Logs` on macOS, else in
-`${XDG_STATE_HOME:-~/.local/state}` (`RETRO_LOG` overrides; the log was `rnd-weekly.log` before the rename; `RND_LOG` still does). It needs the
-plugin enabled in the account it runs under. `retro-weekly <root> --dry-run` prints the command without
-starting it. Point the schedule at a stable checkout of the plugin, not the versioned install cache.
+`retro-run`, next to this file, starts one background session per scope (`retro-<scope>-<date>`, on
+`plan.models.retro`) in a project root when a run is due, and logs to `retro-run.log` in `~/Library/Logs` on macOS,
+else in `${XDG_STATE_HOME:-~/.local/state}` (`RETRO_LOG` overrides). It reads the person's `features.retro` and
+`retro` block (`features/retro.md`); the session needs the plugin enabled in `retro.account`.
 
-- cron (`crontab -e`), Mondays 12:00 local:
+| Call | Does |
+|------|------|
+| `retro-run ROOT [--scope S] [--now] [--dry-run]` | starts the scope's session(s) whose run is due: its last start is older than `retro.schedule`'s most recent time. `--now` skips the check; `--dry-run` prints the verdict and the start line |
+| `retro-run --install ROOT` | writes `~/Library/LaunchAgents/session-orchestration.retro.<slug>-<6 hex>.plist` (needs `features.retro` true and `retro.schedule`) and loads it; again after changing `retro.schedule` or `retro.account`. Prints the command that removes an old cron line; it never edits the crontab |
+| `retro-run --uninstall ROOT` | unloads and deletes it |
+| `retro-run --status [ROOT]` | label, loaded or not, schedule, account, last start and next due per scope (no ROOT: every agent) |
 
-  ```
-  0 12 * * 1 <plugin checkout>/plugins/session-orchestration/skills/retro/retro-weekly <project root>
-  ```
+- **Missed runs**: launchd starts a calendar time missed in sleep at wake; `RunAtLoad` calls the launcher at each
+  login, for a time missed while off or logged out. The due check (a stamp per root and scope in the project's state
+  folder) makes extra calls no-ops. The first stamp is the newest report's time (`retro-<scope>-<N>.md`,
+  `rnd-run-<N>.md`), else now: a missed run starts at once, a new project waits for its first time.
+- **Path**: installed from the plugin cache, the agent looks up the plugin's current `installPath` in the account's
+  `installed_plugins.json` at each start (a versioned path would run old code forever); from a checkout, it names it.
+- **Linux**: no installer. Set `retro.schedule` (without it there is no due check), then a cron line at its time
+  plus an `@reboot` line, both
+  `<checkout>/plugins/session-orchestration/skills/retro/retro-run <root>` (prefix `CLAUDE_CONFIG_DIR=…` for another
+  account): the due check makes the reboot call start only a missed run. A systemd user timer with
+  `Persistent=true` does the same.
+- **The old cron line** (`rnd-weekly` or `retro-weekly`) still works: both call `retro-run ROOT` and log the install
+  command. `--install` prints the command that removes that root's line.
 
-  Prefix `CLAUDE_CONFIG_DIR=<config dir>` to run it under another account.
-- launchd, when cron can't run it (macOS without Full Disk Access for cron): a
-  `~/Library/LaunchAgents/retro-weekly.plist` with `ProgramArguments` = [launcher, project root],
-  `EnvironmentVariables` for `CLAUDE_CONFIG_DIR`, and `StartCalendarInterval` {Weekday 1, Hour 12,
-  Minute 0}; then `launchctl load ~/Library/LaunchAgents/retro-weekly.plist`.
-
-Self-test: `bash retro.test.sh` (prints `ok`).
+Self-tests: `bash retro.test.sh` and `bash retro-run.test.sh` (each prints `ok`).
