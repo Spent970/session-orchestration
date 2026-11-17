@@ -402,7 +402,7 @@ echo 'app#1 OPEN CI-FAILED | ' > "$tmp/prs"; out=$(run --changes)
 grep -qxF "$(pev ci-failed -)" <<<"$out" && git init -q --bare "$tmp/origin.git" && git -C "$root/wt" remote add origin "$tmp/origin.git" &&
   git -C "$root/wt" push -q -u origin feature/ABC-12-fix && out=$(run --changes) && grep -qxF "$(pev ci-failed)" <<<"$out" &&
   [ "$(run --changes)" = "no changes" ] && commit && [ "$(run --changes | grep -c '^  \* ')" = 0 ] && git -C "$root/wt" push -q &&
-  [ "$(SESSION_STATUS_PEEK=1 run --changes | sed -n '/^PR events/,$p')" = "$(printf 'PR events (send each owner the nudge, SKILL.md):\n%s' "$(pev ci-failed)")" ] &&
+  [ "$(SESSION_STATUS_PEEK=1 run --changes | sed -n '/^PR events/,$p')" = "$(printf 'PR events (send each owner the nudge, sessions.md):\n%s' "$(pev ci-failed)")" ] &&
   [ "$(run --changes | tail -1)" = "$(pev ci-failed)" ] && [ "$(run --changes)" = "no changes" ] &&
   echo 'app#1 OPEN CI-FAILED !bob | ' > "$tmp/prs" && [ "$(run --changes | grep -c '^  \* app#1')" = 1 ] && push &&
   [ "$(run --changes | grep '^  \* app#1')" = "$(pev ci-failed)" ] &&

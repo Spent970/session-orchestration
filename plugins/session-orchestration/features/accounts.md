@@ -77,7 +77,7 @@ still lists only your account: `session-status --activity` lists every account's
 ## Messaging another project's coordinator
 
 `session-status --coordinators` names every project's coordinator, its root, account and purpose, and the address to reach it
-at (orchestrating-sessions SKILL.md, Another project's matter). Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
+at (orchestrating-sessions sessions.md, Another project's matter). Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
 project's coordinator often runs under the other account. Live, it takes a SendMessage by its name (or at the `uds:`
 address `session-status --coordinator-of DIR` prints). Not live,
 or with no socket, queue the message in that project's coordinator inbox: `session-status --inbox-add --root <its

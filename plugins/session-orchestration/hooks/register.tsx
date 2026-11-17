@@ -1600,7 +1600,7 @@ async function openInTerminal($: EngineInterface, p: UiPressArgument, term: stri
 }
 
 // The PR events the watcher couldn't deliver itself (a live session, of this account by id, of another by the `uds:`
-// address --outbox looks up: a script can't SendMessage; SKILL.md, Watching): sent from here, without waking the coordinator; what came of each goes back for the watcher's next report.
+// address --outbox looks up: a script can't SendMessage; sessions.md, PR events): sent from here, without waking the coordinator; what came of each goes back for the watcher's next report.
 async function forwardOutbox($: EngineInterface) {
   const out = await runStatus($, ['--outbox'])
   if (!out || out.startsWith('failed: ')) return

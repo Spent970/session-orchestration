@@ -275,7 +275,7 @@ detect_host() {
 #   features.notify     integer minutes, 0 = off: one local macOS notification when an ask has waited unseen this
 #                       long (features/notify.md; person only)          default 0
 #   start.mode          read_only | propose | at_once: when the coordinator starts a session for new work without the
-#                       user's yes (orchestrating-sessions SKILL.md, Starting a session; person only)   default read_only
+#                       user's yes (orchestrating-sessions sessions.md, Starting a session; person only)   default read_only
 #   start.kinds.feedback_apply  the same values, for a plugin feedback apply session (person only)
 #                       default start.mode's value
 #   features.retro      true | false: scheduled retro runs and their coordinator doc (features/retro.md; person only)
