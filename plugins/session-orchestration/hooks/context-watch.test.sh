@@ -30,6 +30,8 @@ expect() {
   if [ -z "$4" ]; then [ -z "$out" ] || fail "$1 at $3: want nothing, got: $out"
   else grep -qE -- "$4" <<<"$out" || fail "$1 at $3: want /$4/, got: ${out:-nothing}"; fi
 }
+# waitkind SID: the detached classification of a first prompt has written SID's .kind (up to 30 s)
+waitkind() { local i; for i in $(seq 150); do [ -f "$XDG_CACHE_HOME/session-status/handoff-$1.kind" ] && return 0; sleep 0.2; done; fail "$1: no .kind"; }
 chunk=$'Session task: PROJ-123\nChunk: PROJ-123/2\nRead the brief.'
 task=$'Session task: PROJ-123\nFix the bug.'
 coord='Act as a coordinator for this project.'
@@ -92,6 +94,7 @@ expect sub "$task" 190000 'Stop now'
 expect sub "$task" 1000 '' SessionStart
 expect sub "$task" 146000 'hand off'
 CLAUDE_CODE_AUTO_COMPACT_WINDOW=150000 EXTRA='{"source": "resume"}' expect sub "$task" 1000 '' SessionStart
+waitkind sub   # a resume classifies detached
 CLAUDE_CODE_AUTO_COMPACT_WINDOW=150000 expect sub "$task" 103000 'Stop now.*window is 150000'
 # An all-zero (synthetic) reply after the real one doesn't hide the context.
 jq -nc '{type: "assistant", message: {usage: {input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0}}}' >> "$t/sub.jsonl"
@@ -123,11 +126,29 @@ out=$(jq -nc --arg f "$t/mc.jsonl" --arg c "$t/proj" '{session_id: "mc", transcr
   bash "$here/context-watch.sh"); [ -z "$out" ] || fail "stale ctx after /compact: $out"
 expect mc "$task" 150000 'at 150K: hand off'
 
+# A first prompt on a 30 MB transcript returns at once though classifying takes over 5 s (a slow git: a loaded
+# machine; first_prompt's head stands in), and writes .kind for the next prompt, which reads only the tail: both well
+# under the hook's 5 s timeout.
+mkdir -p "$t/slow"; printf '#!/bin/sh\nsleep 6; exec %s "$@"\n' "$(command -v head)" > "$t/slow/head"; chmod +x "$t/slow/head"
+{ jq -nc --arg p "$coord" '{type: "user", message: {role: "user", content: $p}}'
+  awk -v l="$(printf '%01000d' 0)" 'BEGIN { for (i = 0; i < 30000; i++) print l }'
+  jq -nc '{type: "assistant", message: {usage: {input_tokens: 5, cache_read_input_tokens: 150000, cache_creation_input_tokens: 0}}}'; } > "$t/long.jsonl"
+ups() { jq -nc --arg f "$t/long.jsonl" --arg c "$t/proj" --arg e "${EV:-UserPromptSubmit}" '{session_id: "long", transcript_path: $f, hook_event_name: $e, cwd: $c}' |
+  PATH=$t/slow:$PATH bash "$here/context-watch.sh"; }
+s=$SECONDS; out=$(ups); (( SECONDS - s <= 2 )) && [ -z "$out" ] || fail "first prompt took $(( SECONDS - s )) s: $out"
+# a tool call while it classifies skips, no second classification inline
+s=$SECONDS; out=$(EV=PostToolUse ups); (( SECONDS - s <= 2 )) && [ -z "$out" ] || fail "tool call while classifying: $out"
+s=$SECONDS; waitkind long; (( SECONDS - s >= 3 )) || fail 'the slow classification was not slow'
+[ ! -e "$XDG_CACHE_HOME/session-status/handoff-long.classifying" ] || fail 'classifying stamp left'
+s=$SECONDS; out=$(ups); (( SECONDS - s <= 2 )) && grep -q 'at 150K: hand off' <<<"$out" || fail "cached prompt took $(( SECONDS - s )) s: $out"
+
 # The reply card: a keyed task, chunk or review at its first firing, once, its paths filled in; again after a
 # compaction (a chunk's with its compacted text), not after a resume; never a coordinator's. A keyless session gets
 # it at its first message: the module's .msg stamp, or a prompt holding one; not when that call makes it a coordinator.
 c='^Coordinated session \(session-orchestration\)'
-CARD=1 expect card1 "$task" 1000 "$c" UserPromptSubmit
+CARD=1 expect card1 "$task" 1000 '' UserPromptSubmit   # its first prompt classifies detached: the card comes next
+waitkind card1
+CARD=1 expect card1 "$task" 1000 "$c"
 CARD=1 expect card1 "$task" 1000 ''
 out=$(CARD=1 fire card2 "$chunk" 1000); grep -qF "no such tool: ${here%/hooks}/skills/orchestrating-sessions/worker.md's Replying" <<<"$out" &&
   grep -qF "${here%/hooks}/skills/orchestrating-sessions/worker.md says" <<<"$out" && ! grep -qF '{dir}' <<<"$out" || fail "card paths: $out"
@@ -142,6 +163,7 @@ CARD=1 expect card5 'Fix the bug.' 1000 ''
 touch "$t/cache/session-status/handoff-card5.msg"
 CARD=1 expect card5 'Fix the bug.' 1000 "$c"
 CARD=1 expect card5 'Fix the bug.' 1000 ''
+CARD=1 expect card6 'Fix the bug.' 1000 ''
 EXTRA='{"prompt": "<cross-session-message from=\"uds:/s\" from-name=\"x-coordinator\">status?</cross-session-message>"}' \
   CARD=1 expect card6 'Fix the bug.' 1000 "$c" UserPromptSubmit
 touch "$t/cache/session-status/handoff-card7.msg"

@@ -41,7 +41,7 @@ coord_file() {
   while [ "$d" != / ]; do
     [ -e "$d/.claude/$1" ] && { echo "$d/.claude/$1"; return 0; }
     [ -x "$d/.claude/session-status-adapter" ] && return 1
-    d=$(dirname "$d")
+    d=${d%/*}; d=${d:-/}   # no dirname: a fork per level adds up in a 5 s hook on a loaded machine
   done
   return 1
 }
@@ -49,7 +49,7 @@ coord_file() {
 # tracked FILE: git tracks FILE. The person's paths (coordination.local.json, coordination.local/, the local
 # adapter) are never taken from a commit: a committed one would trust, delegate or run code for everyone who clones.
 tracked() {
-  git -C "$(dirname "$1")" ls-files --error-unmatch -- "$(basename "$1")" >/dev/null 2>&1 || return 1
+  git -C "${1%/*}" ls-files --error-unmatch -- "${1##*/}" >/dev/null 2>&1 || return 1   # callers pass DIR/FILE
   echo "warning: $1 is committed: a personal file is never read from git: ignored" >&2
 }
 # person_file: the person's coordination.local.json, unless it's committed.
@@ -59,7 +59,10 @@ person_file() { local f; f=$(coord_file coordination.local.json) && ! tracked "$
 # keys are dropped from the repo file: a committed file never delegates for anyone, nor picks your terminal.
 user_config() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/session-orchestration/config.json"; }
 
+coord_memo=   # never inherited: valid only for the cwd its caller built it in
 coord_json() {
+  # a caller that reads several keys sets coord_memo=$(coord_json) once: each build spawns ~15 processes
+  [ -n "${coord_memo:-}" ] && { echo "$coord_memo"; return 0; }
   local f out='{}' j s m p d drop
   # The block of the person's messages module too (e.g. .slack): its settings can name a command to run.
   # Its name from either person's file, the project's winning.
@@ -116,7 +119,7 @@ find_root() {
   # The root has an adapter, or the person file (a team workspace uses the team repo's committed adapter).
   while [ "$d" != / ]; do
     is_root "$d" && { echo "$d"; return; }
-    d=$(dirname "$d")
+    d=${d%/*}; d=${d:-/}   # no dirname: a fork per level adds up in a 5 s hook on a loaded machine
   done
   git rev-parse --show-toplevel 2>/dev/null || pwd
 }
