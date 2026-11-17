@@ -1,7 +1,7 @@
 import type { On, ToolCallResult } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, usageName, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf } from './register'
+import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf } from './register'
 
 test('status rows parse whatever the columns hold', async () => {
   const pad = (k: string, st: string) => `${k.padEnd(9)} ${st.padEnd(14)} `
@@ -291,6 +291,33 @@ test('rows say what they wait on in plain words; a section title toggles wrappin
   await ui.unmount()
 })
 
+test('Pending leaves out the on-you entries shown above; each title or row press logs one usage line', async ($, on) => {
+  mock.clock(on)
+  const used: string[] = []
+  const pending = PENDING.replace('## Handoff', '- 2026-10-08 PROJ-9001: your call on the retry limit.\n\n## Handoff')
+  on('process.run', async (_, e) => {
+    if (e.argv[1] === '-c' && e.argv[2]?.includes('usage')) { // lib.sh usage NAME press (feedback.test.sh checks what it writes with telemetry=local)
+      used.push(`${e.argv.at(-1)}`)
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const arg = e.argv[2]
+    const stdout = arg === '--pending' ? pending : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS : STATUS
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  await ui.press({ key: 'refresh' })
+  const on9001 = 'PROJ-9001: your call on the retry limit.'
+  expect(await ui.find({ type: 'Button', key: `on-${on9001}` })).toBeDefined() // DECISIONS
+  expect(await ui.find({ type: 'Button', key: `pend-${on9001}` })).toBeUndefined() // not again in PENDING
+  expect(await ui.find({ type: 'Button', key: 'pend-PROJ-4842 all done.' })).toBeDefined()
+  await ui.press({ key: 'sec-Pending' })
+  await ui.press({ key: 'pend-PROJ-4842 all done.' })
+  await ui.unmount()
+  expect(used).toEqual(['refresh', 'fold-pending', 'card-pending'])
+})
+
 test('a selected task shows its details and actions: attach, links, refresh, ask', async ($, on) => {
   mock.clock(on)
   const runs = sweep(on)
@@ -478,7 +505,7 @@ test('WAITING ON YOU lists what the header counts: sessions, pending items on yo
   expect([top?.text, top?.props.hotkey]).toEqual(['● PENDING  ', '3'])
   await ui.press({ key: 'on-PROJ-3849 (#224): on you: reply to a review.' })
   expect((await ui.find({ type: 'Button', key: 'on-PROJ-3849 (#224): on you: reply to a review.:lead' }))?.text).toBe('● PENDING  ') // the card marks it, the lead stays
-  expect((await ui.find({ type: 'Button', key: 'pend-PROJ-3849 (#224): on you: reply to a review.:lead' }))?.text).toBe(' ON YOU       ') // the repeat, in words
+  expect(await ui.find({ type: 'Button', key: 'pend-PROJ-3849 (#224): on you: reply to a review.' })).toBeUndefined() // shown above, not again in PENDING
   expect(await ui.find({ type: 'Button', key: 'on-PROJ-4679 your call: prod data.' })).toBeUndefined() // its session is listed
   await ui.unmount()
 })
@@ -931,7 +958,8 @@ test('a failed /reload-plugins says so and names the command to run', async ($, 
 })
 
 test('usage names: fixed words lib.sh usage accepts', () => {
-  const names = [...Object.values(BUILTIN_KEYS), ...USAGE_EXTRA].map(usageName)
+  const names = [...Object.values(BUILTIN_KEYS), ...USAGE_EXTRA, ...USAGE_SECTIONS.flatMap(s => [`fold ${s}`, `card ${s}`])].map(usageName)
+  expect([...GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, OTHER, LEFTOVERS].filter(s => !USAGE_SECTIONS.includes(s))).toEqual([])
   expect(usageName('Attach in tab')).toBe('attach-in-tab')
   expect(names.every(n => /^[a-z0-9-]{1,40}$/.test(n))).toBe(true)
 })

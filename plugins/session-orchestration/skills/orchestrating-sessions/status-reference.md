@@ -294,7 +294,7 @@ fill, `ctx 62%` (dim; amber from 80%, red from 90%), and an idle background sess
 12m` once its transcript has been quiet over 10 minutes. **Other sessions** lists the sessions that
 own no task (running first, a review led by its task key), with the same progress, or the last line
 of an idle one; pressed, attach, the ticket link and Ask. Then the other status footers, the pending
-file's `- ` items, and **Resolved** last, collapsed until pressed. Above the groups, **▶ RUN** lists
+file's `- ` items Waiting on you and Decisions don't already show, and **Resolved** last, collapsed until pressed. Above the groups, **▶ RUN** lists
 the commands sessions handed the user (`hand_command`), per task key, each counted on you under its
 task, with Run, Copy and Dismiss buttons (no key): pane.md, Handed-over commands.
 

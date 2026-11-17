@@ -284,6 +284,9 @@ const taken = (key: string) => /^\d$/.test(key) ? 'a 1-9 item key' : BUILTIN_KEY
 // ponytail: one bash + lib.sh config read per press even with telemetry off; presses are human-paced. Cache the
 // setting in pane state if a press ever feels slow.
 export const USAGE_EXTRA = ['Stop', 'Run handed','Copy handed', 'Dismiss handed', 'Approval answer', 'Project action', 'Cancel stale']
+// The sections whose title and row presses are logged as fold-SLUG and card-SLUG (retro.py inventories them); a
+// footer the status command or an adapter adds later isn't logged until it's listed here.
+export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Worked on', 'Other work']
 export const usageName = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 const logPress = ($: EngineInterface, label: string) => void $.process
   .run(['bash', '-c', '. "$0" && usage "$1" press', `${$.plugin.root}/lib.sh`, usageName(label)], { timeoutMs: 10_000 })
@@ -1920,10 +1923,14 @@ export const register: Register = on => {
     // bar, the title in capitals, the count as a badge, then a rule to the pane's edge.
     type Wrap = 'wrap' | 'truncate-end'
     // `collapsible` (RESOLVED: its items need nothing): the title instead shows and hides the items, cut to a line.
+    // The section a row is drawn in, for its card- usage name (a fixed title, never the row's text).
+    let curSec: string | undefined
+    const inSection = <T,>(id: string, f: () => T) => { curSec = id; try { return f() } finally { curSec = undefined } }
+    const logSection = (what: string, id: string | undefined) => { if (id && USAGE_SECTIONS.includes(id)) logPress($, `${what} ${id}`) }
     const section = (id: string, count: number, body: (wrap: Wrap, accent: Color) => RenderElement[], collapsible = false) => {
       const isOpen = expanded.includes(id)
       const collapsed = collapsible && !isOpen
-      const toggle = () => update($, wrapped, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id]))
+      const toggle = () => (logSection('fold', id), update($, wrapped, l => (l.includes(id) ? l.filter(x => x !== id) : [...l, id])))
       const accent = accentOf(id)
       const head = `▌ ${id.toUpperCase()} ${count} ▾ `
       return (
@@ -1931,7 +1938,7 @@ export const register: Register = on => {
           <Button key={`sec-${id}`} plain onPress={toggle}>
             <Text color={accent}>▌</Text> <Text bold color={accent}>{id.toUpperCase()}</Text> <Text bold color={accent}>{count}</Text> <Text color={accent}>{isOpen ? '▾' : '▸'}</Text> <Text color={accent} dimColor wrap="truncate-end">{'─'.repeat(Math.max(cols - head.length, 0))}</Text>
           </Button>
-          {collapsed ? [] : body(collapsible || !isOpen ? 'truncate-end' : 'wrap', accent)}
+          {collapsed ? [] : inSection(id, () => body(collapsible || !isOpen ? 'truncate-end' : 'wrap', accent))}
         </Box>
       )
     }
@@ -1947,15 +1954,17 @@ export const register: Register = on => {
       used.set(base, n + 1)
       const id = n ? `${base}~${n}` : base
       const isSel = sel === id
+      const sec = curSec
+      const press = () => (isSel || logSection('card', sec), select(id)()) // an open, not a close
       const cut = !isSel && wrap === 'truncate-end'
       const text = hotkey ? lead[0].slice(1, -2) : lead[0]
       const line = (
         <Box height={cut ? 1 : undefined} overflow={cut ? 'hidden' : undefined}>
           <Box width={LEAD_W} flexShrink={0}>
-            <Button key={`${id}:lead`} plain hotkey={hotkey} onPress={select(id)}><Text>{draw([[text, lead[1]]])}</Text></Button>
+            <Button key={`${id}:lead`} plain hotkey={hotkey} onPress={press}><Text>{draw([[text, lead[1]]])}</Text></Button>
           </Box>
           <Box flexGrow={1} flexShrink={1}>
-            <Button key={id} plain onPress={select(id)}><Text>{draw(cut ? clip(body, cols - LEAD_W - 1) : body)}</Text></Button>
+            <Button key={id} plain onPress={press}><Text>{draw(cut ? clip(body, cols - LEAD_W - 1) : body)}</Text></Button>
           </Box>
         </Box>
       )
@@ -2136,6 +2145,8 @@ export const register: Register = on => {
       if (key) seenKeys.add(key)
       return true
     })
+    // PENDING: the rest, not the on-you entries WAITING ON YOU and DECISIONS already show.
+    const restPend = (pend ?? []).filter(p => !topPend.includes(p))
     // DECISIONS: those with no live session behind them, on their own so they don't drown among the sessions (the
     // user, 2026-10-21); WAITING ON YOU keeps the rest.
     const live = liveIds(b?.agents ?? '')
@@ -2506,7 +2517,7 @@ export const register: Register = on => {
         {st?.sections.filter(s => s !== waitSec && s.title !== RESOLVED).map(footer)}
         {elsewhere.length > 0 && section(OTHER_PROJECTS, elsewhere.length, (wrap, accent) => elsewhere.flatMap(a => elseRow(a, wrap, accent)))}
 
-        {pend && section('Pending', pend.length, (wrap, accent) => pend.flatMap(p => pendRow(p, wrap, accent)))}
+        {restPend.length > 0 && section('Pending', restPend.length, (wrap, accent) => restPend.flatMap(p => pendRow(p, wrap, accent)))}
         {st?.sections.filter(s => s.title === RESOLVED).map(footer)}
         {b && !pend && b.pending && (
           <Box flexDirection="column" marginTop={1}>
