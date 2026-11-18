@@ -1024,10 +1024,16 @@ const findBash = async ($: EngineInterface) => {
   return { bash: dir ? `${dir}/bin/bash.exe` : 'bash', windows: true }
 }
 let bashFound: ReturnType<typeof findBash> | undefined
+const onWindows = async ($: EngineInterface) => (await (bashFound ??= findBash($))).windows
+// The project root stays in --root's Git Bash form (/c/…), the form session-status hashes the stores by; where it
+// reaches Windows (a spawn's cwd, $.fs) it goes as C:/…: a Windows spawn can't start in /c/… (ENOENT, issue 71).
+// shortcut: only a drive path converts (a project root is one); an MSYS mount (/home, /tmp) would need cygpath -m.
+export const nativePath = (p: string, windows: boolean) =>
+  windows ? p.replace(/^\/([a-z])(?:\/|$)/i, (_, d: string) => `${d.toUpperCase()}:/`) : p
 async function runBash($: EngineInterface, args: string[], init: Parameters<EngineInterface['process']['run']>[1] = {}) {
   const { bash, windows } = await (bashFound ??= findBash($))
   try {
-    return await $.process.run([bash, ...args], init)
+    return await $.process.run([bash, ...args], init.cwd ? { ...init, cwd: nativePath(init.cwd, windows) } : init)
   } catch (err) {
     if (!windows) throw err
     throw new Error(`${bash} failed to run (${err instanceof Error ? err.message : String(err)}): this plugin runs its scripts in Git for Windows' bash. If it isn't installed there, install Git for Windows, or set CLAUDE_CODE_GIT_BASH_PATH to its bash.exe (C:\\Program Files\\Git\\bin\\bash.exe), then restart Claude Code`)
@@ -1109,7 +1115,7 @@ function markItemsSeen($: EngineInterface, slug: string, ids: string[]) {
 async function loadActions($: EngineInterface): Promise<Actions | null> {
   const root = await projectRoot($)
   if (!root) return null
-  const path = `${root}/${ACTIONS_FILE}`
+  const path = nativePath(`${root}/${ACTIONS_FILE}`, await onWindows($))
   let text: string
   try {
     if (!(await $.fs.exists(path))) return { root, shown: [], owned: [], errors: [] }
@@ -1138,7 +1144,7 @@ export const sameCommand = (s: string) => oneLine(s).replace(/^npx (?:-y |--yes 
   .replace(/^(?:@[\w.-]+\/)?([\w.-]+)(?:@(?:latest|next|[\^~]?\d[\w.-]*))?(?=\s|$)/, '$1')
 async function paneActionFor($: EngineInterface, command: string) {
   const root = await projectRoot($)
-  const path = root && `${root}/${ACTIONS_FILE}`
+  const path = root && nativePath(`${root}/${ACTIONS_FILE}`, await onWindows($))
   if (!path || !(await $.fs.exists(path))) return
   const want = sameCommand(command)
   return parseActions(String(await $.fs.read(path))).list.find(a => sameCommand(a.command) === want)
