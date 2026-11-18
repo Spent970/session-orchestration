@@ -94,7 +94,8 @@ run --uninstall "$root" >/dev/null
 # install command.
 echo '{}' > "$root/.claude/coordination.local.json"
 "$here/../rnd/rnd-weekly" "$root"
-[ "$(calls)" = 7 ] && tail -1 "$tmp/claude.calls" | grep -q 'retro-project-' && grep -q "called as retro-weekly: .*retro-run --install $root" "$tmp/log" ||
+if [ "$(uname)" = Darwin ]; then hint="retro-run --install $root"; else hint="point the cron line at .*retro-run"; fi
+[ "$(calls)" = 7 ] && tail -1 "$tmp/claude.calls" | grep -q 'retro-project-' && grep -q "called as retro-weekly: .*$hint" "$tmp/log" ||
   fail "rnd-weekly shim starts a project run and logs the install" "$(cat "$tmp/log")"
 "$here/retro-weekly" "$tmp/nope" 2>/dev/null && fail "a missing root fails" ""
 grep -q "no project root $tmp/nope" "$tmp/log" || fail "a missing root is logged" ""
