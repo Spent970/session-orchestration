@@ -107,6 +107,14 @@ left (`current: layout N` on the next run). `--dry-run` prints what it would do 
   On their yes write it and run `retro-run --install ROOT`, or hand it as one command when that's refused; it prints a
   crontab line to remove when an old `retro-weekly` one still runs: hand that too, never edit the crontab.
 
+## Migrations
+
+A project set up by an older plugin version may need a step the newer layout expects. `migrations.md`, next to this
+file, lists each one: id, the release it follows, class (auto, ask or hand), the `--check` line that detects it
+(prefixed with its id, `[m7] …`) and the fix. When you change what setup writes, or where a project's files live,
+add the migration in the same PR; its "Adding a migration" section has the steps, and `migrations.test.sh` fails on
+an id in the code with no row or no fixture.
+
 ## Shared mode
 
 Off by default: setup writes nothing a collaborator sees (everything goes to `.git/info/exclude`d files and

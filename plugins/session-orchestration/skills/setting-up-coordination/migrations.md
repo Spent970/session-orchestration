@@ -1,0 +1,33 @@
+# Migrations
+
+What a project set up by an older plugin version needs done when the layout changes. One row per migration; `session-status --init --migrate` runs them in id order. Design: the retro case `claude-plugins-auto-migrate`.
+
+Class: **auto** = applied without asking (personal, untracked, restorable); **ask** = one pane ask, recommended answer first; **hand** = a pane note offering a session.
+"From" names the release after which a project needs it (docs say "from the release after <feature>", never a version that doesn't exist yet).
+
+| id | From | Class | Detector (the `--check` line, prefixed `[id]`) | Fix |
+|---|---|---|---|---|
+| m1 | the release after config files and `approvals.delegate` (0.46) | ask | `delegation found in CLAUDE.md` | `--write --delegate` |
+| m2 | the release after the `features.accounts`, `features.review_inbox` and terminal opt-ins (0.47, 0.48) | ask | `second account found`, `review inbox found`, `detected <terminal>` | `--write` adds that one key |
+| m3 | the release after `history.dirs` (0.94) | ask | `project Stop hook commits a folder` | the folder to `history.dirs`, the hook out of `.claude/settings*.json` (the ask shows the diff) |
+| m4 | the release after retro replaced rnd (0.98) | auto | `rnd-brief.md` exists | `--write`'s rename to `retro-brief.md` |
+| m5 | the release after retro replaced rnd (0.98) | ask | the crontab has the rnd-weekly line | replace it with `retro-run --install`'s line |
+| m6 | the release after `start.mode` (0.99) | ask | a memory line naming the start mode | write `start.mode`, delete the line |
+| m7 | the release after the state folder (0.102; includes 0.56 `pending.file` and the replies move) | auto; ask while sessions are live | `coordinator files outside P` | `--move` |
+| m8 | the release after the repo file stopped setting `pending.file` and `history.dirs` (0.112) | auto (untracked repo file), ask (tracked) | `pending.file and history.dirs are ignored in the repo file` | move both keys to the person file |
+| m9 | the release after 0.46, 0.87 and 0.102 changed the section and adapter templates | auto after a move; ask for template drift | a section or adapter line matching an old template render | old line to new line; a line the person edited is left alone and named |
+| h1 | the release after memory became index + topic files (0.32.2) | hand | flat `memory.md` | pane note offering a session |
+| h2 | the release after messages modules (0.52) | hand | the adapter mentions msgraph while `messages` is unset | pane note offering a session |
+
+Changes that needed no migration (cosmetic, a feature offer, no reliable detector, or old rows still read): `--init` itself (0.42), the github adapter (0.43), generic coordinator rules in the plugin (0.44), the Replies line wording (0.64), `features.retro` (0.103), adapter `brief` and `standup-template` (0.113).
+
+## Adding a migration
+
+A change to what setup writes, or to where a project's files live, ships its migration in the same PR:
+
+1. A detector: a `--check` line in `session-init` that starts `[<id>] `, and its fix.
+2. `LAYOUT` +1 in `lib.sh`.
+3. A row here, with the id the code uses.
+4. A fixture in `orchestrating-sessions/session-status.test.sh`, marked by a line `# migration fixture: <id>`: build the previous layout, run `--migrate`, assert the layout is current, run it again and assert nothing changed.
+
+`migrations.test.sh` fails on an id in the code with no row here, or with no fixture marker. Two branches that both add one conflict on the `LAYOUT=` line; the second renumbers on rebase.
