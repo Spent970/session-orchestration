@@ -8,6 +8,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 orch=$here/../orchestrating-sessions
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
+# Ask-only and hand ids that have no fixture yet (stage 2 adds them and empties this list): everything else needs one.
+no_fixture_yet=" m1 m2 m3 m5 m6 h1 h2 "
+
 # check CODE_FILES... -- TABLE FIXTURES: prints one problem per line, exit 1 if any.
 check() {
   local code=() table fixtures bad=0 id
@@ -15,8 +18,8 @@ check() {
   while read -r id; do
     [ -n "$id" ] || continue
     grep -qE "^\| $id \|" "$table" || { echo "migration $id: no row in migrations.md"; bad=1; }
-    grep -qE "^# migration fixture: $id[[:space:]]*\$" "$fixtures" || { echo "migration $id: no fixture"; bad=1; }
-  done < <(grep -ohE '\[[mh][0-9]+\] ' "${code[@]}" | tr -d '[] ' | sort -u)
+    [[ $no_fixture_yet == *" $id "* ]] || grep -qE "^# migration fixture: $id[[:space:]]*\$" "$fixtures" || { echo "migration $id: no fixture"; bad=1; }
+  done < <(grep -ohE "^[^#]*\[[mh][0-9]+[] ]" "${code[@]}" | grep -oE "[mh][0-9]+" | sort -u)
   while IFS='|' read -r _ id _ class _; do
     id=${id// /}
     [[ $id =~ ^[mh][0-9]+$ ]] || continue
@@ -28,14 +31,14 @@ check() {
 code=("$here/session-init" "$here/../../lib.sh")
 out=$(check "${code[@]}" -- "$here/migrations.md" "$orch/session-status.test.sh") || { echo "$out"; exit 1; }
 
-# Self-check on a fixture set: ids m1 (covered), m2 (no row), m3 (no fixture).
-printf '[m1] a\n[m2] b\n[m3] c\n' > "$tmp/code"
-printf '| m1 | x | auto | d | f |\n| m3 | x | ask | d | f |\n' > "$tmp/table"
-printf '# migration fixture: m1\n# migration fixture: m2\n' > "$tmp/fix"
+# Self-check on a fixture set: ids m4 (covered), m7 (no row), m8 (no fixture).
+printf '[m4 auto] a\n[m7 auto] b\n[m8 $c8] c\n' > "$tmp/code"
+printf "| m4 | x | auto | d | f |\n| m8 | x | ask | d | f |\n" > "$tmp/table"
+printf '# migration fixture: m4\n# migration fixture: m7\n' > "$tmp/fix"
 out=$(check "$tmp/code" -- "$tmp/table" "$tmp/fix") && { echo "self-check: a missing row and fixture passed"; exit 1; }
-[[ $out == *"migration m2: no row"* && $out == *"migration m3: no fixture"* && $out != *"migration m1"* ]] ||
+[[ $out == *"migration m7: no row"* && $out == *"migration m8: no fixture"* && $out != *"migration m4"* ]] ||
   { echo "self-check: wrong report: $out"; exit 1; }
-printf '| m1 | x | maybe | d | f |\n' > "$tmp/table"
+printf '| m4 | x | maybe | d | f |\n' > "$tmp/table"
 out=$(check "$tmp/code" -- "$tmp/table" "$tmp/fix") && { echo "self-check: bad class passed"; exit 1; }
 [[ $out == *"maybe"* ]] || { echo "self-check: bad class not named: $out"; exit 1; }
 echo ok
