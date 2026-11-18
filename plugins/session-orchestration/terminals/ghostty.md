@@ -22,6 +22,9 @@ old one is idle: the whole tab when it holds that terminal alone, else only that
 can't find (the old one ran in another terminal app) is left, and the successor says so.
 
 **Quirks.**
+- Ghostty's AppleScript activates Ghostty on every new tab or window, with no option against it. To keep the user's
+  focus, record the frontmost app and tab and give them back with `open -a` (an Apple Event to their app asks for
+  Automation consent); `TERMINAL_QUIET=1` in ghostty.sh does this.
 - Ghostty not running: nothing opens, the pane copies the command and says so.
 - A reused tab whose attach has exited shows a shell: close it and press again.
 - An AppleScript error (Ghostty's automation permission refused, say) shows as a toast with the error; grant the
