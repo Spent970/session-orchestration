@@ -185,6 +185,14 @@ out=$(run)
 touch "$root/.claude/merged"
 run | grep -q '^ABC-12 ' && { echo "a done key is still a row: $(run)"; exit 1; }
 rm "$root/.claude/merged"
+# A name-shaped key_pattern (tracker none) matches the coordinator's names too: never a task row (issue 44).
+cp "$root/.claude/session-status-adapter" "$tmp/adapter.keep2"; rm "$root/.claude/session-status-adapter"
+cfg=$root/.claude/coordination.local.json; [ ! -e "$cfg" ] || cp "$cfg" "$tmp/cfg.keep"
+echo '{"key_pattern": "proj-[a-z0-9]+(-[a-z0-9]+)*"}' > "$cfg"
+aj='[{"sessionId":"a1","name":"proj-coordinator","cwd":"'$root'","status":"idle"},{"sessionId":"a2","name":"proj-coordinator-next","cwd":"'$root'","status":"idle"},{"sessionId":"a3","name":"proj-coordinator-prev-2","cwd":"'$root'","status":"idle"},{"sessionId":"a4","name":"proj-fix","cwd":"'$root'","status":"idle"}]'
+out=$(cd "$root" && AGENTS_JSON=$aj HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin2:$PATH "$here/session-status")
+grep -q '^proj-fix ' <<<"$out" && ! grep -q '^proj-coordinator' <<<"$out" || { echo "coordinator name as a task row: $out"; exit 1; }
+rm "$cfg"; [ ! -e "$tmp/cfg.keep" ] || mv "$tmp/cfg.keep" "$cfg"; mv "$tmp/adapter.keep2" "$root/.claude/session-status-adapter"
 # Exit 2 that says why on stderr (a syntax error) is a failure, not "not answered"; a quiet exit 2 keeps its fix line.
 printf '#!/bin/sh\necho "oops: bad" >&2; exit 2\n' > "$root/.claude/session-status-adapter"
 out=$(SESSION_STATUS_STRICT=1 run) && { echo "noisy exit 2 exited 0"; exit 1; }
