@@ -91,6 +91,9 @@ Waking a session makes it re-read its whole context, often hundreds of thousands
      session ([feedback.md](feedback.md)). `…, for the plugin coordinator, which isn't running — start it?`: on a
      yes, run `feedback coordinator --start`, never an apply session. Its `project feedback` part waits for the next
      retro.
+   - `docs watch: new page SLUG, re-review DOC`: pass it to the user and offer a review-kind session for DOC
+     ([../../features/docs-watch.md](../../features/docs-watch.md), Acting on a notice). `docs watch: DOC is missing`:
+     tell the user, who fixes `docs_watch.files` or the doc's path.
 2. Message a session only to give it work, or for something only it knows. `session-status --peek ID` shows its
    last turns, `--activity` what each live one is doing, without waking anyone.
 3. Never `claude -p --resume` an old session just to ask for status.

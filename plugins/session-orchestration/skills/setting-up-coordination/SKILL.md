@@ -1,6 +1,6 @@
 ---
 name: setting-up-coordination
-description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, approvals.pr_create, start.mode, start.kinds.feedback_apply, terminal, features.accounts, features.accounts_weekly_switch, features.review_inbox, features.notify, features.retro, retro.*).
+description: Sets a project folder up for coordinated Claude Code sessions (one coordinator, task sessions in parallel) — detects the tracker, code host and task keys, asks the few questions it can't detect, and writes the adapter, the CLAUDE.md section and the config. Use when asked to "coordinate this project", set up or check coordination, when open_pane says the folder isn't set up, or to change a coordination config value (tracker, host, key_pattern, approvals.delegate, approvals.pr_create, start.mode, start.kinds.feedback_apply, terminal, features.accounts, features.accounts_weekly_switch, features.review_inbox, features.notify, features.retro, retro.*, features.docs_watch, docs_watch.*).
 ---
 
 # Setting up coordination
@@ -187,6 +187,9 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `features.review_inbox` | `true` \| `false`: PR findings go to the review inbox page (`features/review-inbox.md`); Bitbucket or Forgejo, GitHub is a TODO | `false`; setup writes `true` when the project's docs name an inbox URL and the host is Bitbucket or Forgejo |
 | `features.notify` | integer minutes, `0` = off: an ask left unseen on the pane that long shows one local macOS notification with a count only (`features/notify.md`) | `0`; person-only; setup doesn't write it |
 | `features.retro` | `true` \| `false`: scheduled retro runs, and `--check` names `features/retro.md` (what to do with a report, an overdue run). `/retro` by hand works either way | `false`; person-only; setup doesn't write it |
+| `features.docs_watch` | `true` \| `false`: once a day, a Notices line per watched docs page a `docs_watch.files` doc's reviewed list lacks (`features/docs-watch.md`) | `true` when `docs_watch.files` names a doc, else `false`; person-only; setup doesn't write it |
+| `docs_watch.files` | JSON list of docs (relative to the root, or `~/…`), each with a `Last reviewed YYYY-MM-DD against:` list | the plugin's `writing-instructions.md` in the plugin repo's project, else unset; person-only; setup doesn't write it |
+| `docs_watch.pattern` | an extended regex over page slugs: which docs pages are watched | prompting, Agent Skills, guardrails and Claude Code memory, skills, subagents and hooks pages; person-only; setup doesn't write it |
 | `retro.scope` | `project` \| `plugin` \| `both`: whose sessions a retro run reads, this project's or every project's (`features/retro.md`) | `project`; person-only |
 | `retro.schedule` | `<day> HH:MM`, local time, day `mon`…`sun` (e.g. `mon 12:00`): when a scheduled run starts | unset: by hand only; person-only |
 | `retro.account` | the Claude config dir a scheduled run starts under (absolute or `~`; must exist) | the current account; person-only |

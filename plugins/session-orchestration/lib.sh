@@ -62,13 +62,13 @@ person_file() { local f; f=$(coord_file coordination.local.json) && ! tracked "$
 
 # The files merged; {} when there are none. A file that isn't a JSON object is skipped with a warning. The person
 # keys are dropped from the repo file: a committed file never delegates for anyone, nor picks your terminal, nor names
-# a personal path (pending.file, history.dirs).
+# a personal path (pending.file, history.dirs, docs_watch.files).
 user_config() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/session-orchestration/config.json"; }
 
 # person_keys_drop [MODULE]: the jq filter that drops the person keys (and MODULE's messages block) from a repo file;
 # coord_json reads the repo file through it, and --shared refuses a team file it would change.
 person_keys_drop() {
-  echo "del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .pending, .history, .fable, .start, .retro, .pane$( [[ ${1:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$1\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
+  echo "del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .pending, .history, .fable, .start, .retro, .docs_watch, .pane$( [[ ${1:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$1\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro, .features.docs_watch) else . end"
 }
 
 coord_memo=   # never inherited: valid only for the cwd its caller built it in
@@ -372,23 +372,27 @@ last_model() {
   model_ok x "${e:-}" || e=
   echo "$m${e:+ $e}"
 }
+# docs_watch (features/docs-watch.md): the watched docs pages' slugs, and the plugin's own reviewed list, from the root
+DOCS_WATCH_PATTERN='^(prompt-engineering|agent-skills|strengthen-guardrails)/|^cc/(memory|best-practices|skills|sub-agents|hooks-guide|context-window|cross-session-messaging|large-codebases|agent-teams|workflows|goal|plugins/components)$|^cc/.*(claude-md|instruction)'
+DOCS_WATCH_PLUGIN_DOC=plugins/session-orchestration/writing-instructions.md
 config() {
   local key=${1:-} v ok=
   case $key in
     tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|start.mode|start.kinds.feedback_apply|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
     features.retro|retro.scope|retro.schedule|retro.account|retro.sections) ;;
+    features.docs_watch|docs_watch.files|docs_watch.pattern) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator|plan.models.retro|plan.models.research) ;;
     plan.advisor.design|plan.advisor.build|plan.advisor.mechanical|plan.advisor.review|plan.advisor.release|plan.advisor.scan|plan.advisor.coordinator|plan.advisor.retro|plan.advisor.research) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
     pane.sections) pane_sections; return 0 ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} plan.advisor.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window pane.sections)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections features.docs_watch docs_watch.files docs_watch.pattern terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} plan.advisor.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window pane.sections)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
     tracker) case $v in none|github|jira) ok=1 ;; esac ;;
     host) case $v in github|bitbucket|forgejo|none) ok=1 ;; esac ;;
-    key_pattern) { grep -qE -- "$v" </dev/null; [ $? -le 1 ]; } 2>/dev/null && ok=1 ;;
-    approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.retro|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
+    key_pattern|docs_watch.pattern) { grep -qE -- "$v" </dev/null; [ $? -le 1 ]; } 2>/dev/null && ok=1 ;;
+    approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.retro|features.docs_watch|plan.enabled) case $v in true|false) ok=1 ;; esac ;;
     retro.scope) case $v in project) ok=1 ;; plugin|both) local pr; ok=1
       # plugin scope has one home: feedback.repo_dir's root when that is set, so all-project numbers are measured once
       pr=$(plugin_root) && [ "$pr" != "$(find_root)" ] &&
@@ -407,7 +411,7 @@ config() {
     telemetry) case $v in full|local|off) ok=1 ;; esac ;;
     pending.file) [[ $v == '~'/* ]] && v=$HOME/${v#'~/'}; [[ $v == *.md && $v != '~'* && $v != *..* ]] && ok=1 ;;
     # a JSON list of folders, printed one per line
-    history.dirs|fable.accounts) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
+    history.dirs|fable.accounts|docs_watch.files) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
     plan.max_parallel) [[ $v =~ ^[1-9][0-9]{0,2}$ ]] && ok=1 ;;
     plan.models.*) [[ $v == */* ]] && model_ok "${v%%/*}" "${v#*/}" && ok=1 ;;
     plan.advisor.*) case $v in fable|opus|sonnet) ok=1 ;; esac ;;
@@ -422,6 +426,11 @@ config() {
   case $key in
     tracker) echo none ;; host) detect_host ;; key_pattern) ;; features.notify) echo 0 ;;
     approvals.pr_create) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && echo true || echo false ;;
+    # on where a project names a doc to watch (docs_watch.files)
+    features.docs_watch) [ -n "$(config docs_watch.files 2>/dev/null)" ] && echo true || echo false ;;
+    # the plugin's own doc, watched from the plugin repo's project only
+    docs_watch.files) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && [ -f "$pr/$DOCS_WATCH_PLUGIN_DOC" ] && echo "$DOCS_WATCH_PLUGIN_DOC" ;;
+    docs_watch.pattern) echo "$DOCS_WATCH_PATTERN" ;;
     approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     start.mode) echo read_only ;; start.kinds.feedback_apply) config start.mode ;;
     feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts|retro.schedule|retro.sections|plan.advisor.*) ;;

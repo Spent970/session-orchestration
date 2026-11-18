@@ -2244,6 +2244,50 @@ pending "ABC-12": reword: names ask 99, not queued; = ask 7' ] && grep -qxF '  *
 rm -r "$af" "$root/pend.md" "$root/.claude/coordination.local.json"; run --changes >/dev/null
 fi
 
+if section docs; then
+# The docs watch: a Notices line per watched page a listed doc's reviewed list lacks; the index fetched once a day.
+cat > "$tmp/bin/curl" <<EOF
+#!/bin/sh
+echo x >> $tmp/curls
+case "\$*" in
+  *platform*) printf '%s\n' '- [O](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview.md)' \
+    '- [X](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-x.md)' \
+    '- [T](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools.md)' ;;
+  *) printf '%s\n' '- [H](https://code.claude.com/docs/en/hooks-guide.md)' '- [C](https://code.claude.com/docs/en/changelog.md)' ;;
+esac
+EOF
+chmod +x "$tmp/bin/curl"
+printf '# Rules\n\nLast reviewed 2026-11-19 against: prompt-engineering/overview,\ncc/hooks-guide.\n' > "$root/doc.md"
+[ "$(run --config features.docs_watch)" = false ] && [ -z "$(run --config docs_watch.files)" ] || { echo "docs watch: on with no doc"; exit 1; }
+echo '{"docs_watch": {"files": ["doc.md", "gone.md"]}}' > "$root/.claude/coordination.local.json"
+[ "$(run --config features.docs_watch)" = true ] || { echo "docs watch: off with a doc"; exit 1; }
+out=$(run | grep 'docs watch' || true)
+[ "$out" = "$(printf '%s\n' '  * docs watch: new page prompt-engineering/prompting-claude-x, re-review doc.md' \
+  '  * docs watch: gone.md is missing, so nothing is checked against it')" ] || { echo "docs watch lines: $out"; exit 1; }
+run >/dev/null; [ "$(wc -l < "$tmp/curls" | tr -d ' ')" = 2 ] || { echo "docs watch: fetched again within a day"; exit 1; }
+echo '{"docs_watch": {"files": ["doc.md"], "pattern": "^cc/"}}' > "$root/.claude/coordination.local.json"
+out=$(run | grep 'docs watch' || true)
+[ "$out" = '  * docs watch: new page cc/changelog, re-review doc.md' ] || { echo "docs watch: the pattern override: $out"; exit 1; }
+echo '{"features": {"docs_watch": false}, "docs_watch": {"files": ["doc.md"]}}' > "$root/.claude/coordination.local.json"
+[ -z "$(run | grep 'docs watch' || true)" ] || { echo "docs watch: on when turned off"; exit 1; }
+# A one-line list ends on its own line: a slug in the prose after it isn't reviewed.
+printf 'Last reviewed 2026-11-19 against: prompt-engineering/overview.\nSee prompt-engineering/prompting-claude-x.\n' > "$root/doc.md"
+echo '{"docs_watch": {"files": ["doc.md"]}}' > "$root/.claude/coordination.local.json"
+[ "$(run | grep -c 'prompting-claude-x' || true)" = 1 ] || { echo "docs watch: a one-line list ran on"; exit 1; }
+# A day on, one site failing keeps the last index (and is tried once that day, not every sweep).
+cp "$tmp/.cache/session-status/docs-index.txt" "$tmp/idx.before"; touch -t 202001010000 "$tmp/.cache/session-status/docs-index.tried"
+sed -i.bak 's/^  \*) printf/  *) exit 22; printf/' "$tmp/bin/curl"; : > "$tmp/curls"; run >/dev/null; run >/dev/null
+cmp -s "$tmp/idx.before" "$tmp/.cache/session-status/docs-index.txt" && [ "$(wc -l < "$tmp/curls" | tr -d ' ')" = 2 ] ||
+  { echo "docs watch: a failed fetch replaced the index or was retried"; exit 1; }
+# Off by default; the plugin repo's own project (feedback.repo_dir) watches the plugin's doc; the repo file can't name one.
+mkdir -p "$root/plugins/session-orchestration" "$root/.claude/coordination" && touch "$root/plugins/session-orchestration/writing-instructions.md"
+echo '{"docs_watch": {"files": ["doc.md"]}}' > "$root/.claude/coordination/coordination.json"; rm "$root/.claude/coordination.local.json"
+[ "$(run --config features.docs_watch)" = false ] || { echo "docs watch: the repo file turned it on"; exit 1; }
+echo "{\"feedback\": {\"repo_dir\": \"$root\"}}" > "$root/.claude/coordination.local.json"
+[ "$(run --config docs_watch.files)" = plugins/session-orchestration/writing-instructions.md ] &&
+  [ "$(run --config features.docs_watch)" = true ] || { echo "docs watch: the plugin repo's default"; exit 1; }
+fi
+
 if section land; then
 # --land: from a linked worktree, fast-forwards the branch the main checkout has out, files included; refuses a
 # dirty checkout and a non-fast-forward.
