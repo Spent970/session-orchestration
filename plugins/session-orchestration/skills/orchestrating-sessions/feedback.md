@@ -96,7 +96,7 @@ footer's `— apply?` is then answered already.
    When `gh repo view REPO` fails (the repo isn't public yet, or you have no access), only `pr` works: skip the
    search and send nothing by `fork-pr` or `issue`.
 3. `feedback scrub FILE…`. Its deny list comes from every project root a case was added in or your sessions ran in (their names, remotes,
-   key patterns, adapter hosts and config strings) plus your home, user and git identity; the plugin's own repo URL,
+   key patterns, adapter hosts and config strings, but not fixed-set values such as `pane.sections` states or `telemetry`) plus your home, user and git identity; the plugin's own repo URL,
    name and state paths never count. A linked git worktree (`.claude/worktrees/<feature>`) adds its main checkout,
    and its own folder name isn't a hit (its config still is, and so is a task key in it). Any hit keeps that case local: show the user the line, and reword the case (in
    plugin terms) or drop it (`feedback mark FILE dropped`). Never send a case with a hit.
