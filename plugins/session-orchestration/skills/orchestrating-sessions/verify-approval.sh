@@ -15,7 +15,7 @@
 #     sender's name, and a SendMessage of this whole relay (Quote, the Action given as <action>, Source): the
 #     stopped session sent it. With no <action>, a stopped source is rejected.
 #  3. In that session's transcript, one message the user typed (origin human, no pasted content)
-#     matches the quote as a whole and is at most MAX_AGE_H hours old (default 24; for a stopped source, when it
+#     matches the quote as a whole (double quotes escaped \" or curled count as straight ones) and is at most MAX_AGE_H hours old (default 24; for a stopped source, when it
 #     sent the relay). The task key is in
 #     the quote, or in the coordinator's last text before it (the message the user was answering).
 #     An answer the user gave in the coordinator's question box (AskUserQuestion: the option label they
@@ -29,6 +29,8 @@ set -uo pipefail
 id=${1:-}; cwd=${2:-}; sender=${3:-}; key=${4:-}; action=${5:-}; q=$(cat)
 max_age_h=${MAX_AGE_H:-24}
 reject() { echo "rejected: $1"; exit 1; }
+# A relay may carry the double quotes of the quote escaped (\") or curled: both sides compare with them straight.
+quotes_def='def quotes: gsub("\\\\\""; "\"") | gsub("[“”„]"; "\"") | gsub("[‘’]"; "'"'"'"); '
 
 [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || reject "sessionId is not a UUID"
 [ -n "$key" ] && [ -n "$sender" ] && [ -n "$q" ] || reject "missing sender, task key or quote"
@@ -51,12 +53,12 @@ else
   # sender's name and sent this relay (SendMessage). The quote's age then counts to that send.
   [ -f "$f" ] || reject "source session isn't running, and has no transcript"
   [ -n "$action" ] || reject "source session isn't running: pass the relay's Action line to verify it by its transcript"
-  sent=$(jq -rn --arg rl "APPROVAL relayed from the user"$'\n'"Quote: $q"$'\n'"Action: $action"$'\n'"Source: $id $cwd" --arg n "$sender" '
+  sent=$(jq -rn --arg rl "APPROVAL relayed from the user"$'\n'"Quote: $q"$'\n'"Action: $action"$'\n'"Source: $id $cwd" --arg n "$sender" "$quotes_def"'($rl | quotes) as $rl |
     reduce inputs as $e ({bg: false, named: false, at: null};
       if $e.sessionKind == "bg" then .bg = true
       elif $e.type == "agent-name" and $e.agentName == $n then .named = true
       elif $e.type == "assistant" and any($e.message.content[]?; .type == "tool_use" and .name == "SendMessage"
-             and (.input.message? | strings | contains($rl))) then .at = $e.timestamp
+             and (.input.message? | strings | quotes | contains($rl))) then .at = $e.timestamp
       else . end)
     | if .bg then "bg" elif .named | not then "name" elif .at == null then "none"
       else .at | sub("\\.[0-9]+Z$"; "Z") | fromdate end' "$f") || reject "source transcript unreadable"
@@ -67,8 +69,9 @@ else
   esac
   ref=$sent
 fi
-matches() { jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage "$((max_age_h * 3600))" '
+matches() { jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjson maxage "$((max_age_h * 3600))" "$quotes_def"'
   def trim: gsub("^\\s+|\\s+$"; "");
+  ($q | quotes | trim) as $qn |
   def names_key: test("(^|[^A-Za-z0-9-])" + ($key | gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/-])"; "\\\(.c)")) + "($|[^A-Za-z0-9-])");
   # A click in the coordinator pane: the prompt this plugin submits, and nothing else it might submit.
   def pane($o): $o.kind == "plugin" and $o.name == "session-orchestration";
@@ -102,7 +105,7 @@ matches() { jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjso
      .cands[]
      | select(.text | contains("<pasted_content") | not)
      | select((.ts | sub("\\.[0-9]+Z$"; "Z") | fromdate) >= ($ref - $maxage))
-     | select((.text | trim) == ($q | trim))
+     | select((.text | quotes | trim) == $qn)
      | (if (.note // "") != "" then ", with the user'"'"'s note: \(.note | gsub("\\s+"; " "))" else "" end) as $note
      | if .text | names_key then "verified\($note)"
        elif .answered | names_key then "verified, answering: \(.answered | gsub("\\s+"; " ") | .[-300:])\($note)"
