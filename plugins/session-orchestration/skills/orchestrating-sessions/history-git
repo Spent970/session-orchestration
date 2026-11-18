@@ -36,7 +36,7 @@ repo() {
   if [ -n "$t" ] && adoptable "$d" "$t"; then
     gd=$(git -C "$t" rev-parse --absolute-git-dir) || return 1
   else
-    gd=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$d").git; t=$d
+    gd=$H/$(enc_path "$d").git; t=$d
     if [ ! -d "$gd" ]; then
       [ "${2:-}" = init ] || return 1
       mkdir -p "$H" && git init -q --bare "$gd" && git --git-dir="$gd" config core.bare false &&
