@@ -353,6 +353,30 @@ run --changes >/dev/null
   [ "$(SESSION_STATUS_RESOLVE_DAYS=0 run | sed -n '/^Resolved/,$p')" = "$(printf 'Resolved (idle a week):\n%s' "$left")" ] &&
   [ "$(SESSION_STATUS_RESOLVE_DAYS=0 run | grep -c Leftovers)" = 0 ] &&
   [ "$(SESSION_STATUS_RESOLVE_DAYS=0 run --changes)" = "no changes" ] || { echo "resolved failed"; exit 1; }
+# Under --watch a committing run stops a finished task's background session at rest and lists it under Stopped, once;
+# a peek stops nothing but names it (so the watcher confirms). Left alone: one on a prompt (status waiting: it stays a
+# leftover), an interactive one, and an open task's session. STOP_AFTER_S 0: no transcripts here to age.
+export SESSION_STATUS_STOP_AFTER_S=0
+cp "$tmp/bin/claude" "$tmp/claude.keep"
+fs() { printf '{"sessionId":"%s","name":"%s","cwd":"%s","kind":"%s","state":"%s","status":"%s","pid":1}' "$1" "$2" "$root" "${5:-background}" "$3" "$4"; }
+echo "[$(fs aaaaaaaa-0000-0000-0000-000000000001 'ABC-34 old' done idle),$(fs bbbbbbbb-0000-0000-0000-000000000002 'ABC-34 asks' done waiting),$(fs cccccccc-0000-0000-0000-000000000003 'ABC-34 tab' idle idle interactive),$(fs "$sid" 'fix it' done idle)]" > "$tmp/agents.json"
+cat > "$tmp/bin/claude" <<EOF
+#!/bin/sh
+case "\$1" in
+  agents) if echo "\$*" | grep -q -- --all; then cat "$tmp/agents.json"; else jq '[.[] | select(.pid != null)]' "$tmp/agents.json"; fi ;;
+  stop) echo "\$2" >> "$tmp/stops"
+    jq --arg id "\$2" '[.[] | if (.sessionId | startswith(\$id)) then .pid = null else . end]' "$tmp/agents.json" > "$tmp/agents.t" && mv "$tmp/agents.t" "$tmp/agents.json" ;;
+esac
+EOF
+run --changes >/dev/null; : > "$tmp/stops"
+out=$(SESSION_STATUS_PEEK=1 SESSION_STATUS_FORWARD=1 run --changes) && [ ! -s "$tmp/stops" ] &&
+  [ "$(grep -c 'would stop' <<<"$out")" = 1 ] && grep -qxF '  * would stop: ABC-34 Done — "ABC-34 old" (aaaaaaaa)' <<<"$out" &&
+  out=$(SESSION_STATUS_FORWARD=1 run --changes) && [ "$(cat "$tmp/stops")" = aaaaaaaa ] &&
+  [ "$(sed -n '/^Stopped/,$p' <<<"$out")" = "$(printf '%s\n%s' "Stopped (finished tasks' sessions, by the watcher; tell the user in one line):" '  * ABC-34 Done — "ABC-34 old" (aaaaaaaa)')" ] &&
+  ! grep -q 'aaaaaaaa$' <<<"$out" && run | grep -q '"ABC-34 asks": claude stop bbbbbbbb$' && run | grep -q '"ABC-34 tab": claude stop cccccccc$' &&
+  [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] && [ "$(cat "$tmp/stops")" = aaaaaaaa ] ||
+  { echo "watcher's stop failed: $out / $(cat "$tmp/stops")"; exit 1; }
+mv "$tmp/claude.keep" "$tmp/bin/claude"; unset SESSION_STATUS_STOP_AFTER_S
 
 # Owners: a review session (newest, `Session task: ABC-12 review`) doesn't take ABC-12 from its worker; a brief sent
 # through a tool (`Session task: ABC-77` in a SendMessage) names no owner, nor does the ~ guess count a session whose
