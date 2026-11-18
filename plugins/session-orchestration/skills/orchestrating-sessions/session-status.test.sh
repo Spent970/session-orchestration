@@ -734,6 +734,17 @@ echo brief > "$root/replies/ABC-41-c1.md"; [ "$(run --changes)" = "no changes" ]
 echo report > "$root/replies/ABC-41.md"; out=$(run --changes)
 rm "$root/replies/ABC-41.md" "$root/replies/ABC-41-c1.md" "$root/.claude/coordination.local.json"; run --changes >/dev/null
 grep -q '^now:   \* report written: ABC-41.md (' <<<"$out" || { echo "a report didn't wake --changes: $out"; exit 1; }
+# Logins restored: a file action whose `when` held and no longer does wakes --changes once, naming the blocked
+# reports whose Blocker line is a sign-in; a peek keeps it for the committing run; the first run only records.
+printf '[{"label":"Sign in","hotkey":"g","command":"gh auth login","when":"[ -f %s/signed-out ]"}]' "$tmp" > "$root/.claude/coordinator-actions.json"
+printf 'ABC-42 · b · blocked\nBlocker: the gh login expired, the user signs in\n' > "$root/replies/ABC-42.md"
+printf 'ABC-43 · b · blocked\nBlocker: the PR author, on the catalog index\n' > "$root/replies/ABC-43.md"
+printf 'ABC-44 · blocked-x · coding\nBlocker: gh auth login\n' > "$root/replies/ABC-44.md"
+touch "$tmp/signed-out"; run --changes >/dev/null; [ "$(run --changes)" = "no changes" ] && rm "$tmp/signed-out" &&
+  [ "$(SESSION_STATUS_PEEK=1 run --changes)" = "$(printf 'Logins restored (resume each session blocked on it; SKILL.md, Watching):\n  * Sign in — blocked on it: ABC-42')" ] &&
+  [ "$(run --changes | head -2 | tail -1)" = "  * Sign in — blocked on it: ABC-42" ] && [ "$(run --changes)" = "no changes" ] ||
+  { echo "login restored failed: $(run --changes)"; exit 1; }
+rm "$root/.claude/coordinator-actions.json" "$root/replies/ABC-4"[234].md; run --changes >/dev/null
 # Weekly limit (accounts and accounts_weekly_switch on): this account past 90% while the other is under it wakes
 # --changes once, and goes quietly; --init --check (so --start) names each account's use. A reading whose window has
 # reset is none. With the switch off (the default) the use is shown and nothing wakes.
