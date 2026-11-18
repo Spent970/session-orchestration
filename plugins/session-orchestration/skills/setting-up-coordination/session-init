@@ -8,7 +8,9 @@
 #                                   read it), the indented value lines open_pane reads (`review_inbox url: URL`,
 #                                   `notify after: N min`), and a line per warning (a config value not valid, a module that doesn't load whole,
 #                                   delegation still in CLAUDE.md, a second account with features.accounts off, a
-#                                   terminal detected but not recorded)
+#                                   terminal detected but not recorded), and `team: memory, review-brief, adapter
+#                                   (trusted)`: the team files git tracks in .claude/coordination/, read before the
+#                                   person's
 #   session-status --init           the proposal: what it found and what it would write, numbered for one reply
 #   session-status --init --write [--delegate] [--own] [--shared] [--trust=REL@SHA…] [--review-brief] [--retro-brief]
 #                                 [KEY=VALUE…]
@@ -225,6 +227,20 @@ if [ "$mode" = check ]; then
                 fi
                 [ "$r" != true ] || { u=$(inbox_url); [ -z "$u" ] || echo "  review_inbox url: $u"; }   # open_pane watches it
                 [ "$no" = 0 ] || echo "  notify after: $no min"   # the pane's ask check reads it
+                # The committed team files sessions read before the person's (worker.md, Project memory): only what git
+                # tracks in T, so the excluded repo file of a personal setup names nothing.
+                if [ -n "$sd" ]; then
+                  ! jq -e '(.pending.file // .history.dirs) != null' "$sd/coordination.json" >/dev/null 2>&1 ||
+                    echo "pending.file and history.dirs are ignored in the repo file (they name personal paths): move them to .claude/coordination.local.json"
+                  tf=()
+                  for x in memory.md:memory memory:memory review-brief.md:review-brief session-status-adapter:adapter; do
+                    v=${x#*:}; case " ${tf[*]-} " in *" $v "*) continue ;; esac   # memory.md and memory/: one entry
+                    [ -n "$(git -C "$sd" ls-files -- "${x%%:*}" 2>/dev/null | head -1)" ] || continue
+                    [ "$v" != adapter ] || { [[ " ${review[*]-} " == *" session-status-adapter@"* ]] && v="adapter (not trusted)" || v="adapter (trusted)"; }
+                    tf+=("$v")
+                  done
+                  [ "${#tf[@]}" = 0 ] || { x=$(printf '%s, ' "${tf[@]}"); echo "team: ${x%, }"; }
+                fi
                 [ -n "$term_set" ] || [ "$term_found" = plain ] || echo "detected $term_found: run setup to record it (session-status --init --write adds terminal=$term_found)"
                 [ "$a" = true ] || [ "$accounts_n" -lt 2 ] || echo "second account found, accounts off: set features.accounts to true in .claude/coordination.local.json (session-status --init --write adds it when unset)"
                 dh=$(detect_host . 2>/dev/null); [ "$dh" = none ] || [ "$dh" = "$h" ] ||

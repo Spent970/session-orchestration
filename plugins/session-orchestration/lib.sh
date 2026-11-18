@@ -11,7 +11,8 @@
 #                                            features.accounts_weekly_switch, features.notify, features.retro, retro.*, start.*,
 #                                            terminal, messages
 #                                            (and its module's block, e.g. msgraph), trusted, team, feedback.mode,
-#                                            feedback.repo_dir, feedback.project_dir, telemetry, handoff.*, compact.window (always excluded;
+#                                            feedback.repo_dir, feedback.project_dir, telemetry, handoff.*, compact.window,
+#                                            pending.file, history.dirs (always excluded;
 #                                            the repo file can't set them)
 # No file means every default. `config KEY` prints the key's value; an unknown value prints the default and one
 # warning line on stderr.
@@ -57,7 +58,8 @@ tracked() {
 person_file() { local f; f=$(coord_file coordination.local.json) && ! tracked "$f" && echo "$f"; }
 
 # The files merged; {} when there are none. A file that isn't a JSON object is skipped with a warning. The person
-# keys are dropped from the repo file: a committed file never delegates for anyone, nor picks your terminal.
+# keys are dropped from the repo file: a committed file never delegates for anyone, nor picks your terminal, nor names
+# a personal path (pending.file, history.dirs).
 user_config() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/session-orchestration/config.json"; }
 
 coord_memo=   # never inherited: valid only for the cwd its caller built it in
@@ -71,7 +73,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .fable, .start, .retro, .pane$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
+  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .pending, .history, .fable, .start, .retro, .pane$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
@@ -249,10 +251,10 @@ detect_host() {
 #                       dropped with a warning; hidden reads as line for the on-you sections (PANE_ON_YOU).
 #                       default {}: every section open, resolved one line
 #   pending.file        the coordinator's handoff file, *.md, relative to the project root, ~ or absolute (pending_path): its entries' history
-#                       and archive (skills/orchestrating-sessions/pending)              default empty (none)
+#                       and archive (skills/orchestrating-sessions/pending); person only    default empty (none)
 #   history.dirs        JSON list of folders (relative to the root, ~ or absolute) the Stop hook keeps a local git
-#                       history of, besides the replies folder and handoff files (skills/orchestrating-sessions/history-git)
-#                       default empty
+#                       history of, besides the replies folder and handoff files (skills/orchestrating-sessions/history-git);
+#                       a folder git tracks is skipped (its history is the project's git); person only   default empty
 #   plan.enabled        true | false: the task planner splits big tasks into chunks         default true
 #   plan.max_parallel   integer >= 1: chunk sessions at once                                default 3
 #   fable.accounts      JSON list of Claude config dirs (~ expanded) whose account has the fable model (person

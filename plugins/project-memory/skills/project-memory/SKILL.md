@@ -27,9 +27,11 @@ file, one line per entry:
 - Append only, with `>>` or an edit at the end; never rewrite or delete other lines. Other sessions write it too.
   Deleting, merging and moving entries is the prune's and the [graduate](../graduate/SKILL.md) pass's.
 - The user says "remember this" about the project: append it the same way.
-- In a repo with a committed `.claude/coordination/memory.md` (session-orchestration's shared mode), read it too, and
-  tag an entry true and useful to a collaborator on another machine `[team]` (`- <date> <TASK>: [team] …`); in doubt,
-  leave it untagged. Never write to the committed file yourself.
+- In a repo with a committed `.claude/coordination/memory.md` (session-orchestration's shared mode), read that team
+  memory first, the same way (its index, then its `memory/<topic>.md` files whose trigger matches), then yours, which
+  uses the same topic names and wins where they differ. Tag an entry true and useful to a collaborator on another
+  machine `[team]` (`- <date> <TASK>: [team] …`); in doubt, leave it untagged. Never write to the committed files
+  yourself.
 
 ## Setting it up
 

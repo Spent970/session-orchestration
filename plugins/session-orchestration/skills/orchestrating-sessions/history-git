@@ -8,7 +8,8 @@
 # repo or one holding it. Never pushed: no remote is ever added and a pre-push hook refuses every push. One history per
 # file: a folder inside a listed whole folder (the replies folder inside history.dirs' docs/notes) is committed only
 # to the outer one's repo, and `versions` finds a file's repo the same way (the deepest folder holding it). Dumps stay
-# out: a file over 1 MB goes into the repo's info/exclude (untracked if it was tracked).
+# out: a file over 1 MB goes into the repo's info/exclude (untracked if it was tracked). A folder the project's git (or
+# another repo it can't adopt) tracks files of is skipped: .claude/coordination/, a committed docs folder.
 #   history-git commit         Stop hook: commits what changed in the cwd project's folders, one commit per repo,
 #                              message `NAME: FILES` (NAME: the session's name, else its id8; a `Session: ID` trailer),
 #                              retried while another git holds the index lock. The repos are made on the first run;
@@ -65,6 +66,7 @@ targets() {
   } | while IFS=$'\t' read -r d glob; do
     d=$(cd "$d" 2>/dev/null && pwd -P) || continue
     [ -n "$glob" ] || case $ROOT/ in "$d"/*) continue ;; esac
+    ! tracked_elsewhere "$d" "$glob" || continue
     printf '%s\t%s\n' "$d" "$glob"
   done | { while IFS=$'\t' read -r d glob; do ds+=("$d"); gs+=("$glob"); done
     for i in "${!ds[@]}"; do keep=1
@@ -75,6 +77,14 @@ targets() {
       done
       [ -z "$keep" ] || printf '%s\t%s\n' "${ds[$i]}" "${gs[$i]}"
     done; }
+}
+
+# tracked_elsewhere DIR GLOB: git tracks a file of DIR (matching GLOB) in a repo history-git doesn't adopt (repo: the
+# project's, one holding it, or one with a remote): the team folder, a committed docs folder. Its history is that git.
+tracked_elsewhere() {
+  local t; t=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) && [ -n "$t" ] || return 1
+  case $ROOT/ in "$t"/*) ;; *) { [ "$t" = "$1" ] || [ "$t" = "$(dirname "$1")" ]; } && [ -z "$(git -C "$t" remote 2>/dev/null)" ] && return 1 ;; esac
+  [ -n "$(git -C "$1" ls-files -- "${2:-.}" 2>/dev/null | head -1)" ]
 }
 
 # inner_repo OUTER DIR: a repo's top (its .git) lies between OUTER (left out) and DIR (included): the outer repo can't hold

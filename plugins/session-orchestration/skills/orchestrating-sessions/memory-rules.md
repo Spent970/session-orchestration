@@ -34,8 +34,9 @@ and swaps the index in with one `mv`, so no worker's append is lost.
 - Prune in passing, as [SKILL.md](SKILL.md) (Project memory) says. You and whoever the index names for graduation
   are the only ones who delete or rewrite entries; sessions only append.
 - **Team memory** (shared mode): a line true and useful to a collaborator on another machine, with another account
-  and coordinator, is tagged `[team]` (`- <date> <TASK>: [team] …`); in doubt, it's personal. Read the repo's
-  `.claude/coordination/memory.md` too when it exists. `[team]` lines never go into it directly: when you prune,
+  and coordinator, is tagged `[team]` (`- <date> <TASK>: [team] …`); in doubt, it's personal. Sessions read the repo's
+  `.claude/coordination/memory.md` (and its `memory/<topic>.md`, P's topic names) before yours ([worker.md](worker.md),
+  Project memory). `[team]` lines never go into it directly: when you prune,
   have a session gather them into one PR that adds them to `.claude/coordination/memory.md` (created by that PR if
   missing), then delete them from your memory once it's merged. Without shared mode they stay in yours.
 - **Graduation** moves an entry into the project doc that owns its situation once it has proved itself: old enough

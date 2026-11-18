@@ -100,7 +100,9 @@ Waking a session makes it re-read its whole context, often hundreds of thousands
 
 **Who owns a task:** the session whose first prompt starts with it ("Work on PROJ-123", `PROJ-123:`), else one that
 wrote a `Session task: <KEY>` line; a first prompt beats a marker. A session that works on a task without owning it
-(a reviewer) writes `Session task: <KEY> review`, so put that in its first prompt.
+(a reviewer) writes `Session task: <KEY> review`, so put that in its first prompt, with its brief: the team's
+`.claude/coordination/review-brief.md` first when `--init --check`'s `team:` line lists `review-brief`, then the
+person's (setting-up-coordination, Optional briefs).
 
 **Confirm the owner before giving task work.** The status column's `sess:—` means no owner is known, and `(maybe ID:
 N mentions)` beside it is a word count, not an owner: never message or resume it on that alone. Run `session-status
