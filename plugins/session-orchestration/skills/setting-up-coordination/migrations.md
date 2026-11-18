@@ -1,11 +1,11 @@
 # Migrations
 
-What a project set up by an older plugin version needs done when the layout changes. One row per migration; `session-status --init --migrate` runs them in id order. Design: the retro case `claude-plugins-auto-migrate`.
+What a project set up by an older plugin version needs done when the layout changes. One row per migration; `session-status --init --migrate` runs them in this order: m1 m2 m3 m4 m5 m6 m8 m7 (m8 before m7, so the move sees the `pending.file` m8 brings over). Design: the retro case `claude-plugins-auto-migrate`.
 
 Class: **auto** = applied without asking (personal, untracked, restorable); **ask** = one pane ask, recommended answer first; **hand** = a pane note offering a session.
 "From" names the release after which a project needs it (docs say "from the release after <feature>", never a version that doesn't exist yet).
 
-| id | From | Class | Detector (the `--check` line, prefixed `[id]`) | Fix |
+| id | From | Class | Detector (the `--check` line, prefixed `[id class]`, e.g. `[m7 auto]`; m8 prints `auto` or `ask`) | Fix |
 |---|---|---|---|---|
 | m1 | the release after config files and `approvals.delegate` (0.46) | ask | `delegation found in CLAUDE.md` | `--write --delegate` |
 | m2 | the release after the `features.accounts`, `features.review_inbox` and terminal opt-ins (0.47, 0.48) | ask | `second account found`, `review inbox found`, `detected <terminal>` | `--write` adds that one key |
@@ -25,9 +25,9 @@ Changes that needed no migration (cosmetic, a feature offer, no reliable detecto
 
 A change to what setup writes, or to where a project's files live, ships its migration in the same PR:
 
-1. A detector: a `--check` line in `session-init` that starts `[<id>] `, and its fix.
+1. A detector: a `--check` line in `session-init` that starts `[<id> <class>] `, and its fix.
 2. `LAYOUT` +1 in `lib.sh`.
 3. A row here, with the id the code uses.
-4. A fixture in `orchestrating-sessions/session-status.test.sh`, marked by a line `# migration fixture: <id>`: build the previous layout, run `--migrate`, assert the layout is current, run it again and assert nothing changed.
+4. A fixture in `orchestrating-sessions/session-status.test.sh`, marked by a line `# migration fixture: <id>` (an ask-only or hand id may wait, through `no_fixture_yet` in `migrations.test.sh`): build the previous layout, run `--migrate`, assert the layout is current, run it again and assert nothing changed.
 
 `migrations.test.sh` fails on an id in the code with no row here, or with no fixture marker. Two branches that both add one conflict on the `LAYOUT=` line; the second renumbers on rebase.
