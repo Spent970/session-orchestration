@@ -199,12 +199,21 @@ run --changes >/dev/null; [ "$(run --changes)" = "no changes" ] && [ "$(SESSION_
 # wakes its watcher; one seen again (it moves up the list) or closing doesn't.
 fbd=$tmp/state/session-orchestration/feedback/bugfixes; mkdir -p "$tmp/.config/session-orchestration" "$fbd"
 echo "{\"feedback\": {\"repo_dir\": \"$root\"}}" > "$tmp/.config/session-orchestration/config.json"
+printf '#!/bin/sh\n[ "$1" != issue ] || cat "%s"\n' "$tmp/issues" > "$tmp/bin/gh" && chmod +x "$tmp/bin/gh"; : > "$tmp/issues"   # no issues, offline
 run --changes >/dev/null; printf '# B case\n- seen: 2026-01-01, 2026-01-02\n- status: open\n' > "$fbd/b.md"
 printf '# A case\n- seen: 2026-01-01\n- status: open\n' > "$fbd/a.md"
 [ "$(run --changes)" = "now:   * A case ($fbd/a.md)"$'\n'"now:   * B case ($fbd/b.md)" ] &&
   printf '# A case\n- seen: 2026-01-01, 2026-01-02, 2026-01-03\n- status: open\n' > "$fbd/a.md" && [ "$(run --changes)" = "no changes" ] &&
   printf '# A case\n- seen: 2026-01-01\n- status: dropped\n' > "$fbd/a.md" &&
   [ "$(run --changes)" = "no changes" ] && rm -r "$tmp/state" "$tmp/.config" || { echo "plugin coordinator's Feedback lines failed"; exit 1; }
+# Its upstream issues: a new one without a case is a --changes line; a case naming its URL takes it off quietly.
+mkdir -p "$tmp/.config/session-orchestration" "$fbd"; echo "{\"feedback\": {\"repo_dir\": \"$root\"}}" > "$tmp/.config/session-orchestration/config.json"
+: > "$tmp/issues"
+repo=$(bash "$here/feedback" repo); run --changes >/dev/null
+printf '5\tsomeone\n' > "$tmp/issues"; rm -f "${fbd%/*}"/.issues-*
+[ "$(run --changes)" = "now:   * #5 by someone (https://github.com/$repo/issues/5)" ] &&
+  printf '# U\n- status: dropped\nevidence: upstream: https://github.com/%s/issues/5\n' "$repo" > "$fbd/u.md" &&
+  [ "$(run --changes)" = "no changes" ] && rm -r "$tmp/state" "$tmp/.config" "$tmp/bin/gh" || { echo "plugin coordinator's Issues lines failed"; exit 1; }
 # A messages module (the person's config) runs beside the adapter's notices, its lines first; each source keeps its
 # own last good lines. Its NOTICE_MINE defaults to the last sweep's keys.
 mkdir -p "$root/.claude/coordination.local/messages"

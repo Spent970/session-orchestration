@@ -94,7 +94,8 @@ part out while that coordinator runs (checked at most once an hour). While it do
 the plugin coordinator, which isn't running — start it? (feedback coordinator --start)`, once a day on a stamp of its
 own (`.footer-elsewhere`). The plugin coordinator's own `--changes` adds a
 `Feedback (feedback list --plugin)` section, one `* TITLE (FILE)` per open plugin case, so a new case wakes its
-watcher. This project's own cases add `· project feedback:
+watcher, and an `Issues (feedback issues)` section, one `* #N by LOGIN (URL)` per open issue on the plugin repo that
+no PR closes and no case names (never the issue's text: it is outside users' data). This project's own cases add `· project feedback:
 K open (…), for the next retro` (alone when the plugin has none): nothing to do but pass it on. Never in the `--changes` child (so the watcher
 doesn't wake on it) or the pane's runs, which set `SESSION_STATUS_NO_FEEDBACK=1`.
 

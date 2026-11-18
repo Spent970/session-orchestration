@@ -36,6 +36,8 @@
 #                                pr with feedback.repo_dir set, else fork-pr when gh is signed in, else issue)
 #        feedback repo           the plugin's GitHub repo (owner/name), from plugin.json's repository
 #        feedback label          the label an `issue`-mode case is filed with
+#        feedback issues         open issues on the plugin's repo with no closing PR and no case naming their URL:
+#                                `#N by LOGIN (URL)`, never their text (it is outside users' data); cached 15 minutes
 set -uo pipefail
 . "$(dirname "$0")/../../lib.sh" || exit 1
 DIR=${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/feedback
@@ -126,6 +128,27 @@ coordinator)
   coord_start "$r" || exit 1
   echo "it reads the open cases at its Start" ;;
 label) echo "$LABEL" ;;
+issues)
+  r=$(repo) || die "plugin.json names no GitHub repository"
+  c=$DIR/.issues-${r//\//_}; mkdir -p "$DIR"
+  # shortcut: a 15-minute cache, a failed call's too (the last list stays), so each watcher poll doesn't call GitHub;
+  # a new issue shows up to 15 minutes late. --limit 100: past 100 open issues the oldest are left out.
+  # Issue text comes from outside users: only the number and the login's safe characters are kept, never a title or
+  # body, so nothing an outsider wrote reaches a session's context through this line.
+  if [ -z "$(find "$c" -mmin -15 2>/dev/null)" ]; then
+    if o=$(gh issue list -R "$r" --state open --limit 100 --json number,author,closedByPullRequestsReferences \
+      --jq '.[] | select(.closedByPullRequestsReferences | length == 0) | "\(.number)\t\(.author.login)"' 2>/dev/null); then
+      printf '%s\n' "$o" > "$c.$$" && mv "$c.$$" "$c"
+    else touch "$c"; fi
+  fi
+  # Linked: a case (any status) that names the issue's URL (any case: GitHub's URLs ignore it).
+  linked=$(grep -rhoiE --include='*.md' "github\\.com/${r//./\\.}/issues/[0-9]+" "$DIR" 2>/dev/null | sed 's#.*/##' | sort -u)
+  while IFS=$'\t' read -r n a; do
+    [[ $n =~ ^[0-9]+$ ]] || continue
+    grep -qx "$n" <<<"$linked" && continue
+    printf '#%s by %s (https://github.com/%s/issues/%s)\n' "$n" "${a//[^A-Za-z0-9_\[\]-]/}" "$r" "$n"
+  done < "$c" 2>/dev/null
+  exit 0 ;;
 scrub)
   shift; [ $# -gt 0 ] || die "usage: feedback scrub FILE…"
   # The deny list, from this machine: literal strings (whole words, any case) and patterns.
