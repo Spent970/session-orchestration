@@ -50,6 +50,7 @@ ask() { # $1 tool_use id, $2 question, $3 answer, $4 timestamp, $5 sidechain
   jq -nc --arg ts "$now" '{type: "attachment", timestamp: $ts, attachment: {type: "queued_command", origin: {kind: "plugin", name: "session-orchestration"},
     prompt: "Approval pane answer for ABC-12: Yes. Asked: Deploy ABC-12?"}}'
   pane other-plugin "Approval pane answer for ABC-13: Yes, push ABC-13. Asked: Push?"
+  pane session-orchestration 'Approval pane answer for ABC-17: Yes, start it. Asked: Start ABC-17 to fix "no such file"?'
   pane session-orchestration "Yes, push ABC-14"
   pane session-orchestration "Yes"
   # An item's Ask from the pane between a question and a typed reply: the reply answers the turn after it.
@@ -83,6 +84,10 @@ check ABC-9 "deploy ABC-9 after lunch" "verified, with the user's note: only if 
 check ABC-10 Yes "verified, answering: Then push ABC-10?"                     # typed after a declined box
 check ABC-11 "Approval pane answer for ABC-11: Yes, merge ABC-11. Asked: Merge PR #5?" verified  # pane click
 check ABC-12 "Approval pane answer for ABC-12: Yes. Asked: Deploy ABC-12?" verified  # pane click, queued
+check ABC-17 'Approval pane answer for ABC-17: Yes, start it. Asked: Start ABC-17 to fix "no such file"?' verified  # double quotes
+check ABC-17 'Approval pane answer for ABC-17: Yes, start it. Asked: Start ABC-17 to fix \"no such file\"?' verified  # quotes escaped in the relay
+check ABC-17 'Approval pane answer for ABC-17: Yes, start it. Asked: Start ABC-17 to fix “no such file”?' verified  # quotes curled in the relay
+check ABC-17 'Approval pane answer for ABC-17: Yes, start it. Asked: Start ABC-17 to fix “no such dir”?' "$no ABC-17 in it or in the message it answers"  # other words still fail
 check ABC-13 "Approval pane answer for ABC-13: Yes, push ABC-13. Asked: Push?" "$no ABC-13 in it or in the message it answers"  # another plugin
 check ABC-14 "Yes, push ABC-14" "$no ABC-14 in it or in the message it answers"  # this plugin, but not a pane answer
 check ABC-13 "Approval pane answer for ABC-11: Yes, merge ABC-11. Asked: Merge PR #5?" "$no ABC-13 in it or in the message it answers"  # a pane row answers no message before it
