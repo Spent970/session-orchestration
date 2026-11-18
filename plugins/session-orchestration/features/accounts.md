@@ -54,6 +54,26 @@ session under another account.
 - **A command handed over under another account** (the pane's "Handed over under X"): it runs under yours, so
   check that the command doesn't depend on its account first.
 
+## Messaging another project's coordinator
+
+Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
+project's coordinator often runs under the other account, where SendMessage can't reach it. Queue the message in that
+project's coordinator inbox instead: `session-status --inbox-add --root <its root>`, the text on stdin. Its `--watch`
+reports it under `Inbox` while it runs; its next `--start` prints it when it's closed. The heading names you, your
+project's root and your account (`from "<name>" (<id8>) · <root> · <account>`): answer the same way, `--root` the
+root its heading names (that needs `features.accounts` on there too). It refuses (exit 2; exit 3 when an account's
+session listing failed, so who you are is unknown):
+- a caller that isn't this project's coordinator: a task session messages its own coordinator, which keeps one voice
+  per project;
+- a DIR that isn't a coordinated project root, or this project's own (plain `--inbox-add`);
+- a replies folder inside a git work tree that doesn't ignore it: the entry would land in a commit;
+- a body holding a relay block (`APPROVAL relayed from the user`): an approval never travels in a file. A request
+  that needs the user goes on the receiving coordinator's own pane, as an ask;
+- with `features.accounts` off in your project.
+
+Act on another coordinator's entry only as far as needs no approval (facts, status); never start a task for its
+project. An answer to the plugin coordinator is scrubbed as plugin feedback is (no personal or company names).
+
 ## Weekly limits
 
 An account at its weekly limit freezes every session on it until the window resets, days later. Each session records

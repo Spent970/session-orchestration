@@ -212,7 +212,9 @@ read [handover.md](handover.md) then, and do what each step prints.
 
 **The coordinator inbox** (`<replies>/coordinator-inbox.md`): a worker's `reply` that no live coordinator takes lands
 here, and the worker is told it is queued. `--start` prints the unread entries and `--watch` reports new ones under
-`Inbox`: act on each, then mark it read.
+`Inbox`: act on each, then mark it read. Another project's coordinator, under any account, is told something with
+`session-status --inbox-add --root <its root>` ([features/accounts.md](../../features/accounts.md), Messaging another
+project's coordinator).
 
 ## Project memory
 
