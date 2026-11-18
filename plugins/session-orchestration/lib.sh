@@ -246,7 +246,10 @@ detect_host() {
 #                       coordinator (features/plugin-coordinator.md)     default empty
 #   feedback.project_dir  this project's feedback cases (feedback --project; ~ expanded, relative: to the project
 #                       root; keep it out of git)     default empty: the state dir's feedback-projects/<root>
-#   telemetry           local | off: pane presses to the local usage log (usage below)     default off
+#   telemetry           full | local | off: what goes to the local usage log (usage below); nothing leaves the machine.
+#                       local: pane presses, path counts, task starts, chunk ends and escalations; full: those, and
+#                       the faults: hook blocks, refused tool calls, passed-over relays, watcher wakes and script
+#                       errors with exit codes. off: nothing. An explicit value stays as set; an invalid one reads as off   default full
 #   pane.sections       JSON object, a pane section's slug (PANE_SLUGS) to open | line | hidden: how the coordinator
 #                       pane draws it (open: its rows; line: its title alone; hidden: only named in the pane's last
 #                       line). Read from this project's .claude/coordination.local.json only, never a committed or
@@ -371,7 +374,7 @@ config() {
     messages) [ "$v" = none ] && ok=1 || { [[ $v =~ ^[A-Za-z0-9_-]+$ ]] && find_module messages "$v" >/dev/null && ok=1; } ;;
     start.*) case $v in read_only|propose|at_once) ok=1 ;; esac ;;
     feedback.mode) case $v in auto|pr|fork-pr|issue|local) ok=1 ;; esac ;;
-    telemetry) case $v in local|off) ok=1 ;; esac ;;
+    telemetry) case $v in full|local|off) ok=1 ;; esac ;;
     pending.file) [[ $v == '~'/* ]] && v=$HOME/${v#'~/'}; [[ $v == *.md && $v != '~'* && $v != *..* ]] && ok=1 ;;
     # a JSON list of folders, printed one per line
     history.dirs|fable.accounts) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
@@ -391,7 +394,7 @@ config() {
     approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     start.mode) echo read_only ;; start.kinds.feedback_apply) config start.mode ;;
     feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts|retro.schedule|retro.sections) ;;
-    retro.scope) echo project ;; retro.account) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;; telemetry) echo off ;;
+    retro.scope) echo project ;; retro.account) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;; telemetry) [ -n "$v" ] && echo off || echo full ;;   # a mistyped value opts out
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
     plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;
         mechanical|release) v=sonnet/medium ;; scan) v=haiku/low ;; retro) v=opus/xhigh ;; research) v=opus/high ;; esac
@@ -442,7 +445,7 @@ pane_section_set() {
   printf '%s\n' "$out" > "$f"
 }
 
-# usage NAME [KIND [MODEL EFFORT EST [ACT]]]: with telemetry=local, one line in the local usage log:
+# usage NAME [KIND [MODEL EFFORT EST [ACT]]]: with telemetry=local or full, one line in the local usage log:
 # {"t":EPOCH,"k":KIND,"what":NAME}. KIND is press (a pane button, from the mod), path (default: a script counting a
 # path no transcript shows) or chunk (session-status --plan --done: NAME is the chunk's kind, then its model, effort,
 # est and act in K of context growth; act may be left out) or start (session-status --kind: a plain task start, NAME
@@ -450,13 +453,24 @@ pane_section_set() {
 # so retro can join a start to its session by hashing session names; the name isn't in clear, but someone who knows or
 # guesses a name can confirm it; then optionally its size S, M or L, logged as size) or escalate (session-status
 # --handover --escalate: NAME task or chunk, then the successor's model and effort and the old session's name, as
-# sess). NAME is a fixed word (lowercase, digits, -), never a key,
-# path or id, and every field is validated, so the file is shareable as is. Never fails its caller.
+# sess). With telemetry=full only, the fault kinds too, as `usage NAME KIND [N [AT]]`, each with the plugin's version
+# as v: block (a hook's deny or ask: NAME approved-action-deny|-ask or coordinator-guard-cd|-edit, AT the hook file:line
+# that decided), refuse (Claude Code refused a tool call, the PermissionDenied hook: NAME the tool's name), relay (the
+# approval hook passed over a relayed approval: NAME why: used-once, no-key, not-landing, unverified), wake
+# (session-status --watch: NAME wake with N the lines it reports, poll-failed or gave-up with N the poll's exit code)
+# and error (a script's non-zero exit: NAME the script, N its exit code, AT its first argument when a --flag, or the
+# file:line that failed). N is an integer, AT a plugin-relative path[:line] or a --flag. NAME is a fixed word
+# (lowercase, digits, -), never a key, path or id, and every field is validated, so the file is shareable as is.
+# Never fails its caller.
 usage_log() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/usage.jsonl"; }
 usage() {
   local f x=
-  [[ ${1:-} =~ ^[a-z0-9-]{1,40}$ && ${2:-path} =~ ^(press|path|chunk|start|escalate)$ ]] || return 0
-  if [ "${2:-}" = start ] || [ "${2:-}" = escalate ]; then
+  [[ ${1:-} =~ ^[a-z0-9-]{1,40}$ && ${2:-path} =~ ^(press|path|chunk|start|escalate|block|refuse|relay|wake|error)$ ]] || return 0
+  if [[ ${2:-} =~ ^(block|refuse|relay|wake|error)$ ]]; then
+    [[ $# -le 4 && ${3:-0} =~ ^[0-9]{1,6}$ && ${4:-x} =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]{0,79}(:[0-9]{1,5})?$ && ${4:-} != *..* ]] || return 0
+    [ "$(config telemetry 2>/dev/null)" = full ] || return 0
+    x=",\"v\":\"$(jq -r '.version // ""' "${BASH_SOURCE[0]%/*}/.claude-plugin/plugin.json" 2>/dev/null | tr -cd '0-9.')\"${3:+,\"n\":$((10#$3))}${4:+,\"at\":\"$4\"}"
+  elif [ "${2:-}" = start ] || [ "${2:-}" = escalate ]; then
     [[ ${3:-} =~ ^[a-z][a-z0-9.-]{0,39}$ && ${4:-} =~ ^(low|medium|high|xhigh|max)$ && ${5-x} =~ ^[A-Za-z0-9._-]{1,80}$ &&
        ${6-S} =~ ^[SML]$ && $# -le 6 && ( $2 = start || $# = 5 ) ]] || return 0
     x=",\"model\":\"$3\",\"effort\":\"$4\""
@@ -467,7 +481,7 @@ usage() {
        ${6:-0} =~ ^[0-9]{1,5}$ && $# -le 6 ]] || return 0
     x=",\"model\":\"$3\",\"effort\":\"$4\",\"est\":$((10#$5))${6:+,\"act\":$((10#$6))}"
   fi
-  [ "$(config telemetry 2>/dev/null)" = local ] || return 0
+  case ${2:-} in block|refuse|relay|wake|error) ;; *) case $(config telemetry 2>/dev/null) in local|full) ;; *) return 0 ;; esac ;; esac
   f=$(usage_log); mkdir -p "${f%/*}" 2>/dev/null &&
     printf '{"t":%s,"k":"%s","what":"%s"%s}\n' "$(date +%s)" "${2:-path}" "$1" "$x" >> "$f" 2>/dev/null
   return 0

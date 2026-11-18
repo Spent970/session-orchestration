@@ -24,6 +24,11 @@ case "${1:-}" in
     jq -c --argjson c "$c" '{time: (now | floor), type: .notification_type, message} + $c' <<<"$in" > "$d/blocked/$sid.json.tmp" &&
       mv "$d/blocked/$sid.json.tmp" "$d/blocked/$sid.json" ;;
   denied)
-    jq -c "{time: (now | floor), session: .session_id, cwd} + $call + {reason}" <<<"$in" >> "$d/denied.jsonl" 2>/dev/null ;;
+    jq -c "{time: (now | floor), session: .session_id, cwd} + $call + {reason}" <<<"$in" >> "$d/denied.jsonl" 2>/dev/null
+    # telemetry=full: a refuse line naming the tool (lib.sh usage); another server's MCP tool only as mcp, its name may
+    # name a company.
+    { read -r t; read -r cwd; } < <(jq -r '(.tool_name // "" | if startswith("mcp__session-orchestration__") then "mcp-" + .[28:]
+      elif startswith("mcp__") then "mcp" else . end | ascii_downcase | gsub("[^a-z0-9-]"; "-") | .[:40]), (.cwd // ".")' <<<"$in")
+    ( l=$(cd "${0%/*}/.." 2>/dev/null && pwd)/lib.sh; cd "$cwd" 2>/dev/null; . "$l" && usage "$t" refuse ) >/dev/null 2>&1 ;;
 esac
 exit 0

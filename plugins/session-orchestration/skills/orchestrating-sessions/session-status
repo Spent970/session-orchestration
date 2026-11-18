@@ -163,6 +163,21 @@
 set -uo pipefail
 [ "${1:-}" = --init ] && { shift; exec bash "$(dirname "$0")/../setting-up-coordination/session-init" "$@"; }
 . "$(dirname "$0")/../../lib.sh" || exit 1
+# telemetry=full: a non-zero exit as an error line (lib.sh usage), named by its --flag (none: the board). Each later
+# EXIT trap ends with it too.
+SS_LIB=$(cd "$(dirname "$0")/../.." && pwd)/lib.sh SS_FLAG=${1:-}; [[ $SS_FLAG =~ ^--[a-z-]{1,40}$ ]] || SS_FLAG=
+# Not faults: exit 3 and 4 (not done yet, busy, skipped, too big); a signal (128+: a closed reader, a stopped watcher);
+# the flags whose 1 or 2 is an answer (the adapter's "no answer", a --plan --check list, "isn't running", "nothing to
+# hand over"); --watch, whose gave-up line says it; a --watch poll (PEEK or FORWARD set), left to the poll-failed line.
+# It logs from a fresh bash: after a closed reader (`| head -1`), bash 3.2 leaks the unsent output into a $(…) the trap
+# forks, and usage's config call then hangs.
+exit_fault() {
+  case $1 in 0|3|4|12[89]|1[3-9][0-9]|2[0-9][0-9]) return ;; esac
+  case $SS_FLAG in --urls|--pending|--agents|--plan|--coordinator-of|--successor|--handover|--resume-ended|--watch) return ;; esac
+  [ -n "${SESSION_STATUS_PEEK:-}${SESSION_STATUS_FORWARD:-}" ] ||
+    bash -c '. "$1" && usage session-status error "$2" "$3"' _ "$SS_LIB" "$1" "${SS_FLAG:-skills/orchestrating-sessions/session-status}" </dev/null >/dev/null 2>&1
+}
+trap 'exit_fault $?' EXIT
 [ "${1:-}" = --config ] && { config "${2:-}"; exit; }
 [ "${1:-}" = --pane-section ] && { [ $# = 3 ] || set -- "$1" "" ""; pane_section_set "$2" "$3"; exit; }
 # --land TARGET: fast-forward branch TARGET to HEAD where TARGET is checked out in another worktree (a project that
@@ -174,7 +189,7 @@ if [ "${1:-}" = --land ]; then
   # A typo would push a new branch, and your own branch is a no-op: both exit 0 with nothing landed.
   git rev-parse -q --verify "refs/heads/$2" >/dev/null || { echo "no branch $2 to land on" >&2; exit 1; }
   [ "$(git branch --show-current)" != "$2" ] || { echo "$2 is this worktree's own branch: name the branch to land on" >&2; exit 1; }
-  exec git push --receive-pack='git -c receive.denyCurrentBranch=updateInstead receive-pack' . "HEAD:refs/heads/$2"
+  git push --receive-pack='git -c receive.denyCurrentBranch=updateInstead receive-pack' . "HEAD:refs/heads/$2"; exit
 fi
 # --kind KIND [NAME]: `--model M --effort E` from plan.models.KIND for a plain task start's `claude --bg` line, logged as
 # a usage start line (lib.sh usage) with NAME (the -n session name) hashed, so `retro.py kinds` ties a kind to its
@@ -223,7 +238,7 @@ fi
 # --search TEXT [days]: retro.py search, every project and account, the caller left out.
 if [ "${1:-}" = --search ]; then
   [ -n "${2:-}" ] && [[ ${3:-7} =~ ^[0-9]+$ ]] || { echo "usage: session-status --search TEXT [days]" >&2; exit 2; }
-  exec python3 -I "$(dirname "$0")/../retro/retro.py" search "$2" "${3:-7}"
+  python3 -I "$(dirname "$0")/../retro/retro.py" search "$2" "${3:-7}"; exit
 fi
 # --plan FILE [--check | --next | --brief N | --done N]: FILE's plan table (the first table under `## Plan` or `## Build plan`:
 # # | Chunk | Kind | Deps | Touches | Est | Model/effort | Done when), with each chunk's state from the
@@ -254,7 +269,7 @@ if [ "${1:-}" = --plan ]; then
   fi
   shift; PLAN_LIVE=$live PLAN_LFAIL=$lfail PLAN_MAXP=$(config plan.max_parallel) PLAN_AT=$(config handoff.at.chunk) PLAN_MODELS=$models PLAN_LIB=$(dirname "$0")/../../lib.sh PLAN_ON=$(config plan.enabled) \
     PLAN_TELEMETRY=$(config telemetry) PLAN_LOG=$(usage_log) PLAN_W=$PLAN_W PLAN_WFROM=$PLAN_WFROM PLAN_WANT=$(config compact.window) \
-    PLAN_BG=$(bg_cmd claude) exec python3 -I "$(dirname "$0")/plan.py" "$@"
+    PLAN_BG=$(bg_cmd claude) python3 -I "$(dirname "$0")/plan.py" "$@"; exit
 fi
 if [ "${1:-}" = --open ]; then
   case ${2:-} in view) fn=open_view ;; split) fn=open_split ;; *) echo "usage: session-status --open view|split …" >&2; exit 1 ;; esac
@@ -531,7 +546,7 @@ ended_free() {
 }
 if [ "${1:-}" = --start ]; then
   shift; rd=$(replies_path); h=${rd:+$rd/coordinator-handover.md}
-  TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+  TMP=$(mktemp -d); trap 'r=$?; rm -rf "$TMP"; exit_fault $r' EXIT
   echo '## Status'; "$SELF" "$@" | tee "$TMP/rows"; rc=${PIPESTATUS[0]}
   pf=$(config pending.file 2>/dev/null); printf '\n## Handoff file%s\n' "${pf:+ ($pf)}"
   prc=0; pend=$("$SELF" --pending) || prc=$?; [ -z "$pend" ] || printf '%s\n' "$pend"
@@ -586,7 +601,7 @@ fi
 if [ "${1:-}" = --resume-ended ]; then
   shift; pause=60; [ "${1:-}" != --pause ] || { pause=${2:-}; shift 2 || shift; }
   [[ $pause =~ ^[0-9]+$ && $# -gt 0 ]] || { echo "usage: session-status --resume-ended [--pause SECS] ID… (ID: 8+ characters)"; exit 2; }
-  TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+  TMP=$(mktemp -d); trap 'r=$?; rm -rf "$TMP"; exit_fault $r' EXIT
   text='The background service stopped while you were working (a restart or a crash), and this resumes you. Check where you left off (your worktree, your last steps) and carry on with your task; nothing else is approved by this message.'
   # still_ended WANT: sets id and name, or says why not and sets rc.
   still_ended() {
@@ -626,13 +641,14 @@ if [ "${1:-}" = --watch ]; then
     if [ "$rc" != 0 ]; then
       # A change waiting to be confirmed keeps the short CONFIRM_S retry, so a blip doesn't delay it by SECS.
       fails=$((fails + 1)) wait=$every out=${out:-"(no output, exit $rc; see stderr)"}; [ -z "$seen" ] || wait=$confirm
-      [ "$fails" -lt "$tries" ] || { echo "session-status --watch: gave up after $fails failed polls in a row; last error:"; echo "$out"; exit "$rc"; }
+      [ "$fails" -lt "$tries" ] || { usage gave-up wake "$rc"; echo "session-status --watch: gave up after $fails failed polls in a row; last error:"; echo "$out"; exit "$rc"; }
+      usage poll-failed wake "$rc"
       echo "session-status --watch: poll failed ($fails/$tries), retrying in ${wait}s: $(paste -sd' ' - <<<"$out" | tr -s ' ' | cut -c1-200)" >&2
       sleep "$wait"; continue
     fi
     fails=0
     if [ "$out" = "no changes" ]; then seen=; sleep "$every"
-    elif [ -n "$seen" ]; then echo "$out"; exit 0
+    elif [ -n "$seen" ]; then usage wake wake "$(grep -c . <<<"$out")"; echo "$out"; exit 0
     else seen=1; sleep "$confirm"
     fi
   done
@@ -846,9 +862,9 @@ adapter() { [ -n "$ADAPTER" ] && "$ADAPTER" "$@"; }
 [ "${1:-}" = --root ] && { echo "$ROOT"; exit; }
 [ "${1:-}" = --pending ] && { adapter pending 2>/dev/null; exit; }
 # The handoff file's archive and per-entry history (config pending.file): next to this script, `pending`.
-case ${1:-} in --pending-done|--pending-history) a=${1#--pending-}; shift; exec bash "$(dirname "$SELF")/pending" "$a" "$@" ;; esac
+case ${1:-} in --pending-done|--pending-history) a=${1#--pending-}; shift; bash "$(dirname "$SELF")/pending" "$a" "$@"; exit ;; esac
 # The replies folder's and the handoff files' local git history (the Stop hook keeps it): `history-git`.
-[ "${1:-}" = --git-history ] && { shift; exec bash "$(dirname "$SELF")/history-git" run "$@"; }
+[ "${1:-}" = --git-history ] && { shift; bash "$(dirname "$SELF")/history-git" run "$@"; exit; }
 PENDING=$(config pending.file 2>/dev/null)
 [ "${1:-}" = --urls ] && { adapter urls 2>/dev/null; exit; }
 [ "${1:-}" = --agents ] && { cat ~/.cache/session-status/"$ENC".agents 2>/dev/null; exit; }
@@ -875,7 +891,7 @@ killtree() {
     for (i = 1; i <= n; i++) { k = split(c[q[i]], x, " "); for (j = 1; j <= k; j++) q[++n] = x[j] }
     for (i = n; i >= 1; i--) print q[i] }' | xargs kill 2>/dev/null
 }
-TMP=$(mktemp -d); NPID=; trap '[ -z "$NPID" ] || killtree "$NPID"; rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d); NPID=; trap 'r=$?; [ -z "$NPID" ] || killtree "$NPID"; rm -rf "$TMP"; exit_fault $r' EXIT
 
 KEYRE=$(key_re "$ADAPTER")
 ACT=; SEND=; COMPACT=; HANDOVER=; PEEK=; WHERE=; ALLP=; YDAY=
@@ -1209,7 +1225,7 @@ if [ -n "$COMPACT" ]; then
   lock=~/.cache/session-status/compact-$id; mkdir -p ~/.cache/session-status
   [ -z "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] || rmdir "$lock" 2>/dev/null
   mkdir "$lock" 2>/dev/null || { echo "\"$name\" is already being compacted"; exit 3; }
-  trap 'rmdir "$lock" 2>/dev/null; rm -rf "$TMP"' EXIT
+  trap 'r=$?; rmdir "$lock" 2>/dev/null; rm -rf "$TMP"; exit_fault $r' EXIT
   [ "$kind" = background ] || { echo "\"$name\" is interactive: run /compact in its terminal"; exit 3; }
   if [ -n "$pid" ]; then
     [ "$status" = idle ] || { echo "\"$name\" is ${status:-$st}, not idle: not compacting"; exit 3; }

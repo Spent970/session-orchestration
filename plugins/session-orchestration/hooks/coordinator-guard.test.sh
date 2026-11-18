@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Self-check for coordinator-guard.sh. Run: bash coordinator-guard.test.sh  (prints "ok" or the failure).
-set -euo pipefail
+set -euo pipefail; unset XDG_STATE_HOME   # the usage log under the test's HOME, never the real one
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 root=$(mkdir -p "$tmp/proj/.claude/orchestration" "$tmp/proj/src" && cd "$tmp/proj" && pwd -P)

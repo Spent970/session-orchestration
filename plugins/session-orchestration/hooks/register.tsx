@@ -291,7 +291,7 @@ export const BUILTIN_KEYS: Record<string, string> = {
 }
 const taken = (key: string) => /^\d$/.test(key) ? 'a 1-9 item key' : BUILTIN_KEYS[key]
 
-// Usage telemetry (telemetry: local): one line per press in the local usage log, through lib.sh's `usage`, which
+// Usage telemetry (telemetry: local or full, the default): one line per press in the local usage log, through lib.sh's `usage`, which
 // checks the config. The names are fixed: the built-in buttons' (BUILTIN_KEYS) plus USAGE_EXTRA, never a key,
 // path, label of the project's own or command text.
 // ponytail: one bash + lib.sh config read per press even with telemetry off; presses are human-paced. Cache the

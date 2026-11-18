@@ -93,9 +93,11 @@ run --changes >/dev/null; echo "DM from Ann: hi" > "$tmp/notices"
   echo junk > "$tmp/notices" && echo 2 > "$tmp/rc" && [ "$(run | grep -c Notices)" = 0 ] || { echo "notices failed"; exit 1; }
 # A reader that stops early (`| head -1`) ends the run: the EXIT trap's killtree (a notices source ran) once read the
 # unsent output as child pids and recursed for days. Only bash 3.2 (macOS's /bin/bash) shows it, so the run uses
-# /bin/bash; the alarm (142) turns the hang into a failure. Then killtree still kills a live tree, leaves first.
+# /bin/bash; the alarm (142) turns the hang into a failure and kills the run's whole process group, so no stuck child
+# outlives the test. Then killtree still kills a live tree, leaves first.
 rc=0; (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH \
-  perl -e 'alarm 20; exec @ARGV' /bin/bash "$here/session-status") 2>/dev/null | head -1 >/dev/null || rc=${PIPESTATUS[0]}
+  perl -e '$p = fork // die; if (!$p) { setpgrp(0, 0); exec @ARGV } $SIG{ALRM} = sub { kill "KILL", -$p; exit 142 };
+    alarm 20; waitpid $p, 0; exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' /bin/bash "$here/session-status") 2>/dev/null | head -1 >/dev/null || rc=${PIPESTATUS[0]}
 [ "$rc" != 142 ] || { echo "a closed reader hangs the exit"; exit 1; }
 eval "$(sed -n '/^killtree() {/,/^}/p' "$here/session-status")"
 bash -c 'sleep 300 & bash -c "sleep 300 & wait" & wait' & tree=$!
@@ -225,13 +227,13 @@ mv "$tmp/claude.keep" "$tmp/bin/claude"
 mv "$tmp/adapter.keep" "$root/.claude/session-status-adapter"
 
 # Entering `working` doesn't wake (blocked → working, done → working); entering done does.
-echo blocked > "$tmp/state"
-printf '#!/bin/sh\nprintf %s "$(cat %s/state)"\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"%s\"}]'" "$tmp" > "$tmp/bin/claude"
-run --changes >/dev/null; echo working > "$tmp/state"; [ "$(run --changes)" = "no changes" ] &&
-  echo done > "$tmp/state" && [ "$(run --changes)" = "$(printf 'was: %s\nnow: %s' "$(run ABC-12 | sed 's/" done/" working/')" "$(run ABC-12)")" ] &&
-  echo working > "$tmp/state" && [ "$(run --changes)" = "no changes" ] || { echo "working filter failed"; exit 1; }
+echo blocked > "$tmp/sstate"
+printf '#!/bin/sh\nprintf %s "$(cat %s/sstate)"\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"%s\"}]'" "$tmp" > "$tmp/bin/claude"
+run --changes >/dev/null; echo working > "$tmp/sstate"; [ "$(run --changes)" = "no changes" ] &&
+  echo done > "$tmp/sstate" && [ "$(run --changes)" = "$(printf 'was: %s\nnow: %s' "$(run ABC-12 | sed 's/" done/" working/')" "$(run ABC-12)")" ] &&
+  echo working > "$tmp/sstate" && [ "$(run --changes)" = "no changes" ] || { echo "working filter failed"; exit 1; }
 # While working, the worktree's counts changing doesn't wake; leaving `working` shows the current counts.
-touch "$root/wt/dirty3"; [ "$(run --changes)" = "no changes" ] && echo done > "$tmp/state" &&
+touch "$root/wt/dirty3"; [ "$(run --changes)" = "no changes" ] && echo done > "$tmp/sstate" &&
   [ "$(run --changes)" = "$(printf 'was: %s\nnow: %s' "$(run ABC-12 | sed 's/" done/" working/')" "$(run ABC-12)")" ] &&
   run ABC-12 | grep -q 'dirty:2' || { echo "working counts filter failed"; exit 1; }
 rm "$root/wt/dirty3"
@@ -309,11 +311,11 @@ printf '%s\tid\tfix it\tapp#9 ci-failed @- (ABC-12) → "fix it" 11111111\tText\
   grep -qxF '  * app#9 ci-failed @- (ABC-12) → "fix it" 11111111 (not forwarded: no coordinator pane sent it)' <<<"$out" && [ ! -s "$e.outbox" ] &&
   rm "$tmp/prs" && run --changes >/dev/null || { echo "outbox failed: $out"; exit 1; }
 # A working <-> idle flip doesn't wake: working -> blocked (its turn is over) and back.
-echo working > "$tmp/state"; run --changes >/dev/null; echo blocked > "$tmp/state"
-[ "$(run --changes)" = "no changes" ] && echo working > "$tmp/state" && [ "$(run --changes)" = "no changes" ] || { echo "idle flip woke --changes"; exit 1; }
+echo working > "$tmp/sstate"; run --changes >/dev/null; echo blocked > "$tmp/sstate"
+[ "$(run --changes)" = "no changes" ] && echo working > "$tmp/sstate" && [ "$(run --changes)" = "no changes" ] || { echo "idle flip woke --changes"; exit 1; }
 # A blocked session hooks/blocked.sh saw on a prompt: Waiting on you says on what, and that wakes --changes. Gone
 # once its transcript is newer (the prompt was answered).
-echo blocked > "$tmp/state"; run --changes >/dev/null; mkdir -p "$tmp/.cache/session-status/blocked"; sleep 1
+echo blocked > "$tmp/sstate"; run --changes >/dev/null; mkdir -p "$tmp/.cache/session-status/blocked"; sleep 1
 echo '{"type":"permission_prompt","tool":"Bash","input":"rm -rf build"}' > "$tmp/.cache/session-status/blocked/$sid.json"
 out=$(run --changes); [ "$out" = 'now:   "fix it" (claude attach 11111111) — blocked: Bash `rm -rf build`' ] || { echo "blocked line failed: $out"; exit 1; }
 sleep 1; touch "$proj/$sid.jsonl"; [ "$(run --changes)" = "no changes" ] && ! run | grep -q 'blocked: Bash' || { echo "answered prompt still shown"; exit 1; }
@@ -338,15 +340,15 @@ echo 2 > "$tmp/n"; out=$(SESSION_STATUS_CONFIRM_S=1 run --watch --every 1 2>"$tm
   { echo "--watch retry failed: $out / $(cat "$tmp/err")"; exit 1; }
 mv "$tmp/adapter.keep" "$root/.claude/session-status-adapter"
 # A session with no row (no task) going busy and idle doesn't wake ("Waiting on you" churn); one that ends does.
-printf '#!/bin/sh\nprintf %s "$(cat %s/state)"\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"working\"},{\"sessionId\":\"$cid\",\"name\":\"docs\",\"cwd\":\"$root\",\"state\":\"%s\"}]'" "$tmp" > "$tmp/bin/claude"
+printf '#!/bin/sh\nprintf %s "$(cat %s/sstate)"\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"working\"},{\"sessionId\":\"$cid\",\"name\":\"docs\",\"cwd\":\"$root\",\"state\":\"%s\"}]'" "$tmp" > "$tmp/bin/claude"
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Your call: keep it?"}]}}' >> "$proj/$cid.jsonl"
-echo blocked > "$tmp/state"; run --changes >/dev/null
-echo working > "$tmp/state"; [ "$(run --changes)" = "no changes" ] && echo blocked > "$tmp/state" &&
+echo blocked > "$tmp/sstate"; run --changes >/dev/null
+echo working > "$tmp/sstate"; [ "$(run --changes)" = "no changes" ] && echo blocked > "$tmp/sstate" &&
   [ "$(run --changes)" = "no changes" ] || { echo "row-less busy/idle filter failed"; exit 1; }
-echo done > "$tmp/state"
+echo done > "$tmp/sstate"
 [ "$(run --changes)" = 'was:   "docs" (claude attach 99999999)' ] || { echo "row-less session filter failed"; exit 1; }
 # One that vanishes from the session list (closed) counts too.
-echo blocked > "$tmp/state"; run --changes >/dev/null
+echo blocked > "$tmp/sstate"; run --changes >/dev/null
 printf '#!/bin/sh\nprintf %s\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"working\"}]'" > "$tmp/bin/claude"
 [ "$(run --changes)" = 'was:   "docs" (claude attach 99999999)' ] || { echo "gone session filter failed"; exit 1; }
 # A finished task's clean, merged worktree is a leftover; idle past the resolve age it moves to Resolved, and
@@ -1251,7 +1253,6 @@ out=$(run)
 # --init (session-init): (a) a GitHub repo with ACME keys and a tracked CLAUDE.md, proposed then written; (b) a
 # workspace of 2 repos with no keys; (c) a folder under an adapter; (d) a configured folder. Outside $root's adapter.
 rm -rf "$tmp/.claude-work"   # one account until the accounts case below
-rm -f "$tmp/state"   # the stub's state file from above: XDG_STATE_HOME (setup's state folders, the usage log) lives under it
 # The terminal it runs in: none, unless T_PROG (TERM_PROGRAM) or T_MUX (TMUX) says.
 init() { (cd "$1" && shift && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
 # pof ROOT: ROOT's state folder (lib.sh proj_dir), where setup puts the replies, memory, handoff and briefs
@@ -1764,8 +1765,9 @@ did=eeeeeeee-2222-3333-4444-555555555555 now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
   for c in 1:10000 2:30000 3:25000 4:60000; do
     jq -nc --arg t "$now" --arg i "m${c%%:*}" --argjson x "${c#*:}" '{type: "assistant", timestamp: $t, message: {id: $i, model: "claude-sonnet", usage: {input_tokens: $x}}}'; done
 } > "$proj/$did.jsonl"
-[ "$(CLAUDE_CODE_SESSION_ID=$did run --plan "$plan" --done 2)" = 'nothing logged: telemetry is off, not local (config telemetry)' ] || { echo "--plan --done, telemetry off"; exit 1; }
-mkdir -p "$tmp/.config/session-orchestration"; echo '{"telemetry": "local"}' > "$tmp/.config/session-orchestration/config.json"
+mkdir -p "$tmp/.config/session-orchestration"; echo '{"telemetry": "off"}' > "$tmp/.config/session-orchestration/config.json"
+[ "$(CLAUDE_CODE_SESSION_ID=$did run --plan "$plan" --done 2)" = 'nothing logged: telemetry is off, not local or full (config telemetry)' ] || { echo "--plan --done, telemetry off"; exit 1; }
+echo '{"telemetry": "local"}' > "$tmp/.config/session-orchestration/config.json"
 out=$(CLAUDE_CODE_SESSION_ID=$did run --plan "$plan" --done c2)
 [ "$(sed -E 's/"t":[0-9]+/"t":T/' <<<"$out")" = '{"t":T,"k":"chunk","what":"mechanical","model":"sonnet","effort":"medium","est":20,"act":55}' ] &&
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl")" = "$out" ] || { echo "--plan --done: $out"; exit 1; }

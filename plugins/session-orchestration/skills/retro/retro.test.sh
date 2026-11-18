@@ -251,11 +251,14 @@ grep -q '<p>see PRs #3879 and #4490</p><p>#3879 alone</p>' "$tmp/h.html" || fail
 # usage: a press in the window counts; one there since 09-01 with none is unused; a 2026-01-01 line is trimmed.
 st=$tmp/state/session-orchestration; mkdir -p "$st/inventory"
 echo '[["press","attach"],["press","compact"]]' > "$st/inventory/2026-09-01.json"
-printf '%s\n' '{"t":1791799200,"k":"press","what":"attach"}' '{"t":1767225600,"k":"press","what":"compact"}' 'junk' > "$st/usage.jsonl"
+printf '%s\n' '{"t":1791799200,"k":"press","what":"attach"}' '{"t":1767225600,"k":"press","what":"compact"}' 'junk' \
+  '{"t":1791799200,"k":"error","what":"session-status","v":"1.0","n":2,"at":"--land"}' \
+  '{"t":1791799300,"k":"error","what":"session-status","v":"1.0","n":2,"at":"--land"}' '{"t":1791799200,"k":"refuse","what":"bash","v":"1.0"}' > "$st/usage.jsonl"
 out=$(XDG_STATE_HOME=$tmp/state retro usage)
 grep -qx $'press\tattach\t1\t2026-09-01\t' <<<"$out" && grep -qx $'press\tcompact\t0\t2026-09-01\tunused' <<<"$out" \
   && grep -q $'^press\tcopy-command\t0\t'"$(date -u +%F)"$'\t$' <<<"$out" && grep -q $'^flag\t--peek\t.*[0-9-]\t$' <<<"$out" \
-  && [ "$(wc -l < "$st/usage.jsonl" | tr -d ' ')" = 1 ] && [ -e "$st/inventory/$(date -u +%F).json" ] || fail "usage" "$out"
+  && grep -qx $'error\tsession-status --land 2\t2\t-\t' <<<"$out" && grep -qx $'refuse\tbash\t1\t-\t' <<<"$out" \
+  && [ "$(wc -l < "$st/usage.jsonl" | tr -d ' ')" = 4 ] && [ -e "$st/inventory/$(date -u +%F).json" ] || fail "usage" "$out"
 # every config() key line, not only the tracker one
 grep -q $'^config\ttracker\t' <<<"$out" && grep -q $'^config\tplan.max_parallel\t' <<<"$out" && grep -q $'^config\thandoff.at.chunk\t' <<<"$out" ||
   fail "usage: config keys" "$(grep '^config' <<<"$out")"
