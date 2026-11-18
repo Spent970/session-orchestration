@@ -19,9 +19,10 @@
    (they may share the merge's command, and a wait loop may test them: `[ "$(gh pr view …)" = MERGED ]`); on `BEHIND` (or a
    conflict) run `git fetch origin && git rebase origin/main && git push --force-with-lease`. Auto-merge stays on and
    merges once CI is green again. No merge queue: GitHub offers it only to organization repos.
-4. Install it: `claude plugin update <plugin>@session-orchestration` once the marketplace source has the release
-   commit, then check `installed_plugins.json` lists `<plugin>` at the new version. A command you can't run
-   yourself goes to the user as one line, through session-orchestration's `hand_command` too.
+4. Install it: the project's coordinator runs the install once per release commit (until the user says otherwise):
+   `claude plugin update <plugin>@session-orchestration` once the marketplace source has the release commit, then it
+   checks `installed_plugins.json` lists `<plugin>` at the new version. A worker's done report says "released", with
+   no command handed to the user.
 5. Reload. Running sessions pick up a new tool or hook after `/reload-plugins`: the coordinator calls
    session-orchestration's `reload_plugins` tool, which runs it in its own session when the turn ends (from
    0.27.1; a worker reloads the same way when messaged to). Restart a session where the new tool doesn't show.
