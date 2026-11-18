@@ -303,8 +303,13 @@ title toggles open and one line and writes it (`session-status --pane-section SL
 name, an adapter's footer, folds for this pane only, as does a failed write, which says so in a toast). Once shown, a
 hidden section's title press folds and writes it like any other, so it is no longer hidden, and the last line
 (`shown: … · hide`) hides them again.
-Folding Waiting on you or Decisions gives their rows no digit key. Waiting on you, Decisions
-and Needs action are never hidden: there `hidden` reads as one line, with a warning from `--config pane.sections`. Above the groups, **▶ RUN** lists
+Waiting on you, Decisions and Needs action are never hidden: there `hidden` reads as one line, with a warning
+from `--config pane.sections`. Folded to one line, they still draw the items new since their title was last pressed
+(open or fold), Waiting on you's and Decisions' with their digit keys, and the title says `· N new` in the warning colour; a title press marks every
+item there seen. An item is its session's name (Waiting on you), its pending entry's text (Waiting on you, Decisions) or its
+key and chip (Needs action). The seen ids are kept per project root in `~/.cache/session-status/seen/`, like the
+asks, so a new coordinator's pane doesn't show everything as new; a section folded before it has any (set in the
+config, never pressed) takes what it holds when first drawn as seen. The rows a fold leaves out get no digit. Above the groups, **▶ RUN** lists
 the commands sessions handed the user (`hand_command`), per task key, each counted on you under its
 task, with Run, Copy and Dismiss buttons (no key): pane.md, Handed-over commands.
 
