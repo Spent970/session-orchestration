@@ -151,6 +151,16 @@ mkdir -p "$T/other-proj/.claude" && echo '{}' > "$T/other-proj/.claude/coordinat
 (cd "$T/other-proj" && "$FB" add features 'Привіт' --where lib.sh --found f --evidence e --new) | grep -q -- '-case\.md$' || fail "empty slug"
 printf '# x\n- in other-proj\n' > "$dirty"
 grep -qF ': names a local name:' <<<"$("$FB" scrub "$dirty")" || fail "scrub missed a project a case was added in"
+# Fixed-set config values are common words, not names; a free string beside them still is, adapter or not.
+echo '{"telemetry":"local","pane":{"sections":{"idle":"line"}},"start":{"kinds":{"feedback_apply":"at_once"}},"trusted":["zorbleco"],"plan":{"models":{"build":"opus/medium"}}}' > "$T/other-proj/.claude/coordination.local.json"
+printf '# x\n- status: local line at_once opus/medium\n' > "$dirty"
+"$FB" scrub "$dirty" >/dev/null || fail "scrub flagged a fixed-set config value"
+printf "# x\n- from zorbleco\n" > "$dirty"
+grep -qF ': names a local name:' <<<"$("$FB" scrub "$dirty")" || fail "scrub missed a free config string"
+echo '{"start":{"mode":"glimwick-room"}}' > "$T/other-proj/.claude/coordination.local.json"
+printf '# x\n- in glimwick-room\n' > "$dirty"
+grep -qF ': names a local name:' <<<"$("$FB" scrub "$dirty")" || fail "scrub skipped a value outside a key's fixed set"
+echo '{}' > "$T/other-proj/.claude/coordination.local.json"
 # A worktree inside its checkout is that checkout: its feature name passes, the project's name and a key in it don't.
 git worktree add -q .claude/worktrees/frobnicate 2>/dev/null || fail "inner worktree setup"
 mkdir -p .claude/worktrees/frobnicate/.claude && echo '{}' > .claude/worktrees/frobnicate/.claude/coordination.local.json   # its own root
@@ -160,7 +170,7 @@ printf '# x\n- adds features/wt-out.md\n' > "$dirty"
 (cd "$T/wt-out" && "$FB" scrub "$dirty" >/dev/null) || fail "scrub flagged an outside worktree's name"
 # The worktree's own config still counts; a set-up subfolder that isn't a worktree keeps its name.
 echo '{"chat": "zorblax-room"}' > .claude/worktrees/frobnicate/.claude/coordination.local.json
-printf '#!/bin/sh\nexit 1\n' > .claude/worktrees/frobnicate/.claude/session-status-adapter   # config counts with an adapter
+printf '#!/bin/sh\nexit 1\n' > .claude/worktrees/frobnicate/.claude/session-status-adapter   # a root with an adapter too
 chmod +x .claude/worktrees/frobnicate/.claude/session-status-adapter
 mkdir -p quuxpkg/.claude && echo '{}' > quuxpkg/.claude/coordination.local.json
 printf '# x\n- in zorblax-room\n- in quuxpkg\n' > "$dirty"
