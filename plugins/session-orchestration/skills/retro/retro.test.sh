@@ -49,7 +49,7 @@ out=$(retro sessions 7)
   || fail "sessions: window, peak, usd, human, denial, bang" "$out"
 [ "$(row bbbbbbbb | cut -f6,9)" = $'1\t40000' ] || fail "sessions: the other account's tree" "$out"
 
-out=$(retro events 7)
+out=$(retro events 7 2>/dev/null)
 for k in human bang self deny bash; do grep -q $'\t'"$k"$'\t' <<<"$out" || fail "events: a $k row" "$out"; done
 grep -q 'old prompt' <<<"$out" && fail "events: the 2020 line is outside the window" "$out"
 grep -q $'deny\tBash: gh pr merge 7\tclassifier/x' <<<"$out" || fail "events: deny row with source/reason" "$out"
@@ -109,11 +109,34 @@ cat > "$a/rrrrrrrr-0003.jsonl" <<'EOF'
 {"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f5","message":{"content":[{"type":"tool_use","id":"f6","name":"Bash","input":{"command":"cp a b\ncat /p/replies/MNO-6.md"}}]}}
 {"type":"assistant","timestamp":"2026-10-11T08:00:06.000Z","requestId":"f7","message":{"content":[{"type":"tool_use","id":"f8","name":"Bash","input":{"command":"python3 -I x.py /p/replies/MNO-6.md"}}]}}
 EOF
+# The reply tool's report writes replies/KEY.md itself once sent: with the task's key, or no key (the session's task
+# key). Not with another key, nor when the reply came back refused (done's gaps).
+cat > "$a/rrrrrrrr-0004.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-11T08:00:00.000Z","message":{"content":"Work on JKL-7"}}
+{"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f9","message":{"content":[{"type":"tool_use","id":"f10","name":"mcp__session-orchestration__reply","input":{"text":"JKL-7 done","report":"JKL-7 · b · merged","key":"JKL-7"}}]}}
+{"type":"user","timestamp":"2026-10-11T08:00:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"f10","content":"sent"}]}}
+EOF
+cat > "$a/rrrrrrrr-0005.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-11T08:00:00.000Z","message":{"content":"Work on PQR-8"}}
+{"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f11","message":{"content":[{"type":"tool_use","id":"f12","name":"mcp__session-orchestration__reply","input":{"text":"x","report":"x","key":"PQR-88"}}]}}
+{"type":"user","timestamp":"2026-10-11T08:00:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"f12","content":"sent"}]}}
+EOF
+cat > "$a/rrrrrrrr-0006.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-11T08:00:00.000Z","message":{"content":"Work on JKL-9"}}
+{"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f13","message":{"content":[{"type":"tool_use","id":"f14","name":"mcp__session-orchestration__reply","input":{"text":"x","report":"x"}}]}}
+{"type":"user","timestamp":"2026-10-11T08:00:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"f14","content":"sent"}]}}
+EOF
+cat > "$a/rrrrrrrr-0007.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-11T08:00:00.000Z","message":{"content":"Work on STU-1"}}
+{"type":"assistant","timestamp":"2026-10-11T08:00:05.000Z","requestId":"f15","message":{"content":[{"type":"tool_use","id":"f16","name":"mcp__session-orchestration__reply","input":{"text":"x","report":"x","key":"STU-1","done":"pr"}}]}}
+{"type":"user","timestamp":"2026-10-11T08:00:06.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"f16","is_error":true,"content":"reply: not sent, done pr doesn't hold yet"}]}}
+EOF
 out=$(retro replies 7 2>&1)
-grep -q 'JKL-' <<<"$out" && fail "replies: a reply written by sed -i or python3 isn't lost" "$out"
+grep -q 'JKL-' <<<"$out" && fail "replies: a reply written by sed -i, python3 or the reply tool's report isn't lost" "$out"
 grep -q $'\tMNO-6\t' <<<"$out" || fail "replies: a cp on another line or a python3 read isn't a write" "$out"
-grep -q "'wrote': 3," <<<"$out" || fail "replies: Bash writes count as written" "$out"
-rm "$a/rrrrrrrr-0001.jsonl" "$a/rrrrrrrr-0002.jsonl" "$a/rrrrrrrr-0003.jsonl"
+grep -q $'\tPQR-8\t' <<<"$out" && grep -q $'\tSTU-1\t' <<<"$out" || fail "replies: a report under another key, or refused, isn't written" "$out"
+grep -q "'wrote': 5," <<<"$out" || fail "replies: Bash writes and the reply tool's report count as written" "$out"
+rm "$a"/rrrrrrrr-000[1-7].jsonl
 
 # Added after the counts above too: a headless permission test (-p) with a denial; a review session that posted a
 # comment and whose user ran a `!` command; a task session with a merge that ran, one that was denied, and a heredoc
@@ -151,7 +174,17 @@ cat > "$a/llllllll-2222.jsonl" <<'EOF'
 EOF
 uu() { for i in 0 1 2 3 4 5 6 7 8 9; do printf '{"type":"user","uuid":"u%s","message":{"content":"x"}}\n' "$i"; done; }
 uu > "$a/iiiiiiii-9999.jsonl"; uu > "$a/jjjjjjjj-0000.jsonl"
-out=$(retro events 7)
+# No-verdict denials by cause on stderr (a headless session's left out).
+cat > "$a/vvvvvvvv-0001.jsonl" <<'EOF'
+{"type":"assistant","timestamp":"2026-10-12T08:30:00.000Z","message":{"content":[{"type":"tool_use","id":"v1","name":"Bash","input":{"command":"ls"}},{"type":"tool_use","id":"v2","name":"Bash","input":{"command":"pwd"}},{"type":"tool_use","id":"v3","name":"Edit","input":{"file_path":"/p/x"}}]}}
+{"type":"user","timestamp":"2026-10-12T08:30:01.000Z","permissionDecision":{"decision":"reject","source":"config","reasonType":"classifier"},"message":{"content":[{"type":"tool_result","tool_use_id":"v1","is_error":true,"content":"The server-side auto mode classifier gave no verdict for Bash: a hook changed this call's input after auto mode reviewed it"}]}}
+{"type":"user","timestamp":"2026-10-12T08:30:02.000Z","permissionDecision":{"decision":"reject","source":"config","reasonType":"classifier"},"message":{"content":[{"type":"tool_result","tool_use_id":"v2","is_error":true,"content":"The server-side auto mode classifier gave no verdict for Bash: another call in this response was changed after auto mode reviewed it"}]}}
+{"type":"user","timestamp":"2026-10-12T08:30:03.000Z","permissionDecision":{"decision":"reject","source":"config","reasonType":"classifier"},"message":{"content":[{"type":"tool_result","tool_use_id":"v3","is_error":true,"content":"The server-side auto mode classifier gave no verdict (the response ended before its verdict arrived), so auto mode cannot approve it"}]}}
+EOF
+[ "$(retro events 7 2>&1 >/dev/null)" = 'noverdict hook_changed=1 sibling_changed=1 ended=1 other=0' ] ||
+  fail "events: no-verdict denials by cause" "$(retro events 7 2>&1 >/dev/null)"
+rm "$a/vvvvvvvv-0001.jsonl"
+out=$(retro events 7 2>/dev/null)
 grep -q $'ffffffff\t2026-10-12T08:00\tdeny\tBash: rm -rf x\tconfig/mode: denied\t-p' <<<"$out" || fail "events: a -p session's deny is tagged test" "$out"
 grep -q $'aaaaaaaa\t2026-10-12T10:20\tdeny\tBash: gh pr merge 7\tclassifier/x: denied\t$' <<<"$out" || fail "events: a real deny has an empty test column" "$out"
 grep -q $'gggggggg\t2026-10-12T09:05\tran\tplugin-release rnd-x' <<<"$out" || fail "events: a ran row for the user's ! command" "$out"
@@ -174,6 +207,21 @@ grep -qw 'ABC-9' "$tmp/keys.txt" && [ "$(wc -l < "$tmp/keys.txt")" -eq 1 ] || fa
 grep -q $'^merge\tapp#30\thost\t2026-10-12T11:30\tABC-9' <<<"$out" && grep -q $'^merge\tlib#21\thost' <<<"$out" && ! grep -qE $'^merge\tapp#(11|22|31|32)\thost' <<<"$out" &&
   grep -q 'merge=5 .* merge_ran=3$' <<<"$out" || fail "units: --merged counts reviewer merges once" "$out"
 # The hook's heredoc rule: a body is dropped only after a safe line that ends there.
+# A task session whose prompt says review, answering a reviewer on its own PR (--parent-id): no review posted.
+cat > "$a/pppppppp-0001.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-12T12:20:00.000Z","message":{"content":"Work on ABC-12: answer the review comments"}}
+{"type":"assistant","timestamp":"2026-10-12T12:20:01.000Z","message":{"content":[{"type":"tool_use","id":"p1","name":"Bash","input":{"command":"npx bitbucketdc-cli@latest pr comment create 30 --repo app --parent-id 5 --body ok"}}]}}
+{"type":"user","timestamp":"2026-10-12T12:20:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"p1","content":"posted"}]}}
+EOF
+# A review session's post beside a --parent-id reply in one command still counts.
+cat > "$a/pppppppp-0002.jsonl" <<'EOF'
+{"type":"user","timestamp":"2026-10-12T12:30:00.000Z","message":{"content":"Review app#31"}}
+{"type":"assistant","timestamp":"2026-10-12T12:30:01.000Z","message":{"content":[{"type":"tool_use","id":"p2","name":"Bash","input":{"command":"npx bitbucketdc-cli@latest pr comment create 31 --repo app --body top && npx bitbucketdc-cli@latest pr comment create 32 --repo app --parent-id 5 --body ok"}}]}}
+{"type":"user","timestamp":"2026-10-12T12:30:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"p2","content":"posted"}]}}
+EOF
+out=$(retro units 7 2>&1); rm "$a"/pppppppp-000[12].jsonl
+grep -q 'app#3[02]' <<<"$out" && fail "units: a --parent-id reply isn't a review post" "$out"
+grep -q $'^post\tapp#31\tpppppppp' <<<"$out" && grep -q ' post=3 ' <<<"$out" || fail "units: post count with --parent-id replies" "$out"
 python3 -I -B - "$here" <<'PY' || fail "units: heredoc_text_dropped follows the hook" ""
 import sys; sys.path.insert(0, sys.argv[1]); from retro import heredoc_text_dropped as d
 assert d("cat > f <<'X'\nmerge\nX\ncat f") == "cat > f <<'X'\ncat f"
@@ -360,6 +408,20 @@ grep -q $'^hroot\topen\tOPEN-1\t2026-10-10\t\t3.1\tuser decision\t1\t1\t\t8\t[0-
   grep -q $'^hroot\tresolved\tGONE-2\t2026-10-01\t2026-10-07 10:00\t3.0\trelease\t0\t2\tunknown\t0\t' <<<"$out" ||
   fail "handoff rows" "$out"
 grep -q "'recurring': 2" "$tmp/handoff.err" && grep -q $'^history read\t2 entries' "$tmp/handoff.err" || fail "handoff totals" "$(cat "$tmp/handoff.err")"
+# pending.file unset: the state folder's pending.md, its entries read from their lines (no history files).
+sr=$tmp/sroot; mkdir -p "$sr/.claude" "$home/.claude/projects/-x-sroot"; echo '{}' > "$sr/.claude/coordination.local.json"
+sp=$home/.local/state/session-orchestration/projects/$(cd "$sr" && pwd -P | sed 's/[^A-Za-z0-9]/-/g'); mkdir -p "$sp"
+printf '# Pending\n\nRules.\n\n- 2026-10-11 SR-1 (PR 4): waits on your approval\n  continued\n- 2026-10-14 SR-2: after the window\n\n## Notes\n- 2026-10-01 NOTE-3: not an entry\n' > "$sp/pending.md"
+mkdir -p "$sp/pending"; printf 'Detail.\n' > "$sp/pending/SR-1.md"
+jq -nc --arg c "$sr" '{type: "user", cwd: $c, timestamp: "2026-10-12T09:00:00.000Z", message: {content: "go"}}' > "$home/.claude/projects/-x-sroot/ssssssss-1.jsonl"
+jq -nc --arg p "$sp/pending/SR-1.md" '{type: "assistant", timestamp: "2026-10-12T09:00:01.000Z", message: {content: [{type: "tool_use", id: "s1", name: "Read", input: {file_path: $p}}]}}' >> "$home/.claude/projects/-x-sroot/ssssssss-1.jsonl"
+jq -nc '{type: "user", timestamp: "2026-10-12T09:00:02.000Z", toolUseResult: {file: {content: "01234567"}}, message: {content: [{type: "tool_result", tool_use_id: "s1"}]}}' >> "$home/.claude/projects/-x-sroot/ssssssss-1.jsonl"
+out=$(TZ=UTC retro handoff 7 2> "$tmp/handoff.err")
+grep -q $'^sroot\topen\tSR-1\t2026-10-11\t\t2.5\tuser decision\t-\t1\t\t8\t0\t1\t2\tssssssss$' <<<"$out" && ! grep -q 'SR-2\|NOTE-3' <<<"$out" ||
+  fail "handoff: pending.file unset reads the state folder's pending.md" "$out"
+grep -q "'entries': 4," "$tmp/handoff.err" && grep -q $'^history read\t2 entries' "$tmp/handoff.err" && grep -q $'^history unread\t1 entries' "$tmp/handoff.err" ||
+  fail "handoff: totals with the state folder's entry, outside the read/unread split" "$(cat "$tmp/handoff.err")"
+rm -r "$sr" "$sp" "$home/.claude/projects/-x-sroot"
 
 # start and loads: a coordinator's Start (the skill: 6000; the --start digest and approvals.md, 4 and 12 chars: 3900
 # split 1:3; a project doc; a schema load; the watcher, whose request after it ends Start, before the typed prompt;

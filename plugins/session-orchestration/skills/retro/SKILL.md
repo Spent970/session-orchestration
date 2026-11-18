@@ -113,7 +113,7 @@ and no heading.
      $(cat keys.txt)`), and pass `--merged merged.txt` to both `units` calls. An adapter without `yesterday`, or a
      non-zero exit: leave it out and say merges count only the ones sessions ran (`merge_ran`).
    - `context`: `context 7 <split> P > context.tsv` (split: last run's end, so the slice after it gets its own row).
-   - `waste`: `sessions 7 P > sessions.tsv`, `events 7 P > events.tsv`, `waits 7 5 P > waits.tsv`,
+   - `waste`: `sessions 7 P > sessions.tsv`, `events 7 P > events.tsv 2> events.txt`, `waits 7 5 P > waits.tsv`,
      `bgtasks 'session-status.*--watch' 7 P > bg-watch.tsv`, plus any `bgtasks` regex the project brief names
      (project scope), and `replies 7 P > replies.tsv` (lost reports). Refusals: count them from `denied.jsonl` for
      the window when it covers it (project scope: the lines whose `cwd` is the root or under it), else from `deny`
@@ -121,13 +121,18 @@ and no heading.
      source was used. A denial whose text (a deny row's `detail2`, after `source/reasonType: `) starts "Background
      session: this compound command" is the plugin's split hint (0.36.0+), not a refusal: count those separately,
      and leave them and the retry after each out of the refusal and retry-waste counts, so runs stay comparable.
+     The classifier's no-verdict denials (`denied.jsonl` logs them as "Classifier unavailable") get their cause from
+     `events.txt`'s `noverdict` line: report it beside the count. `hook_changed` and `sibling_changed` come from a
+     PreToolUse hook that rewrites a call's input (`updatedInput`), which the user can fix in their own hooks;
+     `ended` is the classifier's side.
    - `feedback`: project scope, `../orchestrating-sessions/feedback list --project` from the project root; plugin
      scope, `feedback list --plugin` and `feedback list --all --plugin` (the cases last run filed or named, and
      whether they are `fixed` now).
    - `coordinator`: `triggers <coordinator> 7 P`: the coordinator is the first name
      `bash <orchestrating-sessions skill folder>/session-status --coordinator` prints, run from the project root
      (`triggers` takes a session name or an id prefix). Add an earlier coordinator's id when last run's "Next run"
-     names one. When the project sets `pending.file`: `handoff 28 P > handoff.tsv 2> handoff.txt`.
+     names one. Then `handoff 28 P > handoff.tsv 2> handoff.txt` (config `pending.file`, else the state folder's
+     `pending.md`; an entry with no history file has rewordings `-`).
    - `protocol`: `start 7 > start.tsv` (each coordinator's Start by part, the medians last) and `loads 7 > loads.tsv`
      (messages, skill, `worker.md`, card and reply loads by session kind).
    - `features`: `usage 30 > usage.tsv` and `events 30 > events30.tsv`.
