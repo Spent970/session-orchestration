@@ -12,7 +12,7 @@ What one Claude Code session learns, the next one knows. Works in any project, w
 - **Project cases** (`cases`): friction the project caused a session (a host's sign-in, a misleading doc, a script
   that fails on a case it should handle), filed the moment it happens, deduplicated and counted, kept outside the
   repo in `~/.local/state` until a fix lands.
-- **Deferred tasks** (`defer-task` skill): an out-of-scope bug, feature or refactor noticed mid-task goes to
+- **Deferred tasks** (`defer-task` skill): an out-of-scope bug, feature, refactor or docs/setup gap (coding task or not) noticed mid-task goes to
   `<bugfixes|features|refactorings>/` in the project's tasks folder (`cases tasks`: under `~/.local/state`, outside the
   repo) instead of derailing the task.
 - **Background-session guards** (hooks): in every `--bg` session, in every project, the question box, plan mode, an
