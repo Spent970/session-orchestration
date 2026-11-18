@@ -1689,21 +1689,22 @@ sj=$s/.claude/coordination/coordination.json; cp "$sj" "$tmp/sj"
 jq '.plan.note = "/home/u/notes.md"' "$tmp/sj" > "$sj"
 out=$(init "$s" --write --shared) && { echo "init (s1) --shared took a home path: $out"; exit 1; }
 grep -qF 'refused: --shared: these lines would put personal details in a team file' <<<"$out" &&
-  grep -qE '^  \.claude/coordination/coordination\.json:[0-9]+: a home path: .*/home/u/notes\.md' <<<"$out" &&
+  grep -qE '^  \.claude/coordination/coordination\.json \(as committed\):[0-9]+: a home path: .*/home/u/notes\.md' <<<"$out" &&
   ! git -C "$s" rev-parse -q --verify "refs/heads/coordination/setup-$(date +%F)" >/dev/null || { echo "init (s1) home path: $out"; exit 1; }
 jq '.pending.file = "p.md"' "$tmp/sj" > "$sj"
-out=$(init "$s" --write --shared); grep -qF 'has person keys, which never go in a team file: pending.file (move them' <<<"$out" ||
+out=$(init "$s" --write --shared) || :; grep -qF 'has person keys, which never go in a team file: pending.file (move them' <<<"$out" ||
   { echo "init (s1) person key: $out"; exit 1; }
 cp "$tmp/sj" "$sj"
 sb=coordination/setup-$(date +%F); swt=$s/.worktrees/$sb
 out=$(init "$s" --write --shared) && [ -z "$(git -C "$s" status --short --untracked-files=all)" ] &&
   [ "$(git -C "$s" diff --name-only origin/main "$sb" | paste -sd' ' -)" = ".claude/coordination/coordination.json .gitattributes" ] &&
-  [ "$(git -C "$s" show "$sb:.gitattributes")" = '/.claude/coordination/memory/*.md merge=union' ] &&
+  [ "$(git -C "$s" show "$sb:.gitattributes")" = $'/.claude/coordination/memory.md merge=union\n/.claude/coordination/memory/*.md merge=union' ] &&
+  grep -qxF /.claude/coordination/coordination.json "$s/.git/info/exclude" && ! grep -qxF /.claude/coordination/ "$s/.git/info/exclude" &&
   [ "$(git -C "$s" show "$sb:.claude/coordination/coordination.json" | jq -c .)" = '{"tracker":"none","host":"github","features":{"review_inbox":false}}' ] &&
   [ "$(git -C "$s" log -1 --format=%an "$sb")" = t ] &&
   grep -qxF "Team PR: show its diff in one pane ask (git -C $swt show), then on yes: git -C $swt push -u origin $sb && gh pr create -R o/sail --base main --head $sb --title 'coordination: shared setup (repo keys, merge=union for team memory)' --body 'Shared coordination files: every collaborator reads them once this merges; personal files stay out of git.'" <<<"$out" &&
   grep -qF 'Personal: everything above, out of git' <<<"$out" || { echo "init (s1) --shared: $out / $(git -C "$s" status --short --untracked-files=all)"; exit 1; }
-out=$(init "$s" --write --shared); grep -qF "refused: --shared: $sb exists already" <<<"$out" || { echo "init (s1) second --shared: $out"; exit 1; }
+out=$(init "$s" --write --shared) || :; grep -qF "refused: --shared: $sb exists already" <<<"$out" || { echo "init (s1) second --shared: $out"; exit 1; }
 # merged: the pull replaces this checkout's ignored repo file, and the next --shared has nothing to open
 git -C "$swt" push -q origin "$sb:main" && git -C "$s" pull -q --ff-only origin main && [ -z "$(git -C "$s" status --short)" ] &&
   git -C "$s" ls-files --error-unmatch .claude/coordination/coordination.json >/dev/null &&

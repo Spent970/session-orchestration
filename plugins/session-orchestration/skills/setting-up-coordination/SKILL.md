@@ -117,8 +117,10 @@ checkout's copy of the repo file stays excluded too) and commits the team files 
 `coordination/setup-<date>`, in a worktree of its own (`<repo>/.worktrees/coordination/setup-<date>`, `/.worktrees/`
 excluded) with the person's git identity, so the main checkout stays clean:
 - **Shared** (read by every collaborator once merged): `.claude/coordination/coordination.json` (repo keys only:
-  tracker, host, features.review_inbox, plus any repo key set in this checkout's file) and the `.gitattributes` line
-  `/.claude/coordination/memory/*.md merge=union`, so two people's team memory appends merge on rebase.
+  tracker, host, features.review_inbox, plus any repo key set in this checkout's file) and the `.gitattributes` lines
+  `/.claude/coordination/memory.md merge=union` and `/.claude/coordination/memory/*.md merge=union`, so two people's
+  team memory appends merge on rebase. This checkout's exclude hides only the repo file, not the folder, so team
+  files added there later show in `git status`.
 - **Personal** (out of git, this machine only): everything else it writes, as in a solo setup.
 
 Before writing anything it refuses a repo file with a person key or a line naming a home path, an email, a session
@@ -126,7 +128,8 @@ ID or a coordinator session name, and names each line. Its `Team PR:` line gives
 command: put it on the pane as one ask with the diff (the coordinator: `ask_approval`, the diff in `details`; any
 other session: `hand_command` with that command), and run it only on the user's yes: in a team repo colleagues see
 the PR, so it's asked each time. Once it merges, a pull replaces this checkout's ignored repo file with the
-committed one. The branch exists already: open its PR, or remove the worktree and branch as the refusal says.
+committed one. A setup branch exists already (any day's, local or on origin): open its PR, or remove the worktree
+and branch as the refusal says. A failed write or commit removes its own worktree and branch.
 What may be committed there: `coordination.json`; `memory.md` and `memory/` (team memory, reached through the
 coordinator's prune PR); `review-brief.md` (how the team reviews, read before each person's brief); a shared adapter
 (`session-status-adapter`) and modules (`<kind>/<name>.sh`), each run by a person only once trusted. Never committed:

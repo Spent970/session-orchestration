@@ -567,13 +567,14 @@ else
   layout="workspace of ${#repos[@]} repos"
 fi
 first=${repos[0]:-}
-url=; [ -n "$first" ] && url=$(git -C "$first" remote get-url origin 2>/dev/null)
+url=; [ -n "$first" ] && url=$(git -C "$first" config --get remote.origin.url 2>/dev/null)   # as configured, not insteadOf-rewritten
 case $url in
   *github.com*) host=github ;; *bitbucket*) host=bitbucket ;; *forgejo*) host=forgejo ;; *gitlab*) host=gitlab ;; *) host=none ;;
 esac
 cfg_host=$host cfg_note=   # the config's host: GitLab isn't one yet (TODO: GitLab support)
 [ "$host" = gitlab ] && cfg_host=none cfg_note=" (host=none: GitLab support is a TODO)"
-repo_slug=$(sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@]+@[^:]+:##; s#^[A-Za-z0-9.-]+:##' <<<"$url")
+url_slug() { sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@]+@[^:]+:##; s#^[A-Za-z0-9.-]+:##' <<<"$1"; }
+repo_slug=$(url_slug "$url")
 gh=; [ "$host" = github ] && command -v gh >/dev/null && gh=1
 # The briefs' commands: a PR merge and a review post, by code host; `retro.py units` counts these by default
 # (TODO: gitlab's are unchecked).
@@ -680,13 +681,20 @@ cfg_repo=$root/.claude/coordination/coordination.json
 [ -z "$sd" ] || [ -n "$team" ] || cfg_repo=$sd/coordination.json
 repo_tracked=; git -C "$(dirname "$cfg_repo")" ls-files --error-unmatch coordination.json >/dev/null 2>&1 && repo_tracked=1
 # Shared mode's repo (the team's in a workspace), its default branch, and the team PR's branch and worktree.
-trepo=$top; [ -z "$team" ] || trepo=$(cd "$root/$team" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || trepo=
-[ -z "$trepo" ] || trepo=$(cd "$trepo" && pwd -P)
-tdb=$default_branch
-if [ -n "$team" ] && [ -n "$trepo" ]; then tdb=$(git -C "$trepo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) && tdb=${tdb#origin/} || tdb=main; fi
+# The repo holding the repo file's folder (a team recorded in coordination.local.json too), else the team's, else here.
+td=$(dirname "$cfg_repo")
+trepo=$(for d in "$td" "$root/$team"; do (cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) && break; done)
+[ -z "$trepo" ] || { trepo=$(cd "$trepo" && pwd -P); [ ! -d "$td" ] || td=$(cd "$td" && pwd -P); }
+tdb=$default_branch   # the team repo's own, unless default_branch= was said
+if [ -n "$trepo" ] && [[ " ${over[*]-} " != *" default_branch="* ]]; then
+  tdb=$(git -C "$trepo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) && tdb=${tdb#origin/} ||
+    { tdb=main; git -C "$trepo" rev-parse -q --verify origin/main >/dev/null || ! git -C "$trepo" rev-parse -q --verify origin/master >/dev/null || tdb=master; }
+fi
 tb=coordination/setup-$(date +%F) wt=$trepo/.worktrees/coordination/setup-$(date +%F)
-trel=$(dirname "$cfg_repo"); trel=${trel#"$trepo"/}
-gattr="/$trel/memory/*.md merge=union"
+trel=${td#"$trepo"/}
+# The team memory: memory.md (the prune PR's lines) and memory/*.md.
+gattr="/$trel/memory.md merge=union
+/$trel/memory/*.md merge=union"
 # key_pattern isn't written: the adapter answers it for session keys, and a tracker key's prefix would narrow the
 # default PROJ-123 pattern. It's the user's override only.
 # The features: the review inbox where the project names one (Bitbucket or Forgejo), accounts with a second one.
@@ -803,22 +811,29 @@ team_scrub() {
 tj= ga_need=
 if [ -n "$shared" ]; then
   [ -n "$trepo" ] || { echo "refused: --shared needs a git repo for the team files (here, or the team repo in a workspace)"; exit 1; }
+  case $trel in /*) echo "refused: --shared: the repo file's folder ($trel) is outside $trepo"; exit 1 ;; esac
   git -C "$trepo" fetch -q origin "$tdb" 2>/dev/null   # best effort: offline, the origin/$tdb fetched last
   git -C "$trepo" rev-parse -q --verify "origin/$tdb^{commit}" >/dev/null ||
     { echo "refused: --shared: no origin/$tdb in $trepo to branch the team PR from (push $tdb or fetch it, or say default_branch=…)"; exit 1; }
   if ! git -C "$trepo" cat-file -e "origin/$tdb:$trel/coordination.json" 2>/dev/null; then
     old='{}'; [ ! -e "$cfg_repo" ] || old=$(jq -c . "$cfg_repo") || exit 1
     tj=$(jq -n --argjson n "$cfg_repo_json" --argjson o "$old" '$n * $o')   # this checkout's values win, as --write keeps them
-    msg=$(jq -r '.messages // empty | strings' "$person_src" 2>/dev/null)
+    msg=   # the messages module as coord_json finds it: person-wide config, then this project's
+    for f in "$(user_config)" "$person_src"; do [ -f "$f" ] && m=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$m" ] && msg=$m; done
     pk=$(jq -rn --argjson a "$tj" --argjson b "$(jq -c "$(person_keys_drop "$msg")" <<<"$tj")" \
-      '[$a | paths(type != "object") | . as $p | select(($b | getpath($p)) == null) | join(".")] | join(", ")')
+      '($b | [paths(type != "object") | join(".")]) as $kb | [$a | paths(type != "object") | join(".") | select(. as $k | $kb | index([$k]) | not)] | join(", ")')
     [ -z "$pk" ] || { echo "refused: --shared: ${cfg_repo#"$root"/} has person keys, which never go in a team file: $pk (move them to .claude/coordination.local.json); setup stopped before writing"; exit 1; }
-    bad=$(team_scrub "$trel/coordination.json" "$tj" | sort -u)
+    bad=$(team_scrub "$trel/coordination.json (as committed)" "$tj" | sort -u)
     [ -z "$bad" ] || { echo "refused: --shared: these lines would put personal details in a team file (fix them in ${cfg_repo#"$root"/}); setup stopped before writing:"; sed 's/^/  /' <<<"$bad"; exit 1; }
   fi
-  git -C "$trepo" show "origin/$tdb:.gitattributes" 2>/dev/null | grep -qxF -- "$gattr" || ga_need=1
-  [ -z "$tj$ga_need" ] || ! { git -C "$trepo" rev-parse -q --verify "refs/heads/$tb" >/dev/null || [ -e "$wt" ]; } ||
-    { echo "refused: --shared: $tb exists already ($wt): open its PR, or remove it (git -C $trepo worktree remove $wt; git -C $trepo branch -D $tb), then run this again"; exit 1; }
+  ga_old=$(git -C "$trepo" show "origin/$tdb:.gitattributes" 2>/dev/null)
+  ga_need=$(while IFS= read -r l; do grep -qxF -- "$l" <<<"$ga_old" || echo "$l"; done <<<"$gattr")
+  # An earlier day's setup branch (open or not merged yet) counts too: one team PR at a time.
+  prev=$(git -C "$trepo" for-each-ref --format='%(refname:short)' 'refs/heads/coordination/setup-*' 'refs/remotes/origin/coordination/setup-*' | head -1)
+  if [ -n "$tj$ga_need" ] && { [ -n "$prev" ] || [ -e "$wt" ]; }; then
+    prev=${prev:-$tb}
+    echo "refused: --shared: $prev exists already: open its PR, or remove it (git -C $trepo worktree remove $trepo/.worktrees/${prev#origin/}; git -C $trepo branch -D ${prev#origin/}), then run this again"; exit 1
+  fi
 fi
 key_re_flag=; [ "$keys" = session ] && key_re_flag=1   # the default pattern already matches PROJ-123
 tracker_keys=; [ "$keys" = tracker ] && tracker_keys=1
@@ -866,14 +881,20 @@ if [ -n "$top" ]; then
   mkdir -p "$(dirname "$ex")"
   # The config files up front, written or not: this checkout's repo file is personal too (shared mode commits the
   # team's copy in its own worktree; once merged, the pull replaces this ignored one), the person's always.
+  # Shared mode hides only the repo file, not its folder: team files added there later (memory.md) must stay visible.
   rel=${root#"$top"}; rel=${rel#/}; rel=${rel:+$rel/}
-  for f in "/${rel}.claude/coordination/" "/${rel}.claude/coordination.local.json" "/${rel}.claude/coordination.local/"; do
+  cdir="/${rel}.claude/coordination/"; cf=$cdir; [ -z "$shared" ] || cf=${cdir}coordination.json
+  if [ -n "$shared" ] && grep -qxF "$cdir" "$ex" 2>/dev/null; then   # a personal setup's folder line goes
+    { grep -vxF "$cdir" "$ex" || :; } > "$ex.tmp" && mv "$ex.tmp" "$ex"
+  fi
+  for f in "$cf" "/${rel}.claude/coordination.local.json" "/${rel}.claude/coordination.local/"; do
     git -C "$root" ls-files --error-unmatch "$top$f" >/dev/null 2>&1 && continue   # tracked (shared mode): not ours to hide
     grep -qxF "$f" "$ex" 2>/dev/null || echo "$f" >> "$ex"
   done
   for w in ${wrote[@]+"${wrote[@]}"}; do
-    case $w in *" (section appended)"|.claude/coordination*) continue ;; esac   # the user's file / the config, above
-    case $w in "$orch"/*) w=$orch/ ;; esac   # the whole folder, so files added there later stay out too
+    case $w in *" (section appended)"|.claude/coordination.local*|.claude/coordination/coordination.json*) continue ;; esac   # the user's file / the config, above
+    case $w in .claude/coordination/*) [ -n "$shared" ] || continue ;; esac   # under the folder line, unless shared
+    case $w in "$orch"/*) [ -n "$shared" ] && [ "${orch%/}" = .claude/coordination ] || w=$orch/ ;; esac   # the whole folder, so files added there later stay out too
     f=$(at "$w")
     case $f in "$top"/*) ;; *) continue ;; esac   # outside this repo
     (cd "$root" && git check-ignore -q "$f") && continue
@@ -894,28 +915,31 @@ if [ -n "$shared" ]; then
     git -C "$trepo" worktree add -q -b "$tb" "$wt" "origin/$tdb" 2>&1 || { echo "Shared: git worktree add failed: no team PR"; exit 1; }
     tex=$(git -C "$trepo" rev-parse --git-path info/exclude); case $tex in /*) ;; *) tex=$trepo/$tex ;; esac
     (cd "$trepo" && git check-ignore -q .worktrees/x) || echo /.worktrees/ >> "$tex"   # the main checkout stays clean
+    # A failed step takes the worktree and branch back, so the next run isn't refused over an empty branch.
+    tfail() { echo "Shared: $1 (see above): no team PR"; git -C "$trepo" worktree remove --force "$wt"; git -C "$trepo" branch -q -D "$tb"; exit 1; }
     if [ -n "$tj" ]; then
-      mkdir -p "$wt/$trel" && printf '%s\n' "$tj" > "$wt/$trel/coordination.json" || exit 1
+      mkdir -p "$wt/$trel" && printf '%s\n' "$tj" > "$wt/$trel/coordination.json" || tfail "writing $trel/coordination.json failed"
       tf+=("$trel/coordination.json (repo keys: $(jq -r '[paths(type != "object") | join(".")] | join(", ")' <<<"$tj"))")
     fi
     if [ -n "$ga_need" ]; then
       [ ! -s "$wt/.gitattributes" ] || [ -z "$(tail -c1 "$wt/.gitattributes")" ] || echo >> "$wt/.gitattributes"
-      printf '%s\n' "$gattr" >> "$wt/.gitattributes" || exit 1
-      tf+=(".gitattributes ($gattr: two people's team memory appends merge on rebase)")
+      printf '%s\n' "$ga_need" >> "$wt/.gitattributes" || tfail "writing .gitattributes failed"
+      tf+=(".gitattributes ($(paste -sd ';' - <<<"$ga_need" | sed 's/;/; /g'): two people's team memory appends merge on rebase)")
     fi
     tmsg="coordination: shared setup ($([ -n "$tj" ] && printf 'repo keys, ')merge=union for team memory)"
     # -f: an ignore rule (this clone's own exclude, or one like .claude/*) would hide the team folder
     git -C "$wt" add -f -- ${tj:+"$trel/coordination.json"} ${ga_need:+.gitattributes} &&
-      git -C "$wt" commit -q -m "$tmsg" || { echo "Shared: the commit in $wt failed (see above): no team PR"; exit 1; }
-    turl=$(git -C "$trepo" config --get remote.origin.url); tslug=$(echo "$turl" | sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@]+@[^:]+:##; s#^[A-Za-z0-9.-]+:##')
-    pr="git -C $wt push -u origin $tb"
+      git -C "$wt" commit -q -m "$tmsg" || tfail "the commit in $wt failed"
+    turl=$(git -C "$trepo" config --get remote.origin.url)
+    pr="git -C $wt push -u origin $tb" prnote=
     case $turl in   # as configured, not insteadOf-rewritten: what gh resolves
-      *github.com*) pr+=" && gh pr create -R $tslug --base $tdb --head $tb --title '$tmsg' --body 'Shared coordination files: every collaborator reads them once this merges; personal files stay out of git.'" ;;
-      *) pr+=" (then open a PR from $tb into $tdb)" ;;
+      *github.com*) pr+=" && gh pr create -R $(url_slug "$turl") --base $tdb --head $tb --title '$tmsg' --body 'Shared coordination files: every collaborator reads them once this merges; personal files stay out of git.'" ;;
+      *) prnote="Then open a PR from $tb into $tdb on the code host." ;;
     esac
     echo "Shared: committed on $tb ($wt), for a team PR every collaborator sees:"
     printf '  %s\n' "${tf[@]}"
     echo "Team PR: show its diff in one pane ask (git -C $wt show), then on yes: $pr"
+    [ -z "$prnote" ] || echo "$prnote"
   fi
 fi
 echo "Next: session-status --init --check (expect configured), then open_pane."
