@@ -1,5 +1,13 @@
 name: test
-on: [push, pull_request]
+# A branch is tested by its pull_request run only; push runs are main's. A new push to a PR cancels its older run;
+# a run on main never is (each gets its own group via run_id). The job names are the ruleset's required checks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   shell:
     strategy:
