@@ -31,10 +31,14 @@
 #                                   New files go to the project's state folder (lib.sh proj_dir, P), not the checkout.
 #   session-status --init --write --move [--link]
 #                                   an older setup's replies, memory, handoff (with its archive), briefs and
-#                                   .claude/tasks/ moved into P, the section's path lines, the adapter's quoted
+#                                   .claude/tasks/ moved into P, the section's path lines, the adapter's
 #                                   paths rewritten (a configured pending.file stays where it is),
 #                                   then the plain --write; all or nothing when a target exists. --link: a .coordinator
 #                                   symlink to P in the root, kept out of git.
+#   session-status --init --migrate [--dry-run]
+#                                   an older layout made current: --check's `[mN auto|ask]` lines (prefixed on each
+#                                   line that names one), the auto ones fixed, backed up and logged, the ask ones
+#                                   listed, P/setup.json stamped once none is left (see Migrate below).
 # Configured: the nearest adapter (.claude/session-status-adapter, as session-status finds the root) is in this
 # folder, and its CLAUDE.md or CLAUDE.local.md names a replies folder (the line --handover reads). A folder with its
 # own adapter is its own project even when a parent folder has one too (a subproject coordinator); with no adapter
@@ -46,12 +50,13 @@ tpl=$here/templates
 . "$here/../../lib.sh" || exit 1
 root=$(pwd -P)
 
-mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=()
+mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=() dry=
 for a; do
   case $a in --move) move=1; continue ;; --link) link=1; continue ;; esac
   rest+=("$a")
   case $a in
-    --check) mode=check ;; --write) mode=write ;; --own) own=1 ;; --delegate) delegate=1 ;; --shared) shared=1 ;;
+    --check) mode=check ;; --write) mode=write ;; --migrate) mode=migrate ;; --dry-run) dry=1 ;;
+    --own) own=1 ;; --delegate) delegate=1 ;; --shared) shared=1 ;;
     --trust=?*@?*) trust+=("${a#--trust=}") ;;
     --review-brief) review_brief=1 ;; --retro-brief) retro_brief=1 ;;
     team=?*) team_over=${a#team=}; over+=("$a") ;;
@@ -116,6 +121,17 @@ at() { local r=${1%/}; r=${r/#\~\//$HOME/}; case $r in /*) echo "$r" ;; *) echo 
 # The project's state folder (lib.sh proj_dir): replies, memory, handoff, briefs and tasks of a setup from the release
 # after this one; older ones move there with --write --move.
 P=$(proj_dir "$root")
+# The orch folder setup writes into: P, else an existing section's (its memory line's; a replies folder in the old
+# state dir says nothing about it). A correction (orch=) can change it below.
+orch=$P
+case $replies in ''|*/session-orchestration/replies/*) ;; *) orch=$(dirname "${replies%/}") ;; esac; orch=${mem:-$orch}
+# retro_brief ORCH [NAME...]: the retro brief the retro skill reads: beside the memory (not one left outside the root
+# and P), else .claude/ (older setups). Names default to retro; migration m4 passes "retro rnd" to find the old name.
+retro_brief() {
+  local d n ds=("$1" .claude) ns=("${@:2}"); [ "${#ns[@]}" -gt 0 ] || ns=(retro)
+  case $(at "$1")/ in "$root"/*|"$P"/*) ;; *) ds=(.claude) ;; esac
+  for n in "${ns[@]}"; do for d in "${ds[@]}"; do [ -e "$(at "$d")/$n-brief.md" ] && { echo "$d/$n-brief.md"; return; }; done; done
+}
 # The handoff file: config pending.file, else the section's handoff line (absolute; empty when neither names one).
 hand=$(cd "$root" && pending_path "$root") hand_cfg=$hand   # a configured one is the person's choice: --move leaves it
 [ -n "$hand" ] || { hand=$(cd "$root" && sed -nE 's/.*[Hh]andoff file: `([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1); [ -z "$hand" ] || hand=$(at "$hand"); }
@@ -127,6 +143,39 @@ named_brief=$(cd "$root" && grep -hiE 'review.*brief' CLAUDE.md CLAUDE.local.md 
 top0=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) && top0=$(cd "$top0" && pwd -P)
 oldrep=${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/replies/$(enc_path "$root")
 inside() { case $1 in "$root"/*|"$oldrep"|"$oldrep"/*) return 0 ;; esac; return 1; }
+# RQ=word (the adapter): each shell word, as a hand-made one may write replies=DIR, cat "FILE" or cat 'A B/FILE'; a
+# quoted span stays one word, a $VAR word is left alone (it isn't a path from the root) and so is a comment line.
+rew() { # FILE [check|words]: FILE with each backticked path (RQ: that quote instead) at or under a source in $map (SRC<tab>DST lines) pointing at DST; check: the lines it'd change; words: each path word, resolved
+  MAP=$map ROOT=$root CHECK=${2:-} Q=${RQ:-'`'} awk '
+    BEGIN { n = split(ENVIRON["MAP"], m, "\n"); for (i = 1; i <= n; i++) { split(m[i], kv, "\t"); src[i] = kv[1]; dst[i] = kv[2] }
+            q = ENVIRON["Q"]; w = (q == "word"); ck = ENVIRON["CHECK"]
+            qre = w ? "\047[^\047]*\047|\"[^\"]*\"|[$]?[^][ \t\047\"=;|&()<>`$]+" : q "[^" q "]+" q }
+    w && /^[ \t]*#/ { if (ck == "") print; next }
+    { out = ""; s = $0; hit = 0
+      while (match(s, qre)) {
+        m0 = substr(s, RSTART, RLENGTH); pre = substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
+        c = substr(m0, 1, 1); if (!w || c == "\047" || c == "\"") { qq = c; tok = substr(m0, 2, length(m0) - 2) } else { qq = ""; tok = m0 }
+        if (tok != "" && tok !~ /^\$/) {
+          r = tok; sl = (r ~ /\/$/); sub(/\/+$/, "", r)
+          if (r ~ /^~\//) r = ENVIRON["HOME"] substr(r, 2); else if (r !~ /^\//) r = ENVIRON["ROOT"] "/" r
+          if (ck == "words") { if (tok ~ /\//) print r; continue }
+          for (i = 1; i <= n; i++) if (src[i] != "" && (r == src[i] || index(r, src[i] "/") == 1)) { tok = dst[i] substr(r, length(src[i]) + 1) (sl ? "/" : ""); hit = 1; break }
+        }
+        out = out pre qq tok qq
+      }
+      if (ck != "") { if (hit && ck == "check") print; next }
+      print out s }' "$1"
+}
+# stale_ad: the map (SRC<tab>DST) for an untracked adapter's paths left behind by an earlier move: a missing path
+# outside P whose name (replies, pending.md, …) is in P. Empty when the adapter is committed or names none.
+stale_ad() {
+  local f=$root/.claude/session-status-adapter r map=
+  [ -f "$f" ] && ! tracked "$f" 2>/dev/null || return 0
+  RQ=word rew "$f" words | sort -u | while IFS= read -r r; do
+    case $r in "$P"|"$P"/*) continue ;; esac
+    [ -e "$r" ] || [ ! -e "$P/${r##*/}" ] || printf '%s\t%s\n' "$r" "$P/${r##*/}"
+  done
+}
 # stays SRC: why SRC can't move (empty: it can)
 stays() {
   local s=$1 d t
@@ -150,23 +199,6 @@ fi
 mb=$(at "${mem:-.claude/orchestration}")
 for b in "$named_brief" "$mb/review-brief.md" "$mb/retro-brief.md" \
          "$root/.claude/retro-brief.md" "$root/.claude/tasks"; do [ -z "$b" ] || items+=("file	$b"); done
-# rew FILE [check]: FILE with each backticked path (RQ: that quote instead) at or under a source in map (SRC<TAB>DST
-# lines) pointing to its DST; check: only the lines it'd change.
-rew() {
-  MAP=$map ROOT=$root CHECK=${2:-} Q=${RQ:-'`'} awk '
-    BEGIN { n = split(ENVIRON["MAP"], m, "\n"); for (i = 1; i <= n; i++) { split(m[i], kv, "\t"); src[i] = kv[1]; dst[i] = kv[2] }
-            q = ENVIRON["Q"]; qre = q "[^" q "]+" q }
-    { out = ""; s = $0; hit = 0
-      while (match(s, qre)) {
-        tok = substr(s, RSTART + 1, RLENGTH - 2); pre = substr(s, 1, RSTART - 1); s = substr(s, RSTART + RLENGTH)
-        r = tok; sl = (r ~ /\/$/); sub(/\/+$/, "", r)
-        if (r ~ /^~\//) r = ENVIRON["HOME"] substr(r, 2); else if (r !~ /^\//) r = ENVIRON["ROOT"] "/" r
-        for (i = 1; i <= n; i++) if (src[i] != "" && (r == src[i] || index(r, src[i] "/") == 1)) { tok = dst[i] substr(r, length(src[i]) + 1) (sl ? "/" : ""); hit = 1; break }
-        out = out pre q tok q
-      }
-      if (ENVIRON["CHECK"] != "") { if (hit) print; next }
-      print out s }' "$1"
-}
 # A delegation line left in CLAUDE.md from before the approvals.delegate key (the old template's wording).
 deleg_line=; (cd "$root" && grep -qiE 'delegates approvals' CLAUDE.md CLAUDE.local.md 2>/dev/null) && deleg_line=1
 deleg_set=; jq -e '.approvals.delegate != null' "$person_src" >/dev/null 2>&1 && deleg_set=1
@@ -259,8 +291,10 @@ if [ "$mode" = check ]; then
                 # The committed team files sessions read before the person's (worker.md, Project memory): only what git
                 # tracks in T, so the excluded repo file of a personal setup names nothing.
                 if [ -n "$sd" ]; then
+                  # m8: auto when the repo file is the person's own (untracked), ask when it's committed (the team's)
+                  c8=auto; ! git -C "$sd" ls-files --error-unmatch coordination.json >/dev/null 2>&1 || c8=ask
                   ! jq -e '(.pending.file // .history.dirs) != null' "$sd/coordination.json" >/dev/null 2>&1 ||
-                    echo "pending.file and history.dirs are ignored in the repo file (they name personal paths): move them to .claude/coordination.local.json"
+                    echo "[m8 $c8] pending.file and history.dirs are ignored in the repo file (they name personal paths): move them to .claude/coordination.local.json"
                   tf=()
                   for x in memory.md:memory memory:memory review-brief.md:review-brief session-status-adapter:adapter; do
                     v=${x#*:}; case " ${tf[*]-} " in *" $v "*) continue ;; esac   # memory.md and memory/: one entry
@@ -277,12 +311,12 @@ if [ "$mode" = check ]; then
                   x=${sd#"$root"/}; [ "$x" = .claude/coordination ] && x= || x=" ($x)"
                   [ "${#tf[@]}" = 0 ] || { y=$(printf '%s, ' "${tf[@]}"); echo "team$x: ${y%, }"; }
                 fi
-                [ -n "$term_set" ] || [ "$term_found" = plain ] || echo "detected $term_found: run setup to record it (session-status --init --write adds terminal=$term_found)"
-                [ "$a" = true ] || [ "$accounts_n" -lt 2 ] || echo "second account found, accounts off: set features.accounts to true in .claude/coordination.local.json (session-status --init --write adds it when unset)"
+                [ -n "$term_set" ] || [ "$term_found" = plain ] || echo "[m2 ask] detected $term_found: run setup to record it (session-status --init --write adds terminal=$term_found)"
+                [ "$a" = true ] || [ "$accounts_n" -lt 2 ] || echo "[m2 ask] second account found, accounts off: set features.accounts to true in .claude/coordination.local.json (session-status --init --write adds it when unset)"
                 dh=$(detect_host . 2>/dev/null); [ "$dh" = none ] || [ "$dh" = "$h" ] ||
                   echo "host=$h, but the origin remote is on $dh (moved?): set host to $dh in .claude/coordination/coordination.json"
-                [ "$r" = true ] || [ -z "$inbox" ] || [[ ! $h =~ ^(bitbucket|forgejo)$ ]] || echo "review inbox found, review_inbox off: set features.review_inbox to true in .claude/coordination/coordination.json (session-status --init --write adds it when unset)"
-                [ -z "$deleg_line" ] || [ -n "$deleg_set" ] || echo "delegation found in CLAUDE.md: run setup to move it (session-status --init --write --delegate)"
+                [ "$r" = true ] || [ -z "$inbox" ] || [[ ! $h =~ ^(bitbucket|forgejo)$ ]] || echo "[m2 ask] review inbox found, review_inbox off: set features.review_inbox to true in .claude/coordination/coordination.json (session-status --init --write adds it when unset)"
+                [ -z "$deleg_line" ] || [ -n "$deleg_set" ] || echo "[m1 ask] delegation found in CLAUDE.md: run setup to move it (session-status --init --write --delegate)"
                 # replies, memory and handoff belong in the state folder (a worktree-isolated session can't write
                 # into a checkout); --move takes them there and rewrites the lines. It runs in this folder: no cd.
                 # Named only when --move would change something: see its loop.
@@ -298,18 +332,30 @@ if [ "$mode" = check ]; then
                 # a path line in a tracked CLAUDE.md: --move refuses until it's in CLAUDE.local.md (its own check)
                 tl=; [ -z "$map" ] || ! git ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1 || tl=$(rew "$root/CLAUDE.md" check)
                 if [ -n "$tl" ]; then
-                  echo "coordinator files outside $P ($out), and the committed CLAUDE.md holds their path lines: move these to CLAUDE.local.md (a change to the tracked file), then run session-status --init --write --move:"
+                  echo "[m7 ask] coordinator files outside $P ($out), and the committed CLAUDE.md holds their path lines: move these to CLAUDE.local.md (a change to the tracked file), then run session-status --init --write --move:"
                   sed 's/^/  /' <<<"$tl"
-                elif [ -n "$out" ]; then echo "coordinator files outside $P ($out): run session-status --init --write --move"; fi
+                elif [ -n "$out" ]; then echo "[m7 auto] coordinator files outside $P ($out): run session-status --init --write --move"; fi
+                # an earlier move (before it rewrote unquoted adapter words) left the local adapter naming the old paths
+                [ -z "$(stale_ad)" ] || echo "[m9 auto] .claude/session-status-adapter names files already moved to $P: session-status --init --migrate points it there"
                 # a hand-made Stop hook that git-commits a folder: history-git does that (config history.dirs)
                 for f in "$root"/.claude/settings.json "$root"/.claude/settings.local.json; do
                   jq -r '.hooks.Stop[]?.hooks[]?.command? // empty' "$f" 2>/dev/null
                 done | while read -r c; do
-                  grep -qE 'git[^|;&]* commit' <<<"$c" && { echo "project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; continue; }
+                  grep -qE 'git[^|;&]* commit' <<<"$c" && { echo "[m3 ask] project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; continue; }
                   x=$(sed -e "s#\${CLAUDE_PROJECT_DIR}#$root#g; s#\$CLAUDE_PROJECT_DIR#$root#g" -e 's/["'\'']//g' <<<"$c")
                   set -f; for w in $x; do case $w in /*) ;; '~'/*) w=$HOME/${w#'~/'} ;; *) w=$root/$w ;; esac   # relative: from the root, as Claude runs it
-                    [ -f "$w" ] && grep -qE 'git[^|;&]* commit' "$w" && { echo "project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; break; }; done
+                    [ -f "$w" ] && grep -qE 'git[^|;&]* commit' "$w" && { echo "[m3 ask] project Stop hook commits a folder ($c): run setup to move that folder to history.dirs and drop the hook"; break; }; done
                 done
+                rb=$(retro_brief "$orch" retro rnd); [ "${rb##*/}" != rnd-brief.md ] ||
+                  echo "[m4 auto] old brief name $rb: session-status --init --migrate renames it retro-brief.md"
+                # the scheduled retro's old entry point in this account's crontab, for this root
+                crontab -l 2>/dev/null | grep -F rnd-weekly | tr -d "\"'" | awk -v r="$root" '{ for (i = 1; i <= NF; i++) if ($i == r) f = 1 } END { exit !f }' &&
+                  echo "[m5 ask] the crontab still runs rnd-weekly for this folder: replace that line with the one session-status's retro-run --install prints"
+                # a start mode kept in memory from before the start.mode key (0.99)
+                if [ -n "$memf" ] && ! coord_json 2>/dev/null | jq -e '.start.mode != null' >/dev/null 2>&1; then
+                  sm=$(grep -HniE '(^|[^a-z])start[ ._-]?mode' "$memf" "${memf%.md}"/*.md 2>/dev/null | head -1 | cut -d: -f1,2)
+                  [ -z "$sm" ] || echo "[m6 ask] a start mode in memory ($(tilde "$sm")): set start.mode in .claude/coordination.local.json and delete the line"
+                fi
                 exit 0 ;;
     parent) echo "covered by a parent: $parent ($(slug "$(basename "$parent")")-coordinator) covers this folder"; exit 3 ;;
     partial) m="the CLAUDE.md section naming a replies folder"; [ -n "$adapter" ] || m="the adapter (.claude/session-status-adapter)"
@@ -318,6 +364,74 @@ if [ "$mode" = check ]; then
              echo "partial: $m"; exit 1 ;;
     *) echo "unconfigured: $root has no adapter and no replies folder line"; exit 1 ;;
   esac
+fi
+# --- Migrate (--migrate [--dry-run]): an older setup's layout made current -------------------------------------
+# The detectors are --check's `[mN CLASS]` lines (CLASS auto, ask or hand). Each auto one is fixed in id order, its
+# rewritten personal files backed up first to P/migrate-backup/<date>/, and logged to P/migrate.log (`<id> start`, each
+# move, `<id> done` or `failed`): a run after one that stopped midway resumes, as every fix checks before it applies.
+# The ask and hand ones are listed, for the pane to ask (stage 2). P/setup.json is stamped with LAYOUT only once
+# --check names none: a stamp at LAYOUT ends the next run after one read. --dry-run: what it would do, writing nothing.
+if [ "$mode" = migrate ]; then
+  stamp=$P/setup.json log=$P/migrate.log
+  l=$(jq -r '.layout // 0' "$stamp" 2>/dev/null); l=${l:-0}
+  [ "$l" != "$LAYOUT" ] || { echo "current: layout $LAYOUT ($(tilde "$stamp"))"; exit 0; }
+  [ "$l" -lt "$LAYOUT" ] || { echo "migrated by a newer plugin (layout $l; this one knows $LAYOUT): update this account's plugin"; exit 0; }
+  [ "$state" = configured ] || { echo "not set up for coordination ($state): run session-status --init first"; exit 1; }
+  chk=$(bash "$0" --check 2>/dev/null)
+  ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+  jl() { [ -n "$dry" ] || { mkdir -p "$P" && echo "$(ts) $*" >> "$log"; }; }
+  # an id started and never done or failed: the run before stopped midway
+  [ ! -f "$log" ] || awk '$3 != "mv" { s[$2] = $3 } END { for (i in s) if (s[i] == "start") print "resuming " i ": an earlier run stopped midway"; else if (s[i] == "failed:") print "retrying " i ": it failed in an earlier run" }' "$log"
+  # backup FILE…: each existing one into today's backup folder, at its path under the root, once a day
+  backup() {
+    local f b; for f; do
+      [ -f "$f" ] || continue
+      b=$P/migrate-backup/$(date +%F)/${f#"$root"/}; [ -e "$b" ] || { mkdir -p "$(dirname "$b")" && cp -p "$f" "$b"; } || return 1
+    done
+  }
+  failed= open=
+  # every id up to LAYOUT, in run order: m8 before m7 (m9 last), so the move sees (and rewrites) the pending.file m8 brings over
+  for i in 1 2 3 4 5 6 8 7 9; do
+    lines=$(grep "^\[m$i " <<<"$chk") || continue
+    if ! grep -q "^\[m$i auto\] " <<<"$lines"; then echo "$lines"; open+=" m$i"; continue; fi
+    [ -z "$dry" ] || { echo "would fix: $lines"; continue; }
+    jl "m$i start"; rc=0 out=
+    case $i in
+      4) rb=$(retro_brief "$orch" retro rnd); n=${rb%/*}/retro-brief.md
+         mv "$(at "$rb")" "$(at "$n")" && out="$rb → $n" && jl "m$i mv $(at "$rb") → $(at "$n")" || rc=1 ;;
+      7) backup "$root/CLAUDE.local.md" "$root/CLAUDE.md" "$root/.claude/session-status-adapter" "$cfg_person" || rc=1
+         [ "$rc" = 1 ] || { out=$(SI_MIGRATE=1 bash "$0" --write --move 2>&1) || rc=1; }
+         while IFS= read -r x; do case $x in '  '*' → '*) jl "m$i mv ${x#  }" ;; esac; done <<<"$out" ;;
+      8) rf=$sd/coordination.json
+         if tracked "$cfg_person"; then out="the committed .claude/coordination.local.json can't take them"; rc=1
+         else
+           backup "$rf" "$cfg_person" && mkdir -p "$root/.claude" && { [ -e "$cfg_person" ] || echo '{}' > "$cfg_person"; } &&
+             # the person's own value wins; the repo file's goes either way
+             jq --slurpfile r "$rf" 'reduce (["pending", "file"], ["history", "dirs"]) as $k (.;
+               if getpath($k) == null and ($r[0] | getpath($k)) != null then setpath($k; $r[0] | getpath($k)) else . end)' \
+               "$cfg_person" > "$cfg_person.tmp" && mv "$cfg_person.tmp" "$cfg_person" &&
+             jq 'del(.pending.file, .history.dirs) | with_entries(select((.key | IN("pending", "history") | not) or .value != {}))' \
+               "$rf" > "$rf.tmp" && mv "$rf.tmp" "$rf" && out="pending.file, history.dirs → .claude/coordination.local.json" || rc=1
+         fi ;;
+      9) ad=$root/.claude/session-status-adapter; map=$(stale_ad)
+         if [ -z "$map" ]; then out="nothing left to point"   # a run that stopped after the rewrite
+         else
+           backup "$ad" && out=$(RQ=word rew "$ad" check) && RQ=word rew "$ad" > "$ad.tmp" && chmod +x "$ad.tmp" && mv "$ad.tmp" "$ad" || rc=1
+         fi ;;
+      *) out="no automatic fix for m$i in this plugin"; rc=1 ;;
+    esac
+    if [ "$rc" = 0 ]; then jl "m$i done"; echo "[m$i auto] done"; grep . <<<"$out" | sed 's/^ */  /'
+    else why=$(grep -m1 -E '^(refused|move failed):' <<<"$out" || grep . <<<"$out" | tail -1); jl "m$i failed: $why"; echo "[m$i auto] failed: $why"; failed+=" m$i"; fi
+  done
+  [ -z "$dry" ] || { [ -n "$open" ] && echo "stamp: not yet (open:$open)" || echo "stamp: would write layout $LAYOUT to $(tilde "$stamp")"; exit 0; }
+  [ -z "$failed" ] || { echo "stamp: not written (failed:$failed; --check still names it, files left where they are)"; exit 1; }
+  # the detectors decide: an auto fix that left its line is a failure too
+  left=$(bash "$0" --check 2>/dev/null | grep -E '^\[m[0-9]+ auto\] ') && { echo "stamp: not written, still found:"; sed 's/^/  /' <<<"$left"; exit 1; }
+  [ -z "$open" ] || { echo "stamp: not yet (open:$open)"; exit 0; }
+  dec=$(jq -c '.declined // []' "$stamp" 2>/dev/null); ver=$(jq -r .version "$LIB_DIR/.claude-plugin/plugin.json")
+  mkdir -p "$P" && jq -n --argjson l "$LAYOUT" --arg v "$ver" --arg at "$(ts)" --argjson d "${dec:-[]}" \
+    '{layout: $l, plugin: $v, at: $at, declined: $d}' > "$stamp.tmp" && mv "$stamp.tmp" "$stamp" || exit 1
+  echo "stamp: layout $LAYOUT → $(tilde "$stamp")"; exit 0
 fi
 if [ "$state" = parent ]; then
   p=$(slug "$(basename "$parent")")-coordinator
@@ -374,11 +488,11 @@ if [ -n "$move$link" ]; then
       [ -z "$move" ] || [ -z "$tl" ] || { echo "refused: the committed CLAUDE.md holds coordinator path lines; move them to CLAUDE.local.md first, then run this again:"; sed 's/^/  /' <<<"$tl"; exit 1; }
     else secs+=("$root/CLAUDE.md"); fi
   fi
-  # The adapter's quoted paths: its pending line cats the handoff, which would otherwise read a moved file.
+  # The adapter's paths, quoted or not: its pending line cats the handoff, which would otherwise read a moved file.
   ad=$root/.claude/session-status-adapter; ads=
-  if [ -f "$ad" ] && [ -n "$(RQ="'" rew "$ad" check)" ]; then
+  if [ -f "$ad" ] && [ -n "$(RQ=word rew "$ad" check)" ]; then
     if git -C "$root" ls-files --error-unmatch .claude/session-status-adapter >/dev/null 2>&1; then
-      [ -z "$move" ] || { echo "refused: the committed .claude/session-status-adapter names files this would move; point it into $P first, then run this again:"; RQ="'" rew "$ad" check | sed 's/^/  /'; exit 1; }
+      [ -z "$move" ] || { echo "refused: the committed .claude/session-status-adapter names files this would move; point it into $P first, then run this again:"; RQ=word rew "$ad" check | sed 's/^/  /'; exit 1; }
     else ads=1; fi
   fi
   if [ -n "$move" ] && [ "${#conflicts[@]}" -gt 0 ]; then   # --link alone moves nothing: nothing to refuse
@@ -390,23 +504,36 @@ if [ -n "$move$link" ]; then
       if [ "${#left[@]}" = 0 ]; then echo "Move: nothing to move (everything is in $P)"; else echo "Move: nothing to move"; fi
     else
       echo "Moved to $P:"
+      failed= i=0
       for mv in ${moves[@]+"${moves[@]}"}; do
         s=${mv%%	*} d=${mv#*	}
-        mkdir -p "$(dirname "$d")" && mv "$s" "$d" || { echo "move failed: $s → $d (the ones above moved; run this again for the rest)"; exit 1; }
-        echo "  $s → $d"
+        mkdir -p "$(dirname "$d")" && mv "$s" "$d" || { failed="$s → $d"; break; }
+        echo "  $s → $d"; i=$((i + 1))
       done
+      # A move that failed midway: the lines still follow the moves done, not the sources left (or a folder that
+      # moves entry by entry with entries left), so a second run finds each file where its line says.
+      if [ -n "$failed" ]; then
+        keep=()
+        for r in ${relines[@]+"${relines[@]}"}; do
+          rs=${r%%	*}
+          for mv in "${moves[@]:$i}"; do case ${mv%%	*} in "$rs"|"$rs"/*) continue 2 ;; esac; done
+          keep+=("$r")
+        done
+        map=$(printf '%s\n' ${keep[@]+"${keep[@]}"})
+      fi
       for f in ${secs[@]+"${secs[@]}"}; do
         [ -n "$(rew "$f" check)" ] || continue
         rew "$f" > "$f.tmp" && mv "$f.tmp" "$f" || exit 1; echo "  lines in ${f#"$root"/} rewritten"
       done
-      if [ -n "$ads" ]; then
-        RQ="'" rew "$ad" > "$ad.tmp" && chmod +x "$ad.tmp" && mv "$ad.tmp" "$ad" || exit 1; echo "  paths in .claude/session-status-adapter rewritten"
+      if [ -n "$ads" ] && [ -n "$(RQ=word rew "$ad" check)" ]; then
+        RQ=word rew "$ad" > "$ad.tmp" && chmod +x "$ad.tmp" && mv "$ad.tmp" "$ad" || exit 1; echo "  paths in .claude/session-status-adapter rewritten"
       fi
       # emptied folders go, up to the root
-      for mv in ${moves[@]+"${moves[@]}"}; do
+      for mv in ${moves[@]+"${moves[@]:0:$i}"}; do   # only the ones that moved: a kept line may name an empty source
         s=${mv%%	*}; [ ! -d "$s" ] || find "$s" -depth -type d -empty -delete 2>/dev/null
         d=$(dirname "$s"); while case $d in "$root"/*|"$oldrep") true ;; *) false ;; esac && rmdir "$d" 2>/dev/null; do d=$(dirname "$d"); done
       done
+      [ -z "$failed" ] || { echo "move failed: $failed (the ones above moved and their lines follow; run this again for the rest)"; exit 1; }
     fi
     [ "${#left[@]}" = 0 ] || { echo "Left where they are:"; printf '  %s\n' "${left[@]}"; }
     for o in "${mem:+$(at "$mem")}" "${hand:+$(dirname "$hand")}"; do
@@ -425,6 +552,7 @@ if [ -n "$move$link" ]; then
       fi
     fi
   fi
+  [ -z "${SI_MIGRATE:-}" ] || exit 0   # --migrate's m7: the move only, no plain --write (unset keys stay defaults)
   exec bash "$0" "${rest[@]}"
 fi
 
@@ -503,9 +631,6 @@ else worktree_cmd="EnterWorktree (under .claude/worktrees/)"; fi
 # Where things go: the section in CLAUDE.local.md when CLAUDE.md is tracked; the files in the state folder P.
 section_file=CLAUDE.md
 [ -n "$top" ] && git -C "$root" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1 && section_file=CLAUDE.local.md
-orch=$P
-# An existing section's paths win, but a replies folder in the old state dir says nothing about orch.
-case $replies in ''|*/session-orchestration/replies/*) ;; *) orch=$(dirname "${replies%/}") ;; esac; orch=${mem:-$orch}
 urls=-   # built after the corrections, from a corrected repo_slug or tracker_url too, unless urls itself is given
 
 # Corrections from the reply: KEY=VALUE.
@@ -540,8 +665,7 @@ done_rule="its session's done-when held (no command to count)"
 [ -n "$merge_cmd" ] && done_rule="its PR merged (the merge is the unit)"
 [ "$keys" = tracker ] && done_rule="its $key_example ticket moved to done (pass that command's regex as \`--done RX\`)"
 # The retro brief the retro skill reads: beside the memory (not one left outside), else .claude/ (older setups).
-rbd=("$orch" .claude); [ -z "$mem_out" ] || rbd=(.claude)   # the retro reads it beside the memory file
-rb=$(for n in retro; do for d in "${rbd[@]}"; do [ -e "$(at "$d")/$n-brief.md" ] && { echo "$d/$n-brief.md"; exit; }; done; done)
+rb=$(retro_brief "$orch")
 # A brief the section names counts as present.
 briefs=$( [ -n "$review_brief$named_brief" ] || [ -e "$(at "$bd")/review-brief.md" ] || echo "--review-brief: a brief for PR reviewer sessions ($bd/review-brief.md)"
           [ -n "$retro_brief$rb" ] || if [ -n "$mem_out" ]; then echo "--retro-brief: what the weekly retro counts ($P/retro-brief.md, once --move gives this project its own memory there)"

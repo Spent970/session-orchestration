@@ -39,15 +39,28 @@ by a parent. Configured adds:
   `memory.md` and `memory/`, `pending.md`, the briefs. Run the command as printed, in this folder (no `cd`): it
   moves an older setup's replies, memory, handoff (with `<name>/`, `<name>-archive*` beside it), briefs and
   `.claude/tasks/` into P, rewrites their lines in `CLAUDE.local.md` (or an untracked `CLAUDE.md`), the adapter's
-  quoted paths (its `pending)` line), then runs the plain `--write`. A handoff file config `pending.file` names is
-  the person's choice: it stays where it is. It moves only from inside the root or the old state replies folder,
-  never what git tracks there (a remote-less nested repo's files do move), and nothing at all when a target exists in P or the committed `CLAUDE.md`
+  paths, quoted or not (its `pending)` line), then runs the plain `--write`. A handoff file config `pending.file`
+  names is the person's choice: it stays where it is. It moves only from inside the root or the old state replies
+  folder, never what git tracks there (a remote-less nested repo's files do move), and nothing at all when a target exists in P or the committed `CLAUDE.md`
   or adapter names such a path (it names them). A second run says
   `nothing to move`. `--link` adds a `.coordinator` symlink to P in the root, kept out of git. When the tracked
   `CLAUDE.md` holds those files' path lines, the line says so and lists them (`--move` refuses until they're in
   `CLAUDE.local.md`): that edit changes a tracked file, so it's the user's call or a task session's PR;
 - `project Stop hook commits a folder (COMMAND): …` when a Stop hook in the project's `.claude/settings*.json` runs a
-  script that git-commits (a hand-made auto-history). See Propose's **Hand-made history hook**.
+  script that git-commits (a hand-made auto-history). See Propose's **Hand-made history hook**;
+- `[m4 auto] old brief name …` (an `rnd-brief.md` left beside the memory), `[m5 ask] the crontab still runs
+  rnd-weekly …`, `[m6 ask] a start mode in memory …` (a start-mode line in memory while `start.mode` is unset) and
+  `[m9 auto] .claude/session-status-adapter names files already moved to <P> …` (an earlier move left the local
+  adapter's unquoted or double-quoted paths behind: a missing path whose name is in P).
+
+Each line that names an older layout starts with `[mN CLASS] ` (m1 delegation, m2 terminal, second account or review
+inbox, m3 Stop hook, m4 brief name, m5 crontab, m6 start mode, m7 files outside P, m8 repo-file keys, m9 adapter
+paths). CLASS `auto`: `session-status --init --migrate` fixes it unasked; `ask`: it needs the user's yes (m8 asks when
+the repo file is tracked, m7 when the tracked `CLAUDE.md` holds the path lines). The move rewrites every word of a local adapter that names a moved path, quoted or not.
+`--migrate [--dry-run]` runs the check, then fixes each auto one in the order m1–m6, m8, m7, m9, backing up the
+files it rewrites to `P/migrate-backup/<date>/` and logging each step to `P/migrate.log` (a run after one that
+stopped midway resumes from it), lists the ask ones as open, and stamps `P/setup.json` with the layout once none is
+left (`current: layout N` on the next run). `--dry-run` prints what it would do and writes nothing.
 
 ## Propose, then write
 
