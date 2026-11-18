@@ -47,6 +47,8 @@ root() {
   [ -z "$t" ] || { echo "$t"; return; }
   pwd -P
 }
+# enc_root: the root as one folder name (session-orchestration's lib.sh enc_path, the state folders' names).
+enc_root() { root | sed 's/[^A-Za-z0-9]/-/g'; }
 STORE= ORIGIN=
 while :; do
   case ${1:-} in
@@ -55,7 +57,7 @@ while :; do
     *) break ;;
   esac
 done
-[ -n "$STORE" ] || STORE=${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/feedback-projects/$(root | sed 's/[^A-Za-z0-9]/-/g')
+[ -n "$STORE" ] || STORE=${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/feedback-projects/$(enc_root)
 
 field() { sed -n "s/^- $1: //p" "$2" | head -1; }
 title_of() { sed -n '1s/^# //p' "$1"; }
@@ -128,6 +130,6 @@ mark)
   S="- status: $s" awk '/^- status: / && !d { print ENVIRON["S"]; d = 1; next } { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f" ;;
 store) echo "$STORE" ;;
 root) root ;;
-tasks) echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(root | sed 's/[^A-Za-z0-9]/-/g')/tasks" ;;
+tasks) echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(enc_root)/tasks" ;;
 *) sed -n '/^# Usage:/,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//' >&2; exit 2 ;;
 esac
