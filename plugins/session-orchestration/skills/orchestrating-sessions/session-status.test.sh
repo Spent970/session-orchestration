@@ -1453,6 +1453,12 @@ out=$(init "$c" --write --trust=session-status-adapter@"$sha") && [ ! -e "$c/.cl
   [ "$(jq -r '.trusted["session-status-adapter"]' "$c/.claude/coordination.local.json")" = "$sha" ] &&
   grep -q "^configured: " <<<"$(init "$c" --check)" && [ "$(cd "$c" && HOME=$tmp "$here/session-status" --urls)" = team-urls ] &&
   [ -z "$(git -C "$c" status --short)" ] || { echo "init (s2) trusted: urls=$(cd "$c" && HOME=$tmp "$here/session-status" --urls 2>&1) / $(git -C "$c" status --short)"; exit 1; }
+# --check names the team files sessions read before the person's, only those git tracks
+mkdir -p "$c/.claude/coordination/memory"; echo '# Team memory' > "$c/.claude/coordination/memory.md"; echo x > "$c/.claude/coordination/memory/misc.md"
+echo '# Team review' > "$c/.claude/coordination/review-brief.md"
+init "$c" --check | grep -qx 'team: adapter (trusted)' || { echo "init (s2) team line, untracked files: $(init "$c" --check)"; exit 1; }
+git -C "$c" add -f .claude/coordination && gc "$c" -m 'team files'
+init "$c" --check | grep -qx 'team: memory, review-brief, adapter (trusted)' || { echo "init (s2) team line: $(init "$c" --check)"; exit 1; }
 echo '# changed' >> "$c/.claude/coordination/session-status-adapter"
 [ -z "$(cd "$c" && HOME=$tmp "$here/session-status" --urls 2>/dev/null)" ] &&
   [ "$(cd "$c" && HOME=$tmp "$here/session-status" --urls 2>&1)" = "warning: session-status-adapter changed upstream: run setup to review it" ] ||

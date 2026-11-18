@@ -107,6 +107,19 @@ stop "$root"
 GS=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$S").git
 [ "$(git --git-dir="$GS" ls-files 2>&1 | paste -sd' ' -)" = "memory.md pending.md replies/S-1.md" ] && [ ! -d "$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$S/replies").git" ] ||
   fail "state folder: $(git --git-dir="$GS" ls-files 2>&1)"
+# a folder the project's git tracks (team files, a committed docs folder) is skipped; an untracked one beside it kept;
+# the repo file's pending.file and history.dirs are dropped (personal paths)
+root=$(mkroot tracked r); git -C "$root" init -q; mkdir -p "$root/docs" "$root/.claude/coordination" "$root/mine"
+echo t > "$root/docs/t.md"; echo m > "$root/.claude/coordination/memory.md"; echo x > "$root/mine/x.md"
+git -C "$root" add docs .claude/coordination
+echo '{"history": {"dirs": ["docs", ".claude/coordination", "mine"]}}' > "$root/.claude/coordination.local.json"
+echo '{"pending": {"file": "docs/p.md"}, "history": {"dirs": ["elsewhere"]}}' > "$root/.claude/coordination/coordination.json"
+echo '#!/bin/sh' > "$root/.claude/session-status-adapter"; chmod +x "$root/.claude/session-status-adapter"
+stop "$root"
+for d in docs .claude/coordination; do [ ! -d "$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root/$d").git" ] || fail "a history repo for tracked $d"; done
+[ "$(git --git-dir="$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root/mine").git" ls-files 2>&1)" = x.md ] || fail "untracked listed folder skipped"
+rm "$root/.claude/coordination.local.json"
+[ -z "$(cd "$root" && . "$here/../../lib.sh" && config pending.file; config history.dirs)" ] || fail "the repo file set a personal path"
 # a history.dirs that isn't a list warns
 echo '{"history": {"dirs": "docs"}}' > "$root/.claude/coordination.local.json"
 (cd "$root" && . "$here/../../lib.sh" && config history.dirs 2>&1) | grep -q 'history.dirs.* is not valid' || fail "no warning for a bad history.dirs"

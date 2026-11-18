@@ -66,17 +66,19 @@ by a parent. Configured adds:
   file with its sha256 and the `--trust=REL@SHA` arguments. Show the user each file whole and ask in the same round;
   pass the `--trust` arguments only on their yes. `--trust` refuses a file that changed since it was shown. A trusted
   committed adapter is used instead of writing a local one; declined, a local adapter is written as usual.
-- **Hand-made history hook** (the `--check` line above): read the script, find the folder it commits, and ask the
-  user in one plain-text round whether the plugin's history hook takes it over: the folder goes into `history.dirs`
-  (Config), the hook entry leaves `.claude/settings*.json`, and the script goes if nothing else runs it. Its repo, at
-  the top of the folder with no remote, is adopted with its history; one commit per repo per turn, the session's
-  name in the message, as such a hook does. Change nothing before their yes; a folder with a remote isn't adopted
-  (its history would start over in an outside repo): say so and leave the hook.
+- **Hand-made history hook** (the `--check` line above): read the script, find the folder it commits, and ask the user
+  in one plain-text round whether the plugin's history hook takes it over: the folder goes into `history.dirs` in
+  `.claude/coordination.local.json` (Config), the hook entry leaves `.claude/settings*.json`, and the script goes if
+  nothing else runs it. Its repo, at the top of the folder with no remote, is adopted with its history; one commit per
+  repo per turn, the session's name in the message, as such a hook does. Change nothing before their yes; a folder
+  with a remote isn't adopted (its history would start over in an outside repo): say so and leave the hook.
 - **Optional briefs**, on the user's request (`--init` lists the missing ones, also once set up): `--write
   --review-brief` writes `review-brief.md` beside the handoff file (P for a new setup); name it in each PR reviewer's
-  first prompt (`Review <repo>#<id> (<KEY>). Brief: <path>`). `--write --retro-brief` writes `retro-brief.md` beside
-  the memory file (older setups: `.claude/retro-brief.md`; `--rnd-brief` still works, and --write renames an old
-  `rnd-brief.md`), which the `retro` skill reads.
+  first prompt (`Review <repo>#<id> (<KEY>). Brief: <path>`). A repo that commits the team's conventions in
+  `.claude/coordination/review-brief.md` (`--check`'s `team:` line lists `review-brief`) gets both, the team's first:
+  `Brief: .claude/coordination/review-brief.md, then <path>`; the personal one wins where they differ. `--write
+  --retro-brief` writes `retro-brief.md` beside the memory file (older setups: `.claude/retro-brief.md`; `--rnd-brief`
+  still works, and --write renames an old `rnd-brief.md`), which the `retro` skill reads.
 - **Retro schedule**, when the user wants scheduled retro runs or a `--check` shows `features.retro` on with no
   agent (`skills/retro/retro-run --status ROOT` in the plugin says `not installed`): propose, in one plain-text round,
   `features.retro: true` and a `retro` block in the person file (`schedule` `mon 12:00` unless they name another,
@@ -92,9 +94,10 @@ repo's owner wants it, on the user's request: `session-status --init --write --s
 `.claude/coordination/coordination.json` (repo keys only) out of the exclude and, when an ignore rule still hides it
 (an exclude with `.claude/*`), adds `!/.claude/coordination/` and says so. The user commits it, with their usual PR.
 What may be committed there: `coordination.json`; `memory.md` and `memory/` (team memory, reached through the
-coordinator's prune PR); a shared adapter (`session-status-adapter`) and modules (`<kind>/<name>.sh`), each run by a
-person only once trusted. Never committed: anything in `coordination.local.json` (delegation, terminal, accounts,
-`trusted`, `team`), your adapter, your memory and replies.
+coordinator's prune PR); `review-brief.md` (how the team reviews, read before each person's brief); a shared adapter
+(`session-status-adapter`) and modules (`<kind>/<name>.sh`), each run by a person only once trusted. Never committed:
+anything in `coordination.local.json` (delegation, terminal, accounts, `trusted`, `team`), your adapter, your memory
+and replies.
 
 A folder that isn't a repo itself (a workspace of repos) uses the `team` person key: the path, relative to the
 folder, of the repo holding `.claude/coordination/`. Setup finds it one level down and proposes it; with several,
@@ -115,7 +118,8 @@ below reads the project's:
   any key but `team` (the project's file only), meant for the person-wide ones (`feedback`, `telemetry`). Setup
   doesn't write it.
 
-`handoff.*` and `compact.window` are person-only too: dropped from the repo file, and setup writes none of them.
+`handoff.*`, `compact.window`, `pending.file` and `history.dirs` are person-only too: dropped from the repo file (the
+last two name personal state), and setup writes `pending.file` only into the person file.
 Set `autoCompactWindow` in Claude Code settings to `compact.window` (220000). An env
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (a background daemon's included) overrides it, and the context-watch hook's
 mismatch line says so.
@@ -145,8 +149,8 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `feedback.mode` | `auto` \| `pr` \| `fork-pr` \| `issue` \| `local`: how plugin feedback cases are sent (`../orchestrating-sessions/feedback.md`) | `auto`: `pr` with `feedback.repo_dir` set, else `fork-pr` when `gh` is signed in, else `issue`; setup doesn't write it |
 | `feedback.repo_dir` | a clone of the plugin repo you can push to (`~` expanded); its coordinator is the plugin coordinator, which owns every plugin feedback case (`features/plugin-coordinator.md`) | unset; person key; setup doesn't write it |
 | `feedback.project_dir` | where this project's own feedback cases go (`feedback add --project`; `~` expanded, relative to the root; keep it out of git). A project key: never in the person-wide config.json | unset: `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<root, encoded>`; setup doesn't write it |
-| `pending.file` | the coordinator's handoff file, `*.md`: relative to the root (e.g. `docs/pending.md`), `~/…` or absolute: turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`) | unset; setup doesn't write it |
-| `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`) | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
+| `pending.file` | the coordinator's handoff file, `*.md`: relative to the root (e.g. `docs/pending.md`), `~/…` or absolute: turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`). Person only | unset; setup writes it only when `--move` moves the handoff file |
+| `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`). A folder git tracks (team files, a committed docs folder) is skipped: its history is the project's git. Person only | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
 | `pane.sections` | a JSON object, a coordinator pane section's slug to `open` \| `line` \| `hidden` (e.g. `{"pending": "hidden", "idle": "line"}`; slugs and states: `../orchestrating-sessions/status-reference.md`, The pane in detail). Read from the project's `.claude/coordination.local.json` only, never the repo file or the person-wide one; a press on a section's title writes it there (`session-status --pane-section SLUG STATE`) | unset: every section open, Resolved one line; a folded Waiting on you, Decisions or Needs action still draws its new items; person-only; setup doesn't write it |
 | `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `retro.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
 | `plan.enabled` | `true` \| `false`: `session-status --plan` splits a design into chunks | `true`; setup doesn't write it |
