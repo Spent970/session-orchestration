@@ -750,13 +750,17 @@ async function runAction($: EngineInterface, a: PaneAction) {
   let free = false
   await update($, actionBusy, cur => ((free = cur === null) ? a.label : cur))
   if (!free) return
-  let result: Omit<ActionResult, 'at'>
+  let result: Omit<ActionResult, 'at'>, retried = ''
   try {
     const cwd = (await read($, actions))?.root
     if (!cwd) throw new Error('project root unknown (session-status --root)')
-    const r = await runBash($, ['-c', a.command], { cwd, timeoutMs: 300_000 })
-    const last = `${r.stdout}\n${r.stderr}`.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
-    result = { label: a.label, ok: r.exitCode === 0, line: r.exitCode === 0 ? last : `exit ${r.exitCode}${last ? `: ${last}` : ''}` }
+    // The Bash tool with the press as consent, as Run handed: a raw process.run is refused when it repeats a denied
+    // Bash call. A subshell, so the root's cd doesn't carry over to the coordinator's next call.
+    const command = `(cd '${cwd.replaceAll("'", `'\\''`)}' && {\n${a.command}\n})`
+    const o = bashOutcome(await $.tool.call({ tool: 'Bash', command, description: 'Project action from the coordinator pane', timeout: 300_000,
+      consent: `The user pressed a project action in the coordinator pane that runs this exact command: ${command}` }))
+    result = { label: a.label, ok: o.ok, line: o.line }
+    if (o.retry) retried = command
   } catch (err) {
     result = { label: a.label, ok: false, line: err instanceof Error ? err.message : String(err) }
   } finally {
@@ -764,6 +768,7 @@ async function runAction($: EngineInterface, a: PaneAction) {
   }
   const at = new Date(await $.clock.now()).toTimeString().slice(0, 5)
   await update($, actionResult, () => ({ ...result, at }))
+  if (retried) await $.prompt.submit({ text: actionRetryText(retried, result.line) })
   await inFlight // a sweep started before the action ran would show the state before it
   await refresh($)
 }
@@ -1270,6 +1275,17 @@ export const USER_NO = /by the user|user doesn't want to proceed/i
 export const retryText = (h: Handed, line: string) =>
   `Coordinator pane: the user pressed Run on the command session ${h.session.slice(0, 8)} handed over for ${h.key} (${h.what}), and the pane's own call was ${line}. Make that Bash call yourself now, this exact command, so your permission prompt asks the user: ${h.command}. Then per pane.md (Handed-over commands).`
 
+// A pane Bash call's outcome: refused (retry unless it was the user's own No), or its result with runTail's line.
+export function bashOutcome(r: ToolCallResult<'Bash'>) {
+  if (r.deny !== undefined) return { ok: false, line: `refused: ${oneLine(r.deny)}`, retry: !USER_NO.test(r.deny) }
+  const res = r.result
+  const stderr = typeof res === 'object' && res !== null && 'stderr' in res && typeof res.stderr === 'string' ? res.stderr : ''
+  return { ok: !r.isError, line: runTail(r.text ?? '', stderr, !r.isError), retry: false }
+}
+// A refused project action, for the coordinator's own Bash call, whose permission prompt can ask the user. Not asUser.
+export const actionRetryText = (command: string, line: string) =>
+  `Coordinator pane: the user pressed a project action, and the pane's own call was ${line}. Make that Bash call yourself now, this exact command, so your permission prompt asks the user: ${command}`
+
 // Handed commands this pane removed, with when it handed them: a read that raced the removal can't bring one back,
 // while the same command handed again later (a newer `at`) shows.
 const droppedHanded = new Map<string, number>()
@@ -1352,15 +1368,7 @@ async function runHanded($: EngineInterface, h: Handed) {
   let ok = false, line = '', retry = false
   try {
     const r = await $.tool.call({ tool: 'Bash', command: h.command, description: h.what, timeout: 600_000, consent: runConsent(h) })
-    if (r.deny !== undefined) {
-      line = `refused: ${oneLine(r.deny)}`
-      retry = !USER_NO.test(r.deny)
-    } else {
-      ok = !r.isError
-      const res = r.result
-      const stderr = typeof res === 'object' && res !== null && 'stderr' in res && typeof res.stderr === 'string' ? res.stderr : ''
-      line = runTail(r.text ?? '', stderr, ok)
-    }
+    ;({ ok, line, retry } = bashOutcome(r))
   } catch (err) {
     line = err instanceof Error ? err.message : String(err)
   }

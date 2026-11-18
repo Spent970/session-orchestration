@@ -47,44 +47,59 @@ test('an action shows while its when passes and the fix line is there; pressing 
   mock.clock(on)
   on('session.id', async () => ({ value: 'sess-c' }))
   let signedOut = true
-  const runs: { argv: string[]; cwd?: string }[] = []
   on('process.run', async (_, e) => {
-    runs.push({ argv: [...e.argv], cwd: e.init?.cwd })
     const arg = e.argv[2] ?? ''
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     if (e.argv[1] === '-c') {
       if (arg === '! gh auth status') return out('', signedOut ? 0 : 1)
-      if (arg === 'gh auth login') {
-        signedOut = false
-        return out('waiting\nconnected\n')
-      }
-      if (arg === 'false-cmd') return out('nope', 3)
     }
     if (arg === '--root') return out('/proj\n')
     if (arg === '--pending' || arg === '--urls' || arg === '--agents') return out('')
-    return out(signedOut ? 'Tracker search failed (signed out? try: gh auth login):\n  timeout\nfix: Sign in → gh auth login\nfix: Broken → false-cmd' : 'PROJ-1    Open           no-wt | sess:—')
+    return out(signedOut ? 'Tracker search failed (signed out? try: gh auth login):\n  timeout\nfix: Sign in → gh auth login\nfix: Broken → false-cmd\nfix: Denied → denied-cmd' : 'PROJ-1    Open           no-wt | sess:—')
   })
   on('fs.exists', async (_, e) => ({ value: e.path === '/proj/.claude/coordinator-actions.json' }))
   on('fs.read', async () => ({ value: JSON.stringify([
     { label: 'Sign in', hotkey: 'v', command: 'gh auth login', when: '! gh auth status' },
     { label: 'Bad', hotkey: 'r', command: 'x' },
   ]) }))
+  const prompts: string[] = []
+  on('prompt.submit', async (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
   on('ui.open', async () => ({ value: { isPlaced: true } }))
+  // A press runs through the Bash tool with the press as consent: a raw process.run is refused as a repeat of a denied call.
+  const calls: { command: string; consent?: string }[] = []
+  on('tool.call', { tool: 'Bash' }, async (_, e) => {
+    calls.push({ command: e.command, consent: (e as { consent?: string }).consent })
+    if (e.command.endsWith('\ngh auth login\n})')) {
+      signedOut = false
+      return { result: { stdout: 'waiting\nconnected', stderr: '', interrupted: false }, text: 'waiting\nconnected' }
+    }
+    if (e.command.endsWith('\ndenied-cmd\n})')) return { deny: 'Permission to use Bash has been denied.' }
+    return { result: { stdout: 'nope', stderr: '', interrupted: false }, text: 'nope\nExit code 3', isError: true }
+  })
 
   await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
   await ui.press({ key: 'refresh' })
-  expect((await ui.find({ type: 'Button', key: 'sec-Actions' }))?.text).toMatch(/ACTIONS 2 /)
+  expect((await ui.find({ type: 'Button', key: 'sec-Actions' }))?.text).toMatch(/ACTIONS 3 /)
   expect(await ui.find({ type: 'Button', key: 'action-Sign in' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /hotkey "r" is the pane's own \(Refresh\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^fix:/ })).toBeUndefined() // shown as actions, not as warnings
 
   await ui.press({ key: 'action-Broken' })
   expect(await ui.find({ type: 'Text', text: /✗ Broken/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /exit 3: nope/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /nope \| Exit code 3/ })).toBeDefined()
+
+  await ui.press({ key: 'action-Denied' })
+  expect(await ui.find({ type: 'Text', text: /refused: Permission to use Bash has been denied/ })).toBeDefined()
+  // Not the user's own No: the coordinator makes the call itself, where its permission prompt can ask.
+  expect(prompts.at(-1)).toMatch(/project action, and the pane's own call was refused: .*Make that Bash call yourself now, this exact command, so your permission prompt asks the user: \(cd '\/proj' && \{\ndenied-cmd\n\}\)$/s)
 
   await ui.press({ key: 'action-Sign in' })
-  expect(runs.find(r => r.argv[2] === 'gh auth login')?.cwd).toBe('/proj')
+  expect(calls.at(-1)).toEqual({ command: "(cd '/proj' && {\ngh auth login\n})",
+    consent: "The user pressed a project action in the coordinator pane that runs this exact command: (cd '/proj' && {\ngh auth login\n})" })
   expect(await ui.find({ type: 'Text', text: /✓ Sign in/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /connected/ })).toBeDefined()
   // The refresh after it: Sign in, so neither the file's when nor a fix line offers it.

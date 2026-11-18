@@ -22,6 +22,9 @@ only way its command reaches the user: `hand_command` refuses the same command (
 package scope or an `@version`), so a sign-in kept as an action with a `when` check is a button, never an ask or a
 handed command. Don't queue an ask for it either: tell the user its key. `hand_command` also refuses an interactive command (`claude attach`, a bare or resumed
 `claude`, an editor, pager or `tmux`): Run is a Bash call with no terminal, so the session gives the user its `! ` line.
+A press whose call is refused by anything but the user's own No (a rule, the classifier, no prompt shown) arrives as
+`Coordinator pane: the user pressed a project action, …`: make that Bash call yourself, the exact command it names,
+so your permission prompt asks the user; then tell the user the outcome.
 
 ## Card actions
 
