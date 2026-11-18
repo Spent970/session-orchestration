@@ -47,8 +47,10 @@ the same settings. Then:
 - Messages, `reply`, the hooks and the approval gate work as in a terminal; a Desktop coordinator shows in
   `claude agents` as an interactive session.
 - Desktop opens no tabs: with the terminal setting `plain` (the default; it's per person, so a terminal recorded by an
-  earlier setup still opens its tabs) Attach and Logs copy their command, and a coordinator handover prints the successor's
-  command for you to run in that Terminal (the successor is a terminal session from then on).
+  earlier setup still opens its tabs) Attach and Logs copy their command.
+- A coordinator handover starts the successor as a Desktop session (`start_session`), so it shows in the sidebar and
+  takes the old one's pin; a handover the coordinator starts on its own shows a New task card for you to start. The old
+  coordinator is left running: stop it, don't archive it (archiving takes the successor with it).
 
 ## Install
 

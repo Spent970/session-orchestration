@@ -1056,9 +1056,27 @@ printf '{"type":"assistant","uuid":"row-f","quotaLimits":{"status":"rejected","r
 out=$(as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -qF "claude --model opus --effort medium -n p-coordinator-next" <<<"$out" || { echo "--successor kept fable past its limit: $rc $out"; exit 1; }
 rm "$proj/$o.jsonl" "$proj/ffffffff-0000-0000-0000-000000000000.jsonl" "$u/cfg.fable"
-# From Claude Code Desktop (no tab of its own) it says where to run the command.
+# From Claude Code Desktop: a start_session call (an app session, in the sidebar); with --account the CLI command
+# and where to run it.
 out=$(CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p as "$o" --successor) && rc=0 || rc=$?
-[ "$rc" = 2 ] && grep -q "^This is Claude Code Desktop: tell the user to run it in the session's Terminal" <<<"$out" || { echo "--successor from Desktop: $rc $out"; exit 1; }
+[ "$rc" = 2 ] && grep -q '^This is Claude Code Desktop: start the successor as an app session. Call mcp__ccd_session__start_session' <<<"$out" &&
+  grep -qF 'title "p-coordinator-next", context "fresh", use_worktree false, model "opus", effort "medium",' <<<"$out" &&
+  grep -qF "First run \`$here/session-status --successor --started p-coordinator\`" <<<"$out" && grep -qF -- '--await ready` (Bash' <<<"$out" &&
+  ! grep -q 'claude --model' <<<"$out" || { echo "--successor from Desktop: $rc $out"; exit 1; }
+out=$(CLAUDE_CODE_ENTRYPOINT=claude-desktop-3p as "$o" --successor --account "$tmp/cfg") && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -q "^This is Claude Code Desktop: tell the user to run it in the session's Terminal" <<<"$out" || { echo "--successor --account from Desktop: $rc $out"; exit 1; }
+# Its title not taken as the name: the successor recorded its id (--started), so it counts as NAME-next.
+setacct cfg "$(sess "$o" p-coordinator idle 1 interactive),$(sess "$x" 'New session' idle 1 interactive)"
+[ "$(as "$x" --name-check p-coordinator)" = "held other $o" ] && as "$x" --successor --started p-coordinator | grep -q '^recorded:' &&
+  [ "$(as "$x" --name-check p-coordinator)" = "held next $o" ] && [ "$(as "$z" --name-check p-coordinator)" = "held other $o" ] &&
+  { as "$z" --successor --started p-coordinator >/dev/null; [ $? = 3 ]; } && { as "$x" --successor --started q-coordinator >/dev/null; [ $? = 2 ]; } &&
+  { as "$o" --successor || [ $? = 3 ]; } | grep -qF '"p-coordinator-next" (0b0b0b0b) runs already' &&
+  ! as "$x" --await name --timeout 1 >/dev/null && as "$o" --await ready --timeout 2 | grep -q '^ready: "p-coordinator-next" (0b0b0b0b)' &&
+  setacct cfg "$(sess "$o" p-coordinator-prev-1 idle 1 interactive),$(sess "$x" 'New session' idle 1 interactive)" &&
+  as "$x" --await name --timeout 2 | grep -q '^"p-coordinator" is free' && as "$o" --successor --done >/dev/null &&
+  CLAUDE_CODE_ENTRYPOINT=claude-desktop as "$x" --await done --timeout 2 | grep -q 'never archive it' &&
+  [ ! -e "$tmp/.cache/session-status/handover/p-coordinator.next" ] || { echo "--successor --started, a Desktop successor by id"; exit 1; }
+as "$x" --successor --started 'a b' >/dev/null && { echo "--successor --started took a bad name"; exit 1; }
 # A coordinator that was a successor itself, its tab still titled NAME-next: its own tab is retitled NAME first, so
 # open_view opens the successor's tab instead of selecting the caller's (a terminal that reuses a tab by its title).
 mkdir -p "$tmp/.config/session-orchestration/terminals"; echo '{"terminal": "fake"}' > "$tmp/.config/session-orchestration/config.json"

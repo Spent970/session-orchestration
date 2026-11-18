@@ -412,10 +412,13 @@ fi
 #   --await name                  the successor, at the end of its Start: writes NAME.ready, waits until no other live
 #                                 session holds NAME (the old one renamed itself)
 #   --successor --done            the old one, renamed and done forwarding: writes NAME.done
+#   --successor --started NAME    a Desktop successor, first thing: writes its own id to NAME.next, so it counts as
+#                                 NAME-next whatever name start_session's title gave it
 #   --await done                  the successor, named NAME: once NAME.done is there and the old session idle, closes
 #                                 the old one's terminal (close_tty: its tab, or only its split beside others)
 #   --name-check NAME             `free|held next|other [HOLDER_ID]`: whether a live session other than the caller holds
-#                                 NAME, and whether the caller is NAME-next (open_pane and name_session ask it)
+#                                 NAME, and whether the caller is NAME-next (by name, or the id in NAME.next; open_pane
+#                                 and name_session ask it)
 # A successor's --await exits early (exit 3, first line NOT DONE) on an unread inbox entry (it prints them): act on
 # them, mark them read, re-arm.
 # Each --await polls every SESSION_STATUS_AWAIT_S (10) seconds and gives up after --timeout SECS (3600), exit 1.
@@ -426,6 +429,13 @@ ho_live() {
   rm -rf "$TMP"; unset TMP; [ -z "$f" ] || { echo "couldn't list an account's sessions; try again" >&2; return 1; }
 }
 ho_field() { awk -F'\t' -v k="$1" -v v="$2" -v c="$3" '$k == v { print $c; exit }' <<<"$live"; }   # COLUMN VALUE OUTPUT_COLUMN
+# ho_next NAME: the id a Desktop successor recorded in NAME.next (--successor --started), if any
+ho_next() { cat "$HO_DIR/$1.next" 2>/dev/null; }
+# ho_name ID: ID's listed name (empty when not listed), or NAME-next when ID is recorded in NAME.next and isn't listed
+# as NAME yet: a Desktop successor whose start_session title didn't become its name
+ho_name() { local m f b; [ -n "$1" ] && [ -n "$(ho_field 1 "$1" 1)" ] || return 0; m=$(ho_field 1 "$1" 2)
+  for f in "$HO_DIR"/*.next; do [ "$(cat "$f" 2>/dev/null)" = "$1" ] || continue; b=${f##*/}; b=${b%.next}
+    [ "$m" = "$b" ] || m=$b-next; break; done; echo "$m"; }
 ho_base() { local b=$1; [[ $b =~ ^(.+)-prev-[0-9]+$ ]] && b=${BASH_REMATCH[1]}; echo "${b%-next}"; }
 ho_tty() { local p t; p=$(ho_field 1 "$1" 9); [ -n "$p" ] && t=$(ps -o tty= -p "$p" 2>/dev/null | tr -d ' ') && [ -n "$t" ] && [[ $t != \?* ]] && echo "$t"; }   # no tty: ?? on macOS, ? on Linux
 # ho_retitle ID TITLE: ID's terminal tab titled TITLE (after load_terminal); fails when it has no tty or the terminal didn't
@@ -449,15 +459,26 @@ ho_shown_tty() {
 if [ "${1:-}" = --name-check ]; then
   [ -n "${2:-}" ] || { echo "usage: session-status --name-check NAME" >&2; exit 2; }
   ho_live || exit 1
-  awk -F'\t' -v me="${CLAUDE_CODE_SESSION_ID:-}" -v n="$2" '$1 == me { mine = $2 } $1 != me && $2 == n && h == "" { h = $1 }
+  awk -F'\t' -v me="${CLAUDE_CODE_SESSION_ID:-}" -v n="$2" -v mine="$(ho_name "${CLAUDE_CODE_SESSION_ID:-}")" '$1 != me && $2 == n && h == "" { h = $1 }
     END { print (h == "" ? "free" : "held") " " (mine == n "-next" ? "next" : "other") (h == "" ? "" : " " h) }' <<<"$live"
   exit 0
 fi
 if [ "${1:-}" = --successor ]; then
-  shift; acct=${CLAUDE_CONFIG_DIR:-$HOME/.claude} fin=
-  case ${1:-} in --account) acct=${2:-}; shift 2 || true ;; --done) fin=1; shift ;; esac
+  shift; acct=${CLAUDE_CONFIG_DIR:-$HOME/.claude} fin= given=
+  case ${1:-} in --account) acct=${2:-} given=1; shift 2 || true ;; --done) fin=1; shift ;;
+    --started) id=${CLAUDE_CODE_SESSION_ID:-}; [[ ${2:-} =~ ^[A-Za-z0-9._-]+$ ]] && [ $# = 2 ] && [ -n "$id" ] ||
+        { echo "usage: session-status --successor --started NAME (as the successor, CLAUDE_CODE_SESSION_ID set)"; exit 2; }
+      ho_live || exit 1
+      # only while another live session (the old coordinator) holds NAME, and no other live successor is recorded
+      [ -n "$(awk -F'\t' -v me="$id" -v n="$2" '$1 != me && $2 == n { print $1; exit }' <<<"$live")" ] ||
+        { echo "no other live session holds \"$2\": no handover to succeed in"; exit 2; }
+      r=$(ho_next "$2"); [ -z "$r" ] || [ "$r" = "$id" ] || [ "$(ho_name "$r")" != "$2-next" ] ||
+        { echo "\"$2-next\" is recorded already (${r:0:8}, live): not recorded"; exit 3; }
+      mkdir -p "$HO_DIR"; echo "$id" > "$HO_DIR/$2.next"
+      echo "recorded: you count as \"$2-next\" whatever your name; go on with your Start."; exit 0 ;;
+  esac
   acct=${acct/#\~/$HOME}; acct=${acct%/}
-  [ $# = 0 ] && [ -d "$acct" ] || { echo "usage: session-status --successor [--account CONFIG_DIR] | --successor --done"; exit 2; }
+  [ $# = 0 ] && [ -d "$acct" ] || { echo "usage: session-status --successor [--account CONFIG_DIR] | --successor --done | --successor --started NAME"; exit 2; }
   ho_live || exit 1; id=${CLAUDE_CODE_SESSION_ID:-}; me=$(ho_field 1 "$id" 2)
   [ -n "$id" ] && [ -n "$me" ] || { echo "this session isn't listed (CLAUDE_CODE_SESSION_ID ${id:-unset}): hand over by hand"; exit 2; }
   n=$(ho_base "$me"); mkdir -p "$HO_DIR"
@@ -469,9 +490,10 @@ if [ "${1:-}" = --successor ]; then
     echo "done: end your turn; the successor closes this session's terminal once it is idle (forward anything still arriving first)."; exit 0
   fi
   [ "$me" = "$n" ] || { echo "\"$me\" isn't a coordinator's own name: not handed over"; exit 2; }
-  nx=$(ho_field 2 "$n-next" 1)
+  nx=$(ho_field 2 "$n-next" 1); r=$(ho_next "$n")
+  [ -n "$nx" ] || [ -z "$r" ] || [ "$r" = "$id" ] || [ "$(ho_name "$r")" != "$n-next" ] || nx=$r
   [ -z "$nx" ] || { echo "\"$n-next\" (${nx:0:8}) runs already: arm \`$SELF --await ready\` in the background"; exit 3; }
-  rm -f "$HO_DIR/$n.ready" "$HO_DIR/$n.done"
+  rm -f "$HO_DIR/$n.ready" "$HO_DIR/$n.done" "$HO_DIR/$n.next"
   # The name goes into a command typed into a shell: only the characters name_session and open_pane give one.
   [[ $n =~ ^[A-Za-z0-9._-]+$ ]] || { echo "\"$n\" has characters a shell would read (a /rename?): not handed over; rename it with name_session first"; exit 2; }
   # SESSION_STATUS_CLAUDE: the claude command, for a dev build's successor (`claude --plugin-dir DIR`)
@@ -481,6 +503,19 @@ if [ "${1:-}" = --successor ]; then
   [[ ${sm:-} != *fable* ]] || ! fable_no "$acct" || sm=   # no fable there (or its Fable limit is hit): config's
   [ -n "${sm:-}" ] || { cm=$(FABLE_ACCT=$acct config plan.models.coordinator 2>/dev/null); sm=${cm%%/*}; se=${cm#*/}; }   # never config's effort on another model
   cmd="${SESSION_STATUS_CLAUDE:-claude} --model $(printf %q "$sm")${se:+ --effort $se} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
+  next="Then arm \`$SELF --await ready\` (Bash, run_in_background) and end your turn. From now on act on no message: forward each to the inbox (\`$SELF --inbox-add --from '<sender name> (<id8>)'\`, its text on stdin)."
+  # Desktop (claude-desktop, claude-desktop-3p), same account: the coordinator starts the successor as an app session
+  # (start_session), so it stays in the sidebar. The successor records its id first: whether start_session's title
+  # becomes the name `claude agents` lists is unverified.
+  if [[ ${CLAUDE_CODE_ENTRYPOINT:-} == claude-desktop* ]] && [ -z "$given" ]; then
+    echo "This is Claude Code Desktop: start the successor as an app session. Call mcp__ccd_session__start_session (ToolSearch it) with:"
+    echo "  title \"$n-next\", context \"fresh\", use_worktree false${sm:+, model \"$sm\"}${se:+, effort \"$se\"},"
+    echo "  initiation \"user_asked\" if the user asked for this handover in this turn, else \"own_initiative\" (a card the user starts),"
+    echo "  background: goal, decisions and constraints from <replies>/coordinator-handover.md,"
+    echo "  prompt: Act as a coordinator. You succeed \"$n\" (${id:0:8}). First run \`$SELF --successor --started $n\`, then end your Start with the successor step (${SELF%/*}/handover.md)."
+    echo "Once it runs: if mcp__ccd_session_mgmt__get_session \"self\" says pinned, pin the new session (mcp__ccd_sidebar__set_pinned, its local_ id) and unpin yourself. Never archive this session: archiving takes its side sessions, the successor too, with it. An approval you relay in the handover note may not verify for the successor (its prompt isn't typed by the user): if its approval check rejects one, it asks the user again."
+    echo "$next"; exit 2
+  fi
   case $acct in "$HOME/.claude") pre='env -u CLAUDE_CONFIG_DIR ' ;; *) pre="CLAUDE_CONFIG_DIR=$(tilde "$acct") " ;; esac
   load_terminal
   # a coordinator that was a successor itself may still have the NAME-next tab title (--await name's retitle didn't
@@ -492,7 +527,6 @@ if [ "${1:-}" = --successor ]; then
   # open_view selects an open tab with the title instead: a successor that exited left it, and nothing was started
   [ "$rc" != 0 ] || [ "${out#reused}" = "$out" ] ||
     { echo "a tab titled \"$n-next\" is open already ($out), so nothing started: close it (a successor that exited?), then run this again.$own"; exit 3; }
-  next="Then arm \`$SELF --await ready\` (Bash, run_in_background) and end your turn. From now on act on no message: forward each to the inbox (\`$SELF --inbox-add --from '<sender name> (<id8>)'\`, its text on stdin)."
   # Desktop (claude-desktop, claude-desktop-3p) draws no tab of its own; its Terminal panel runs the successor as a
   # CLI session beside the chat.
   desk=; [[ ${CLAUDE_CODE_ENTRYPOINT:-} != claude-desktop* ]] || desk="This is Claude Code Desktop: tell the user to run it in the session's Terminal (its title bar, or Ctrl+\`) or any terminal app; the successor is a terminal session from then on."
@@ -509,7 +543,7 @@ if [ "${1:-}" = --await ]; then
   case $what in ready|renamed|name|done) ;; *) what= ;; esac
   [ -n "$what" ] && [[ $tmo =~ ^[1-9][0-9]*$ ]] && [ $# = 0 ] || { echo "usage: session-status --await ready|renamed|name|done [--timeout SECS]"; exit 2; }
   every=${SESSION_STATUS_AWAIT_S:-10}; end=$(( $(date +%s) + tmo )); id=${CLAUDE_CODE_SESSION_ID:-}
-  ho_live || exit 1; me=$(ho_field 1 "$id" 2)
+  ho_live || exit 1; me=$(ho_name "$id")
   [ -n "$id" ] && [ -n "$me" ] || { echo "this session isn't listed (CLAUDE_CODE_SESSION_ID ${id:-unset})"; exit 2; }
   n=$(ho_base "$me"); mkdir -p "$HO_DIR"
   [ "$what" = ready ] || [ "$what" = renamed ] || [ "$me" != "$n" ] || [ "$what" = done ] || { echo "you are \"$me\", not \"$n-next\": no handover to wait on"; exit 2; }
@@ -522,7 +556,7 @@ if [ "${1:-}" = --await ]; then
       echo "$u"; exit 3
     else case $what in
       ready) s=$(cat "$HO_DIR/$n.ready" 2>/dev/null)
-        if [ -n "$s" ] && [ "$(ho_field 1 "$s" 2)" = "$n-next" ]; then
+        if [ -n "$s" ] && [ "$(ho_name "$s")" = "$n-next" ]; then
           echo "ready: \"$n-next\" (${s:0:8}) has finished its Start. Now: rename yourself (name_session with the name \`$SELF --prev-name --title\` prints; it also titles your tab), arm \`$SELF --await renamed\` (Bash, run_in_background) and end your turn."
           exit 0
         fi ;;
@@ -537,7 +571,9 @@ if [ "${1:-}" = --await ]; then
         if [ "$o" = "$id" ]; then echo "the done stamp names you (${id:0:8}), not the old coordinator: nothing closed"; exit 2
         elif [ -n "$o" ] && [ "$st" != busy ] && [ "$st" != waiting ]; then
           # a background one (or one no longer listed) shows in the tab it was moved out of, not its own pid's
-          t=; if { [ "$(awk -F'\t' -v o="$o" '$1 == o { print $7; exit }' <<<"$all")" != background ] && t=$(ho_tty "$o"); } ||
+          t=; if [[ ${CLAUDE_CODE_ENTRYPOINT:-} == claude-desktop* ]] && [ -n "$(ho_field 1 "$o" 1)" ]; then
+            msg="the old coordinator (${o:0:8}) is left running: stop it (mcp__ccd_session_mgmt__stop_session, or tell the user to), never archive it: archiving takes its side sessions, you too, with it"
+          elif { [ "$(awk -F'\t' -v o="$o" '$1 == o { print $7; exit }' <<<"$all")" != background ] && t=$(ho_tty "$o"); } ||
             t=$(ho_shown_tty "$o"); then
             load_terminal; c=$(close_tty "$t" 2>&1); rc=$?
             case $rc in
@@ -550,7 +586,7 @@ if [ "${1:-}" = --await ]; then
           elif [ -z "$(ho_field 1 "$o" 1)" ]; then msg="the old coordinator (${o:0:8}) has exited: nothing to close"
           else msg="the old coordinator (${o:0:8}) has no terminal: left running; tell the user to close it"
           fi
-          rm -f "$HO_DIR/$n.ready" "$HO_DIR/$n.done"; echo "handover done: $msg."; exit 0
+          rm -f "$HO_DIR/$n.ready" "$HO_DIR/$n.done" "$HO_DIR/$n.next"; echo "handover done: $msg."; exit 0
         fi ;;
     esac; fi
     [ "$(date +%s)" -lt "$end" ] || { echo "--await $what: nothing after ${tmo}s; check the other coordinator (session-status --activity) and arm it again or hand over by hand"; exit 1; }
