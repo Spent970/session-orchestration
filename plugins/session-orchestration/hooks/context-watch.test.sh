@@ -140,6 +140,8 @@ s=$SECONDS; out=$(ups); (( SECONDS - s <= 2 )) && [ -z "$out" ] || fail "first p
 # a tool call while it classifies skips, no second classification inline
 s=$SECONDS; out=$(EV=PostToolUse ups); (( SECONDS - s <= 2 )) && [ -z "$out" ] || fail "tool call while classifying: $out"
 s=$SECONDS; waitkind long; (( SECONDS - s >= 3 )) || fail 'the slow classification was not slow'
+# the detached copy writes .kind, then its EXIT trap drops the stamp: wait for that, as for .kind
+for i in $(seq 50); do [ -e "$XDG_CACHE_HOME/session-status/handoff-long.classifying" ] || break; sleep 0.2; done
 [ ! -e "$XDG_CACHE_HOME/session-status/handoff-long.classifying" ] || fail 'classifying stamp left'
 s=$SECONDS; out=$(ups); (( SECONDS - s <= 2 )) && grep -q 'at 150K: hand off' <<<"$out" || fail "cached prompt took $(( SECONDS - s )) s: $out"
 
