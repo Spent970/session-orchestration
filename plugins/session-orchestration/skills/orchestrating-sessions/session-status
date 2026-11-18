@@ -282,6 +282,9 @@ if [ "${1:-}" = --coordinator-of ]; then
   exit 0
 fi
 ROOT=$(find_root); cd "$ROOT" || exit 1
+# This project's coordinator names (and its handoff's -next, -prev-K): never read as a task key, which a name-shaped
+# key_pattern (tracker none) would otherwise match (issue 44).
+CNRE="$(coord_name "$ROOT")(-next)?(-prev-[0-9]+)?"
 ENC=$(sed 's/[^A-Za-z0-9]/-/g' <<<"$ROOT")
 RESOLVED='Resolved (idle a week)'   # the pane's RESOLVED (hooks/register.tsx)
 NOW=$(date +%s); RESOLVE_S=$(( ${SESSION_STATUS_RESOLVE_DAYS:-7} * 86400 ))
@@ -543,7 +546,7 @@ if [ "${1:-}" = --start ]; then
     while IFS=$'\t' read -r id name; do
       why=$(grep -F "| sess:${id:0:8} closed " "$TMP/rows" | awk '{ print $1 }' | paste -sd, -); why=${why:+status row $why}
       f=$(ended_transcript "$id") k=; [ -z "$f" ] || k=$(first_key "$(first_prompt "$f" 50)")
-      [ -n "$k" ] || k=$(grep -oE -m1 "$KEYRE" <<<"$name" | head -1)
+      [ -n "$k" ] || grep -qxE -- "$CNRE" <<<"$name" || k=$(grep -oE -m1 "$KEYRE" <<<"$name" | head -1)
       if [ -z "$why" ] && { { [ -n "$k" ] && grep -qE "(^|[^A-Za-z0-9])$k([^0-9]|$)" <<<"$pend"; } || grep -qF "${id:0:8}" <<<"$pend"; }; then
         why="handoff file${k:+ ($k)}"
       fi
@@ -1705,7 +1708,7 @@ local_for() {
 
 # Keys running sessions and worktrees point at: their names, the exact owners of running sessions, branches.
 pointed_keys() {
-  awk -F'\t' '{print $2}' "$TMP/agents" | grep -oE "$KEYRE"
+  awk -F'\t' '{print $2}' "$TMP/agents" | { grep -vxE -- "$CNRE" || :; } | grep -oE "$KEYRE"
   awk 'NR==FNR {live[$1]; next} ($2 in live) {print $1}' <(cut -f1 "$TMP/agents") "$TMP/owners.exact"
   while read -r r; do git -C "$r" worktree list --porcelain | awk '/^branch /' | grep -oE "$KEYRE"; done < "$TMP/repos"
 }
@@ -1770,7 +1773,7 @@ blocked=$(tr '\t' '\037' < "$TMP/agents.all" | while IFS=$'\037' read -r id name
   fi
   # Its last turn asks the user (no prompt): for the Stale section's "decision not on the pane".
   if [ "$ov" = "on	" ] && [ "$status" != waiting ]; then
-    k=$(awk -v n="sess:\"$name\"" 'index($0, n) { print $1; exit }' "$TMP/rows"); [ -n "$k" ] || k=$(grep -oE -m1 "$KEYRE" <<<"$name" | head -1)
+    k=$(awk -v n="sess:\"$name\"" 'index($0, n) { print $1; exit }' "$TMP/rows"); [ -n "$k" ] || grep -qxE -- "$CNRE" <<<"$name" || k=$(grep -oE -m1 "$KEYRE" <<<"$name" | head -1)
     printf '%s\t%s\t%s\n' "${id:0:8}" "$name" "$k" >> "$TMP/asking"
   fi
   # Not on you (idle, busy, superseded, a delivered review, landed): Other sessions or its row lists it.
