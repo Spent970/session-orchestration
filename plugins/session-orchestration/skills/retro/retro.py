@@ -29,7 +29,9 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project
   triggers SESSION_PREFIX [days=7]     a session's wakes, requests and USD by trigger: human/xmsg/bgtask/cron/other
   usage [days=30]                 one row per plugin feature (pane button, tool, skill, doc, session-status flag,
                                   config key): uses in the window, first seen, `unused` when 0 uses all window;
-                                  presses from the local usage log (telemetry=local), which it trims to 180 days
+                                  presses from the local usage log (telemetry=local or full), which it trims to 180
+                                  days; with telemetry=full (the default) also one row per fault the log holds
+                                  (block, refuse, relay, wake, error: what [at] [n], counted, first_seen `-`)
   chunks [days=7] [--session PREFIX]  one row per chunk (first prompt `Chunk: KEY/N`, successors joined through
                                   Supersedes: and summed) or per matching session: kind/model/effort, est, act growth
                                   (K), peak, cache read, out, USD, turns, compactions, handoff (none|before|after a
@@ -1457,9 +1459,12 @@ def inventory():
     return inv
 
 
+FAULTS = ("block", "refuse", "relay", "wake", "error")  # lib.sh usage's telemetry=full kinds
+
+
 def usage(days=30):
     """Each feature with its uses in the window and first-seen date; `unused` when 0 uses and it existed all window.
-    Uses: the pane's usage log (telemetry=local), transcript tool calls, skill loads, doc reads, session-status flags.
+    Uses: the pane's usage log (telemetry=local or full; full adds its fault lines), transcript tool calls, skill loads, doc reads, session-status flags.
     First-seen: the earliest inventory snapshot listing it (one saved per run in the state folder). Also trims the
     log to 180 days."""
     window(days)
@@ -1490,8 +1495,12 @@ def usage(days=30):
             os.replace(log + ".tmp", log)
         for _, o in rows:
             h = (o.get("k"), o.get("what"))
+            if h[0] in FAULTS:  # one row per fault and where: a hook line, a --flag, an exit code
+                n = None if h == ("wake", "wake") else o.get("n")  # a wake's n is the lines it reported, not a kind
+                at = f"{o['at']}@{o['v']}" if ":" in o.get("at", "") and o.get("v") else o.get("at")  # a file:line holds for its version; a --flag across them
+                h = (h[0], " ".join(str(x) for x in (h[1], at, n) if x not in (None, "")))
             if CUT <= o["t"] <= END:
-                if h in count or h[0] == "path":
+                if h in count or h[0] in ("path", *FAULTS):
                     count[h] = count.get(h, 0) + 1
     flags = [n for k, n in inv if k == "flag"]
     # The pane runs these itself (no transcript shows it): their presses are measured instead, never flagged here.
@@ -1534,9 +1543,10 @@ def usage(days=30):
     # ponytail: config keys have no use count (they're set in files, not called): listed, never flagged; count the
     # roots that set each one if a key's removal comes up. Presses count only with the log; path lines aren't inventoried.
     for k, n in sorted(count):
-        known = k not in ("config", "path") and (k != "press" or on)
+        known = k not in ("config", "path", *FAULTS) and (k != "press" or on)
         unused = known and (k, n) not in pane and count[(k, n)] == 0 and first.get((k, n), today) <= start
-        print(f"{k}\t{n}\t{count[(k, n)] if known or k == 'path' else '-'}\t{first.get((k, n), '-' if k == 'path' else today)}\t{'unused' if unused else ''}")
+        logged = k in ("path", *FAULTS)
+        print(f"{k}\t{n}\t{count[(k, n)] if known or logged else '-'}\t{first.get((k, n), '-' if logged else today)}\t{'unused' if unused else ''}")
 
 
 MASKS = [(re.compile(p, re.I), r) for p, r in [

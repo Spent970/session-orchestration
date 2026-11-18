@@ -14,12 +14,17 @@ input=$(cat)
 k=${XDG_CACHE_HOME:-$HOME/.cache}/session-status/handoff-${BASH_REMATCH[1]}.kind
 [ -f "$k" ] && read -r kind _ < "$k" && [ "$kind" = coordinator ] || exit 0
 
-deny() { jq -nc --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'; exit 0; }
+# deny REASON NAME: the decision, and NAME as a telemetry=full block line (lib.sh usage).
+deny() {
+  jq -nc --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+  ( l=$(cd "${0%/*}/.." 2>/dev/null && pwd)/lib.sh; cd "${cwd:-.}" 2>/dev/null; . "$l" && usage "coordinator-guard-$2" block "" "hooks/coordinator-guard.sh:${BASH_LINENO[0]}" ) >/dev/null 2>&1
+  exit 0
+}
 { read -r tool; read -r cwd; read -r path; } < <(jq -r '.tool_name // "", .cwd // "", (.tool_input.file_path // .tool_input.notebook_path // "")' <<<"$input")
 if [ "$tool" = Bash ]; then
   cmd=$(jq -r '.tool_input.command // ""' <<<"$input")
   [[ $cmd =~ ^[[:space:]]*(cd|pushd)([[:space:]]|$) ]] || exit 0
-  deny "Coordinator rule: never cd in your shell; use absolute paths. The Bash tool keeps a cd across calls, and claude --bg then starts the new session in that folder, outside the project's settings. Run it again without the cd."
+  deny "Coordinator rule: never cd in your shell; use absolute paths. The Bash tool keeps a cd across calls, and claude --bg then starts the new session in that folder, outside the project's settings. Run it again without the cd." cd
 fi
 [ -n "$path" ] || exit 0
 here=$(cd "$(dirname "$0")" && pwd)
@@ -44,4 +49,4 @@ if ! under "$path" "$root/.claude/worktrees" && ! under "$path" "$root/.worktree
   # an untracked CLAUDE.local.md: no worktree has it, so no session can make the edit
   [ "$path" = "$root/CLAUDE.local.md" ] && ! git ls-files --error-unmatch CLAUDE.local.md >/dev/null 2>&1 && exit 0
 fi
-deny "Coordinator rule: the only files you change are the memory files, the handoff file and your handover (SKILL.md, Rules). ${path#"$root"/} is a session's to change, however small: give it to the session that owns it, or start one."
+deny "Coordinator rule: the only files you change are the memory files, the handoff file and your handover (SKILL.md, Rules). ${path#"$root"/} is a session's to change, however small: give it to the session that owns it, or start one." edit

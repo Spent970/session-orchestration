@@ -102,8 +102,8 @@ if mode == "--done":   # row N's kind, model/effort and est, and this session's 
     if n not in R: die(f"no row {n} in {path}")
     r = R[n]; m, _, e = (KINDS.get(r["kind"], "") if r["model"] == "default" else r["model"]).partition("/")
     if r["est"] is None: sys.exit(print(f"nothing logged: c{n}'s est {r['raw_est'] or '(none)'} is not like 60K"))
-    if os.environ["PLAN_TELEMETRY"] != "local":
-        sys.exit(print(f"nothing logged: telemetry is {os.environ['PLAN_TELEMETRY']}, not local (config telemetry)"))
+    if os.environ["PLAN_TELEMETRY"] not in ("local", "full"):
+        sys.exit(print(f"nothing logged: telemetry is {os.environ['PLAN_TELEMETRY']}, not local or full (config telemetry)"))
     act, sid = "", os.environ.get("CLAUDE_CODE_SESSION_ID", "")[:8]
     try:   # growth has one definition: retro.py's; no session id, no act
         if not sid: raise ValueError

@@ -49,14 +49,20 @@ pre='session-status[[:space:]]+--land|bitbucketdc-cli|forgejo-cli|jiradc-cli|msg
 [[ $input =~ $pre ]] || exit 0
 
 done=
-trap '[ -n "$done" ] || { echo "approved-action hook failed, so this command is blocked. Report \"needs your approval: <the exact action>\" to the coordinator and end your turn." >&2; exit 2; }' EXIT
+trap 'rc=$?; [ -n "$done" ] || { fault approved-action error "$rc" hooks/approved-action.sh 2>/dev/null; echo "approved-action hook failed, so this command is blocked. Report \"needs your approval: <the exact action>\" to the coordinator and end your turn." >&2; exit 2; }' EXIT
 set -uo pipefail
 # Bytes, not characters: under a UTF-8 locale macOS awk dies on a multibyte character its substr cut in two (towc:
 # multibyte conversion failure), which blocked any gated-looking command holding one. Every separator here is ASCII.
 export LC_ALL=C
 here=$(cd "$(dirname "$0")" && pwd)
 pass() { done=1; exit 0; }
-decide() { done=1; jq -nc --arg d "$1" --arg r "$2" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'; exit 0; }
+# fault NAME KIND [N [AT]]: lib.sh usage, a telemetry=full fault line (never fails, prints nothing).
+fault() { ( l=${here:-${0%/*}}/../lib.sh; cd "${cwd:-.}" 2>/dev/null; . "$l" && usage "$@" ) >/dev/null 2>&1; }
+decide() {
+  done=1; jq -nc --arg d "$1" --arg r "$2" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
+  [ "$1" = allow ] || fault "approved-action-$1" block "" "hooks/approved-action.sh:${BASH_LINENO[${#BASH_LINENO[@]}-2]}"   # the top-level line whose call decided
+  exit 0
+}
 attended() { local d=deny; if [ "${CLAUDE_CODE_SESSION_ATTENDED:-}" = 1 ]; then d=ask; fi; decide "$d" "$1"; }
 ask_for() {
   attended "Blocked: $1 needs the user's approval, relayed by the coordinator and naming exactly this. Don't retry it, and don't route it another way. Send the coordinator your blocked status report with the line: needs your approval: $2. Then end your turn. When the relay arrives (Action naming $3), run the same command again; this hook verifies it."
@@ -539,19 +545,19 @@ while IFS= read -r r; do
     [ -n "$me" ] || me=$(jq -r 'select(.type == "agent-name") | .agentName // empty' "$tp" 2>/dev/null | tail -1)
     # Under another key, the yes itself must speak of the landing: a yes to start some task approves no merge.
     if [ -n "$under" ] && ! jq -r .quote <<<"$r" | grep -qiE 'land|merg'; then
-      tried="the quote approved under $under doesn't speak of landing or merging"; continue; fi
+      tried="the quote approved under $under doesn't speak of landing or merging"; fault not-landing relay; continue; fi
     [ "$nm" != "$me" ] || key=${under:-$me}
   fi
   # No tracker key (session-name keys): the user's words must name the target itself (REPO#ID; OWNER/ may precede).
   [ -n "$key" ] || key=$short
-  [ -n "$key" ] || { tried="the matching relay's Action names no task key"; continue; }
+  [ -n "$key" ] || { tried="the matching relay's Action names no task key"; fault no-key relay; continue; }
   v=$(cd "$cwd" 2>/dev/null && jq -r .quote <<<"$r" |
       bash "$here/../skills/orchestrating-sessions/verify-approval.sh" "$(jq -r .sid <<<"$r")" "$(jq -r .scwd <<<"$r")" "$(jq -r .name <<<"$r")" "$key" "$act")
   # One use per relay: a rerun (the CLI timed out after the server took it) needs a new approval.
   # ponytail: used up when allowed, not when the command succeeds; the deny says to check before asking again.
   used=~/.cache/session-status/approved/$(printf '%s|%s|%s' "$(jq -r .tp <<<"$r")" "$action" "$(jq -c "del(.tp)" <<<"$r")" | shasum -a 256 | cut -c1-32)
   case "$v" in
-    verified*) [ ! -e "$used" ] || { tried="this relay was used once already: check whether that run landed before asking again"; continue; }
+    verified*) [ ! -e "$used" ] || { tried="this relay was used once already: check whether that run landed before asking again"; fault used-once relay; continue; }
                mkdir -p "${used%/*}" && touch "$used" || exit 1
                # This exact command, also handed to the user (hand_command): withdrawn, or the pane's Run posts it again.
                w=
@@ -561,6 +567,6 @@ while IFS= read -r r; do
                done
                decide allow "Relayed approval for $action (good for this one run)$w: $v" ;;
   esac
-  tried=${v:-verify-approval.sh failed}
+  tried=${v:-verify-approval.sh failed}; fault unverified relay
 done < <(awk '{ l[NR] = $0 } END { for (i = NR; i > 0; i--) print l[i] }' <<<"$relays")   # newest first (no tail -r on Linux)
 ask_for "$action${tried:+ (the relay found: $tried)}" "$action" "$what"

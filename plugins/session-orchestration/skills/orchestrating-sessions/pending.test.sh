@@ -2,7 +2,7 @@
 # Self-check for pending: the hook's history and auto-archive, done (exact, prefix, ambiguous, none), history --last
 # and --find, notices, yesterday, and --scan/--seed over a fixture transcript (a full Read, an Edit without its
 # file, a copy swapped in with mv, a test fixture with the same header elsewhere). Run: bash pending.test.sh
-set -euo pipefail; unset XDG_CONFIG_HOME CLAUDE_CODE_SESSION_ID
+set -euo pipefail; unset XDG_CONFIG_HOME XDG_STATE_HOME CLAUDE_CODE_SESSION_ID
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; trap 'echo "failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 export HOME=$tmp CLAUDE_CONFIG_DIR=$tmp/cfg XDG_CACHE_HOME=$tmp/cache

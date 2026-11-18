@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-check for approved-action.sh: a fake coordinator transcript holding the user's approvals, a worker transcript
 # holding the coordinator's relays, a stubbed `claude agents`. Run: bash approved-action.test.sh  (prints "ok" or the failure).
-set -euo pipefail; unset XDG_CONFIG_HOME   # the person-wide config.json: never the real one
+set -euo pipefail; unset XDG_CONFIG_HOME XDG_STATE_HOME   # the person-wide config.json and usage log: never the real ones
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 root=$(mkdir -p "$tmp/proj/.claude" && cd "$tmp/proj" && pwd -P)
@@ -97,6 +97,10 @@ check "$bb pr merge --help" pass "help"
 check "$bb pr merge 271 --project PROJ --repo app 2>&1 | head -5" allow "approved merge"
 check "cd $root && $bb pr merge 271 --repo app" deny "approval used once already"
 check "$bb pr merge 272 --project PROJ --repo app" deny "unapproved merge"
+# telemetry full (the default): the reused relay, then each deny with the hook line that decided.
+u=$home/.local/state/session-orchestration/usage.jsonl
+[ "$(grep -c '"k":"relay","what":"used-once"' "$u")" = 1 ] && [ "$(grep -cE '"k":"block","what":"approved-action-deny","v":"[0-9.]+","at":"hooks/approved-action.sh:[0-9]+"}$' "$u")" = 2 ] ||
+  { echo "FAIL (usage lines): $(cat "$u")"; exit 1; }
 check "$bb pr merge 271 --repo web" allow "approved merge, other repo relay"
 check "$bb pr merge 280 --repo app" deny "merge relayed by a subagent hand-back"
 check "$bb pr merge 271" deny "merge without --repo"

@@ -177,14 +177,37 @@ printf '# x\n- in zorblax-room\n- in quuxpkg\n' > "$dirty"
 o=$(cd .claude/worktrees/frobnicate && "$FB" scrub "$dirty"; cd "$T/acme-widgets/quuxpkg" && "$FB" scrub "$dirty")
 grep -qF ':2: names a local name:' <<<"$o" && grep -qF ':3: names a local name:' <<<"$o" || fail "scrub from a worktree: $o"
 
-# usage (lib.sh): nothing with telemetry off (the default); with local, fixed names only.
+# usage (lib.sh): nothing with an explicit telemetry off; with local, fixed names only, no fault lines; full (the
+# default, no setting) adds the fault lines, each with the plugin's version, from the hooks and session-status too.
 U=$XDG_STATE_HOME/session-orchestration/usage.jsonl LIB=${FB%/skills/*}/lib.sh
 use() { (cd "$T/other-proj" && bash -c '. "$0" && usage "$@"' "$LIB" "$@"); }
-use peek press; [ ! -e "$U" ] || fail "usage logged with telemetry off"
+echo '{"telemetry": "off"}' > "$T/other-proj/.claude/coordination.local.json"
+use peek press; use x block 1 hooks/x.sh:3; [ ! -e "$U" ] || fail "usage logged with telemetry off"
 echo '{"telemetry": "local"}' > "$T/other-proj/.claude/coordination.local.json"
-use peek press; use 'PROJ-1 /x' press; use fallback; use peek bogus
+use peek press; use 'PROJ-1 /x' press; use fallback; use peek bogus; use x block 1 hooks/x.sh:3
 [ "$(wc -l < "$U" | tr -d ' ')" = 2 ] && grep -q '"k":"press","what":"peek"}$' "$U" && grep -q '"k":"path","what":"fallback"}$' "$U" ||
   fail "usage log: $(cat "$U")"
+echo '{}' > "$T/other-proj/.claude/coordination.local.json"; : > "$U"
+[ "$(cd "$T/other-proj" && bash -c '. "$0" && config telemetry' "$LIB")" = full ] || fail "telemetry default"
+v=$(jq -r .version "${LIB%/*}/.claude-plugin/plugin.json")
+use peek press; use x-deny block "" hooks/x.sh:3; use wake wake 4; use y error 2 --land
+use z error 1 /home/u/proj; use z error 1 ../x; use z error x; use 'a b' refuse; use z error 1 a b   # refused: path, .., N, name, arity
+SS=${FB%/feedback}/session-status
+(cd "$T/other-proj" && "$SS" --config bogus 2>/dev/null; "$SS" --config telemetry >/dev/null)
+unset XDG_CACHE_HOME; mkdir -p "$HOME/.cache/session-status" && echo coordinator > "$HOME/.cache/session-status/handoff-s1.kind"
+jq -nc --arg c "$T/other-proj" '{session_id: "s1", cwd: $c, tool_name: "Bash", tool_input: {command: "cd /tmp"}}' |
+  bash "${LIB%/*}/hooks/coordinator-guard.sh" | grep -q '"deny"' || fail "guard didn't deny the cd"
+jq -nc --arg c "$T/other-proj" '{session_id: "s1", cwd: $c, tool_name: "mcp__acme-jira__get", tool_input: {}, reason: "r"}' |
+  bash "${LIB%/*}/hooks/blocked.sh" denied
+want='{"t":T,"k":"press","what":"peek"}
+{"t":T,"k":"block","what":"x-deny","v":"V","at":"hooks/x.sh:3"}
+{"t":T,"k":"wake","what":"wake","v":"V","n":4}
+{"t":T,"k":"error","what":"y","v":"V","n":2,"at":"--land"}
+{"t":T,"k":"error","what":"session-status","v":"V","n":2,"at":"--config"}
+{"t":T,"k":"block","what":"coordinator-guard-cd","v":"V","at":"hooks/coordinator-guard.sh:LINE"}
+{"t":T,"k":"refuse","what":"mcp","v":"V"}'
+got=$(sed -E 's/"t":[0-9]+/"t":T/; s/"v":"'"${v//./\.}"'"/"v":"V"/; s/(coordinator-guard\.sh:)[0-9]+/\1LINE/' "$U")
+[ "$got" = "$want" ] || fail "full usage log: $got"
 
 # pm_dir: the sibling in a checkout; else the installed copy installed_plugins.json names; else a failure.
 [ "$(bash -c '. "$0" && pm_dir' "$LIB")" = "$(cd "${LIB%/*}/../project-memory" && pwd)" ] || fail "pm_dir sibling"

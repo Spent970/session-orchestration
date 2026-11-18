@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Self-check for blocked.sh. Run: bash blocked.test.sh  (prints "ok" or the failure).
-set -euo pipefail
+set -euo pipefail; unset XDG_STATE_HOME   # the usage log under the test's HOME, never the real one
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 h() { HOME=$tmp bash "$here/blocked.sh" "$@"; }
