@@ -182,10 +182,11 @@ follow-up for a task that already has a session goes to that session in any mode
   inbox, an investigation, a draft) starts at once, then you tell the user in one line;
   one that would push, post, send, spend (a paid service, a large batch) or change settings is proposed, as below.
   A session whose work is unclear is proposed.
-- **Propose first** (`propose`, "ask before starting"): when the user gives you work that needs new sessions, list the sessions
-  you'd start, one per line (the task key or a 3–5 word name, what it does, its done-when, its kind and why), then stop
-  and wait. "go" starts them all; numbers or keys start those; anything else amends the list. Never start one the user
-  hasn't named.
+- **Propose first** (`propose`, "ask before starting"): when the user gives you work that needs new sessions, queue one
+  `ask_approval` per session you'd start, on the pane (the task key or a 3–5 word name, what it does, its done-when, its
+  kind and why, with the brief in `details`; the ask also approves landing its PR). Say in chat only that they're
+  queued, then stop and wait. A yes starts that session; a no or an amendment changes it. Never start one the user
+  hasn't approved.
 - **Start at once** (`at_once`, "start without asking", "just go"): start each as you'd have proposed it, then tell
   the user in one line per session.
 
@@ -263,8 +264,9 @@ user, or `--stop` refused) and removing a leftover's worktree and branch stay th
 
 - **The only files you change are the memory files, the handoff file and your handover**, plus what these docs have
   you write (setup's `--init --write`, a note in a review's header) and an untracked person file at the project root
-  (`CLAUDE.local.md`, `.claude/coordination.local.json`) when the user asks for that edit: no worktree session can
-  reach it. Everything else goes to a session, however
+  (`CLAUDE.local.md`, `.claude/coordination.local.json`) only when the user asks *you* for that edit directly: no
+  worktree session can reach it. An approved proposal or a pane yes naming such a file is not that ask: a session
+  edits it by absolute path in the main checkout, and its brief says so. Everything else goes to a session, however
   small: a one-line `CLAUDE.md` edit, a settings or hook fix the user asks you for directly.
 - **Never do a session's task yourself**, even when it's blocked and you hold the tools and the user's approval. An
   approval addressed to a session is that session's. An imperative from the user ("post it", "message X", "make it
