@@ -931,6 +931,36 @@ if [ "${1:-}" = --changes ]; then
   evl+=$(awk -F'\t' '$1 == "failed" { print "  * " $2 " (not forwarded: " $3 ")" }' <<<"$fwc")
   evl=$(grep . <<<"$evl"); ev=; [ -z "$evl" ] || ev=$'PR events (send each owner the nudge, SKILL.md):\n'$evl
   [ -z "$stopped" ] || ev+=${ev:+$'\n'}$'Stopped (finished tasks\' sessions and worktrees, by the watcher; tell the user in one line):\n'${stopped%$'\n'}
+  # Logins restored: a project action (.claude/coordinator-actions.json) whose `when` held at the last committing run
+  # and no longer does (the sign-in it offers is back), with the keys of the blocked reports (<replies>/KEY.md, first
+  # line `· blocked`) whose Blocker line names its label, its command or a sign-in, so the coordinator resumes them.
+  # $last.when: the labels whose `when` held. The first run only records; a later peek records nothing.
+  acts=$ROOT/.claude/coordinator-actions.json restored=
+  if [ -f "$acts" ]; then
+    # \037-separated, not @tsv: that escapes backslashes, and IFS=tab would merge an empty field.
+    all=$(jq -r '.[]? | select((.label | type) == "string" and (.when | type) == "string") | [.label, (.command // ""), .when] | join("\u001f")' "$acts" 2>/dev/null)
+    held=$(while IFS=$'\037' read -r l c w; do   # the pane's 10s cap per check; a timeout or signal (>128) keeps the last state
+      [ -n "$l" ] || continue; (cd "$ROOT" && perl -e 'alarm 10; exec @ARGV' bash -c "$w") </dev/null >/dev/null 2>&1; r=$?
+      [ "$r" = 0 ] || { [ "$r" -gt 128 ] && grep -qxF -- "$l" "$last.when" 2>/dev/null; } && echo "$l"; done <<<"$all")
+    if [ -f "$last.when" ]; then
+      rd=$(replies_path)
+      while IFS=$'\037' read -r l c w; do
+        [ -n "$l" ] && grep -qxF -- "$l" "$last.when" && ! grep -qxF -- "$l" <<<"$held" || continue
+        # shortcut: any sign-in word counts, so with two login actions each lists the other's blocked keys too; their
+        # sessions find it still out and say so. Matching a report to one action would need it to name the action.
+        keys=; [ -z "$rd" ] || while IFS= read -r -d '' f; do
+          head -1 "$f" | grep -qE ' · blocked([ ;:,.(]|$)' || continue
+          b=$(grep -m1 '^Blocker:' "$f") || continue
+          grep -qiwF -- "$l" <<<"$b" || { [ -n "$c" ] && grep -qiF -- "$c" <<<"$b"; } ||
+            grep -qiE '(^|[^a-z])(log-? ?in|sign(ed)?-? ?(in|out)|auth|expired)([^a-z]|$)' <<<"$b" || continue
+          k=${f##*/}; keys+=${keys:+, }${k%.md}
+        done < <(find "$rd" -maxdepth 1 -type f -name '*.md' -mtime -7 -print0 2>/dev/null | sort -z)
+        restored+="  * $l${keys:+ — blocked on it: $keys}"$'\n'
+      done <<<"$all"
+    fi
+    [ -n "${SESSION_STATUS_PEEK:-}" ] && [ -f "$last.when" ] || printf '%s\n' "$held" > "$last.when"
+  fi
+  [ -z "$restored" ] || ev+=${ev:+$'\n'}$'Logins restored (resume each session blocked on it; SKILL.md, Watching):\n'${restored%$'\n'}
   sent=$(awk -F'\t' '$1 == "ok" { print "  * " $2 " (" $3 ")" }' <<<"$fwc")
   # A baseline another session wrote (a predecessor's, hours old) would wake this coordinator on rows and reports it
   # read at its --start: this run only records its own baseline, a peek too, so --watch's next poll diffs against it.

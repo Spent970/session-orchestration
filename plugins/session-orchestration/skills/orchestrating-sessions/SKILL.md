@@ -266,6 +266,12 @@ change already on the default branch (by patch, since main lands by rebase; no m
 `Stopped` too. A leftover session it leaves (interactive, on a prompt, asking the user, or `--stop` refused) and a
 worktree it keeps (its Leftovers line says why) stay the user's call: ask before removing them.
 
+**A restored login wakes you.** When a pane action's `when` check (`.claude/coordinator-actions.json`) stops
+holding, its sign-in is back: the change lists it under `Logins restored (…)` as `* LABEL — blocked on it: KEY, …`,
+the keys whose report is `blocked` with a Blocker line naming that label, its command or a sign-in. Tell each of
+those sessions the login is back and to go on (`session-status --send-when-idle ID TEXT`; a retired one: resume it),
+without asking the user: they signed in for it.
+
 ## Rules
 
 - **The only files you change are the memory files, the handoff file and your handover**, plus what these docs have
