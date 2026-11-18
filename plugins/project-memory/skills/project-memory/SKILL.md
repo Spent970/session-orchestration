@@ -1,6 +1,6 @@
 ---
 name: project-memory
-description: A project's shared memory across Claude Code sessions, and its friction cases. Use when the project's CLAUDE.md names a project memory file (read it when you start a task; append what another task would need), when the user says "remember this" about the project, when asked to set up project memory, or the moment the project itself (its hosts, sign-ins, docs, scripts) cost you a workaround, an extra round trip or the user's help.
+description: A project's shared memory across Claude Code sessions, and its friction cases. Use when the project's CLAUDE.md names a project memory file (read it when you start a task; append what another task would need), when the user says "remember this" about the project, when asked to set up project memory, or the moment the project itself (its hosts, sign-ins, docs, scripts, setup) cost you a workaround, a round trip, a whole-tree search or the user's help, on any task, coding or not.
 ---
 
 # Project memory
@@ -52,9 +52,11 @@ so no session's append is lost. Moving entries into the docs is the [graduate](.
 
 ## Project cases (friction)
 
-File a case the moment you tell the user about friction the project caused (its hosts, sign-ins, docs, scripts): you
+File a case the moment you tell the user about friction the project caused (its hosts, sign-ins, docs, scripts, setup): you
 worked around it, took an extra round trip, misreported because of a file or a script's output, or the user had to
-step in. Then carry on with your task.
+step in. It counts on any task, coding or not, and also when you said nothing: you searched the whole tree for what a
+doc should have pointed to, or the user pointed you to something written where you couldn't find it (a rule you just
+skipped is your mistake, not a case). A gap you only notice, at no cost yet, is a deferred task. Then carry on.
 
 ```
 cases add bugfixes 'Dev host sign-in expires hourly' --where scripts/login.sh:12 \
