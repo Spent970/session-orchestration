@@ -272,6 +272,35 @@ relay "Approval pane answer for claude-plugins-x: Yes, start claude-plugins-x. A
 check "true && bash /x/session-status --land main" deny "--land in a chain"
 check "/x/session-status --land main" allow "--land relayed as the task's landing"
 check "/x/session-status --land main" deny "--land relay used once already"
+# Landing: the merge chained with read-only status reads, and those reads tested in "$(…)" in a wait loop.
+for n in 60 61 62 63; do
+  relay "Approval pane answer for claude-plugins-x: Yes, start claude-plugins-x. Asked: Start claude-plugins-x?" "merge acme/app#$n (claude-plugins-x)" >> "$w"
+done
+check "gh pr merge 60 -R acme/app --auto --rebase && gh pr view 60 -R acme/app --json state,mergeStateStatus" allow "merge chained with a pr view"
+check "gh pr merge 61 -R acme/app --auto --rebase; gh pr checks 61 -R acme/app --watch; gh run list -R acme/app" allow "merge chained with pr checks and run list"
+check "gh pr merge 62 -R acme/app --auto --rebase && until [ \"\$(gh pr view 62 -R acme/app --json state -q .state)\" = MERGED ]; do sleep 30; done" allow "merge, then a wait loop on \$(gh pr view)"
+check "gh pr merge 63 -R acme/app --auto && gh pr merge 99 -R acme/app" deny "an approved merge chained with an unapproved one"
+check "gh pr merge 63 -R acme/app --auto && bash -c 'gh pr merge 99 -R acme/app'" deny "an approved merge beside a merge in bash -c"
+check "gh pr merge 63 -R acme/app --auto && gh pr view 63 -R acme/app && bash -c 'gh pr comment 99 -R acme/app -b hi'" deny "a read beside it doesn't hide a post in bash -c"
+check "gh pr merge 63 -R acme/app && x=\$(gh pr merge 99 -R acme/app)" deny "an unapproved merge in \$(…) beside an approved one"
+check "gh pr merge 63 -R acme/app && [ \"\$(gh pr view 63 -R acme/app; gh pr merge 99 -R acme/app)\" = x ]" deny "a merge after a read inside one tested \$(…)"
+check "gh pr merge 63 -R acme/app && eval \"\$(gh pr view 63 -R acme/app --json body -q .body)\"" deny "a PR body run by eval beside the merge"
+check "gh pr merge 63 -R acme/app && eval [ \"\$(gh pr view 63 -R acme/app -q .body)\" = x ]" deny "a tested \$(…) under eval"
+check "gh pr merge 63 -R acme/app --auto --rebase && gh pr view 63 -R acme/app" allow "the approved merge, unchanged by the denials beside it"
+check "$bb pr merge 12 --repo app && gh pr view 5 -R acme/app" deny "a read-only gh call doesn't share a bitbucket merge's command"
+check "until [ \"\$(gh pr view 62 -R acme/app --json state -q .state)\" = MERGED ]; do sleep 30; done" pass "a wait loop on \$(gh pr view)"
+check "for i in \$(seq 20); do case \"\$(gh pr view 62 -R acme/app --json mergeStateStatus -q .mergeStateStatus)\" in BEHIND|DIRTY) break ;; esac; sleep 30; done" pass "a for loop testing gh pr view with case"
+check "while [[ \"\`gh pr checks 62 -R acme/app\`\" == *pending* ]]; do sleep 30; done" pass "gh pr checks in backticks under [[ ]]"
+check "\$(gh pr view 5 -R acme/app --json body -q .body)" deny "a PR body run as a command"
+check "s=\$(gh pr view 5 -R acme/app -q .body); \$s" deny "a PR body read into a variable (\$s could run it)"
+check "eval \"\$(gh pr diff 5 -R acme/app)\"" deny "a diff run by eval"
+check "\$(echo \"\$(gh pr view 5 -R acme/app -q .body)\")" deny "echo's output run as a command"
+check "x=\$(gh pr merge 99 -R acme/app)" deny "a merge in \$(…) is still gated"
+check "until \$(gh pr merge 99 -R acme/app); do sleep 5; done" deny "a merge polled in a loop is still gated"
+fb=$(cd "$here/.." && pwd)/skills/orchestrating-sessions/feedback
+check "$fb add bugfixes 'landing trips the hook' --where hooks/x.sh --found 'retro; scan' --evidence 'gh pr merge 5 -R acme/app chained with a view'" pass "a feedback case quoting a merge"
+check "$fb add x 'y' --evidence \"\$(gh pr merge 99 -R acme/app)\"" deny "a feedback case running a merge in \$(…)"
+check "/tmp/x/skills/orchestrating-sessions/feedback add x 'gh pr merge 99 -R acme/app'" deny "another script named feedback"
 # A Teams attachment goes into the action with its sha256.
 osha=$(shasum -a 256 "$tmp/other.txt" | cut -d' ' -f1)
 typed "yes, send the PROJ-24 message" "$now" >> "$proj/$cid.jsonl"

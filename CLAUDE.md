@@ -12,10 +12,11 @@
 2. Before committing: `claude plugin test plugins/<plugin>`, `tsc -p plugins/<plugin>` (needs the
    engine's generated `.claude-plugin/types/`, untracked), `claude plugin validate plugins/<plugin>` and
    `./scrub-check.sh` (no personal or company names: examples use `PROJ-123`, paths `/home/u/…`).
-3. Land it through a PR: push the branch, open the PR and, once the task is approved, `gh pr merge <N> --auto --rebase`.
+3. Land it through a PR: push the branch, open the PR and, once the task is approved, `gh pr merge <N> -R OWNER/REPO --auto --rebase`.
    `main` takes only rebase merges of a branch that is up to date with it and green in CI; nothing pushes `main` by
    hand. Each landing adds a release commit, which puts every other open PR behind `main`. Until yours shows merged,
-   after each `gh pr checks <N> --watch` check `gh pr view <N> --json state,mergeStateStatus`; on `BEHIND` (or a
+   after each `gh pr checks <N> -R OWNER/REPO --watch` check `gh pr view <N> -R OWNER/REPO --json state,mergeStateStatus`
+   (they may share the merge's command, and a wait loop may test them: `[ "$(gh pr view …)" = MERGED ]`); on `BEHIND` (or a
    conflict) run `git fetch origin && git rebase origin/main && git push --force-with-lease`. Auto-merge stays on and
    merges once CI is green again. No merge queue: GitHub offers it only to organization repos.
 4. Install it: `claude plugin update <plugin>@session-orchestration` once the marketplace source has the release

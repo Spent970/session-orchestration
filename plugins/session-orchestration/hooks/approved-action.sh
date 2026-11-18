@@ -9,7 +9,8 @@
 # session-name keys) is verified with REPO's last part #ID as the key; a merge's Action may instead end "(<this session's name>)",
 # verified with that name (approving the task covers its landing), or "(<this session's name>, approved under KEY)",
 # verified with KEY (a yes under another task's key that started this session with its landing). Then: allow, once per relay
-# (~/.cache/session-status/approved/). The command must be that one CLI call alone. Anything else on
+# (~/.cache/session-status/approved/). The command must be that one CLI call alone (a gh one: beside
+# read-only gh calls only, see ghro below). Anything else on
 # those commands: deny, with the exact action to report. A `gh api` call with a write method or fields, a
 # `forgejo-cli raw` call with a write method, or gh reached through a variable or $(…), is denied (asked, when
 # attended): it can't be named as an action.
@@ -23,7 +24,9 @@
 # denied (asked, when attended). A post or merge it can't find as a call (inside bash -c, a heredoc a shell reads) is
 # denied too: post from a file. A command that only mentions one (a grep pattern, a commit message, a prompt, a
 # heredoc cat writes to a file or session-status --inbox-add stores) passes when every command in it is on an allowlist of ones that never run their text
-# (SAFE); read-only calls (gh pr view, gh api GET, an inline graphql query) pass too.
+# (SAFE); read-only calls (gh pr view, gh api GET, an inline graphql query) pass too. A gated call may share its
+# command with read-only gh calls (gh pr view|checks, gh run view|watch, …, gh by name right after the subcommand), in
+# $(…) or a loop too: a landing's status poll.
 # ponytail: a text check, not a sandbox: a file one call writes (a script, a git hook) can run its text in a later
 # call this hook never links to it. Gate at execution (a wrapper for gh and the CLIs on PATH) if that matters.
 # ponytail: gh subcommands outside pr/issue/api (release, repo, workflow) aren't gated; add them when a project
@@ -135,6 +138,8 @@ function safe(u, cat,   n, seg, x, m, w, y, t) {
     if (t == "") continue
     # it stores its stdin as an inbox message (a forwarded worker message), never runs it
     if (t ~ /\/skills\/orchestrating-sessions\/session-status$/ && w[y + 1] == "--inbox-add") continue
+    # it writes a feedback case whose evidence may quote a gated command, never runs it
+    if (t == PROOT "/skills/orchestrating-sessions/feedback" && w[y + 1] == "add") continue
     if (cat && t != "cat") return 0
     if (t == "npx") { for (y++; w[y] == "-y" || w[y] == "--yes"; y++); t = w[y]; sub(/@[^@\/]*$/, "", t); sub(/^@[^\/]*\//, "", t)
       if (t !~ /^(bitbucketdc|forgejo|jiradc|msgraph)-cli$/) return 0 }
@@ -145,7 +150,8 @@ function safe(u, cat,   n, seg, x, m, w, y, t) {
       if ((w[y] == "push" || w[y] == "fetch") && seg[x] ~ /(^|[ \t])--[reu]/) return 0 }
     if (!index(SAFE, " " t " ")) return 0 }
   return 1 }'
-awkv=(-v "SAFE=$SAFE" -v "PRE= env command time nohup rtk proxy then do else ! { } if elif while until done fi esac " -v "Q='")
+# PROOT: this plugin's own folder, so only its feedback script counts, not one a session wrote under that name.
+awkv=(-v "PROOT=${here%/hooks}" -v "SAFE=$SAFE" -v "PRE= env command time nohup rtk proxy then do else ! { } if elif while until done fi esac " -v "Q='")
 # Heredoc bodies (cat > f <<EOF … EOF) are text, not commands: dropped when nothing but cat (or session-status --inbox-add) runs in the command
 # without them; else the command is printed whole, its bodies unlexed, and the first line says 1 (opaque: the scan below
 # reads it all). A << inside quotes, in (( )) arithmetic, in a <<< here-string or on a line going on with \, or with
@@ -181,6 +187,13 @@ ghw='(^|[^A-Za-z0-9_.-])gh([^A-Za-z0-9_.-]|$)'
 ghops='(^|[^A-Za-z0-9_.-])gh([^A-Za-z0-9_.-][^|;&]*[[:space:]]|[[:space:]]+)((pr|issue)([[:space:]][^|;&]*)?[[:space:]](merge|comment|review)|api)([[:space:]]|$)'
 # gh named through a variable or $(…): x=gh, $(which gh), `command -v gh`.
 ghind='(=["'"'"']?|\$\(|`)[[:space:]]*((which|command[[:space:]]+-v|type[[:space:]]+-p)[[:space:]]+)?([^[:space:]]*/)?gh([^A-Za-z0-9_.-]|$)'
+# A read-only gh call (pr view|checks, run watch, …), as landing a PR polls it: chained with the merge (then it
+# doesn't count as one more call), and in "$(…)" tested by [ ], [[ ]], test or case, in a wait loop too: there its
+# output (a PR body, a diff, which others write) is only compared, never run. Anywhere else (x=$(…), which $x could
+# run, echo's output in $(…), eval, a shell) it is still denied as indirect.
+# shortcut: a known list of re-parsing commands (eval, shells, interpreters); add one if it shows up.
+ghreparse='(^|[^A-Za-z0-9_.-])(eval|source|sh|bash|zsh|dash|ksh|fish|python3?|perl|ruby|node)([^A-Za-z0-9_.-]|$)'
+ghro='[[:space:]]+((pr|issue)[[:space:]]+(view|checks|list|status|diff)|run[[:space:]]+(view|list|watch)|repo[[:space:]]+view)([^A-Za-z0-9_.-]|$)'
 # One line: continuations joined, other newlines made command separators.
 # (awk, not ${cmd//"$nl"/ ; }: bash 3.2's replace-all is quadratic, minutes on a 50 KB heredoc.)
 cmd=$(printf '%s\n' "$cmd" | awk 'NR > 1 { printf "%s", (c ? " " : " ; ") } { c = sub(/\\$/, ""); printf "%s", $0 }') || exit 1
@@ -201,6 +214,7 @@ scan=$(printf '%s' "$cmd" | awk "${awkv[@]}" -v q="'" -v opaque="$opaque" "$awkl
   }
   printf "%s", out s }') || exit 1
 ghn=$(grep -oE "$ghw" <<<"$scan" | wc -l | tr -d ' ')
+ghron=$(grep -oE "(^|[^A-Za-z0-9_.-])gh$ghro" <<<"$scan" | wc -l | tr -d ' ')
 # Matched with quotes dropped too, so a quoted subcommand (pr 'merge') or flag is still seen.
 # (tr, not ${scan//[\"\']/}: bash 3.2's is quadratic, 11 s on a 5 KB heredoc.)
 uq=$(tr -d "\"'" <<<"$scan")
@@ -225,7 +239,10 @@ ghl=$scan
     else if (iq == Q && (c == "`" || c == "$")) c = "_"
     o = o c }
   printf "%s", (iq == "" ? o : s) }') || exit 1
-grep -qE "$ghind" <<<"$ghl" &&
+ghi=$ghl
+grep -qE "$ghreparse" <<<"$ghl" ||
+  ghi=$(sed -E "s/((^|[^A-Za-z0-9_.-])(\\[|\\[\\[|test|case)[[:space:]]+\"(\\\$\\(|\`)[[:space:]]*)gh($ghro)/\\1_\\5/g" <<<"$ghl") || exit 1
+grep -qE "$ghind" <<<"$ghi" &&
   attended "Blocked: gh reached through a variable or \$(…) can't be checked by the approval hook. Run it by its name (gh …), as one plain command."
 alone="Run that CLI call alone, as one plain command (the CLI, then its subcommand, then the arguments)."
 # Fails closed on anything it can't read as exactly one call: a second CLI call (chained, or glued to a token), a
@@ -408,8 +425,10 @@ if [ "$calls" = 0 ]; then
   [ -z "$bbops" ] && { [ "$ghn" = "$ghcalls" ] || ! grep -qE "$ghops" <<<"$scan"; } && pass
   decide deny "Blocked: the approval hook can't read this as one PR/Jira comment post or PR merge. $alone"
 fi
-[ "$calls" = 1 ] && [ $((bbn + ghn)) = 1 ] ||
-  decide deny "Blocked: a PR/issue comment post, review, merge or Teams/mail send must be the only bitbucketdc-cli/forgejo-cli/jiradc-cli/msgraph/gh call in its command. $alone"
+# Each read-only gh mention is one, never the gated call too: a hidden second post or merge still counts.
+[ "$host" = gh ] || ghron=0
+[ "$calls" = 1 ] && [ $((bbn + ghn - ghron)) = 1 ] ||
+  decide deny "Blocked: a PR/issue comment post, review, merge or Teams/mail send must be the only bitbucketdc-cli/forgejo-cli/jiradc-cli/msgraph/gh call in its command (a gh one may share it with plain read-only gh calls: gh pr view|checks, gh run view|watch). $alone"
 [ -z "$help" ] || pass
 [ -n "$target" ] || decide deny "Blocked: no PR id, issue key, chat, message id or recipient in this command."
 short=
