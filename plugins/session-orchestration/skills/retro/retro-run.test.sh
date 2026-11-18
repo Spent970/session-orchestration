@@ -90,14 +90,13 @@ grep -q '^due: project' <<<"$out" || fail "the plist's resolve runs the installe
 run --uninstall "$root" >/dev/null
 [ ! -e "$pf" ] && grep -q "^bootout gui/$(id -u)/$lb$" "$tmp/launchctl.calls" || fail "--uninstall" ""
 
-# The old entry points (a crontab line names rnd-weekly): with no schedule there's no due check, and the log names the
+# The old entry points (a crontab line names retro-weekly): with no schedule there's no due check, and the log names the
 # install command.
 echo '{}' > "$root/.claude/coordination.local.json"
-"$here/../rnd/rnd-weekly" "$root"
+"$here/retro-weekly" "$root"
 if [ "$(uname)" = Darwin ]; then hint="retro-run --install $root"; else hint="point the cron line at .*retro-run"; fi
 [ "$(calls)" = 7 ] && tail -1 "$tmp/claude.calls" | grep -q 'retro-project-' && grep -q "called as retro-weekly: .*$hint" "$tmp/log" ||
-  fail "rnd-weekly shim starts a project run and logs the install" "$(cat "$tmp/log")"
+  fail "retro-weekly shim starts a project run and logs the install" "$(cat "$tmp/log")"
 "$here/retro-weekly" "$tmp/nope" 2>/dev/null && fail "a missing root fails" ""
 grep -q "no project root $tmp/nope" "$tmp/log" || fail "a missing root is logged" ""
-grep -q '^name: rnd$' "$here/../rnd/SKILL.md" && grep -q 'session-orchestration:retro' "$here/../rnd/SKILL.md" || fail "/rnd stub points at retro" ""
 echo ok

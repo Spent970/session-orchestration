@@ -1446,7 +1446,7 @@ def inventory():
     secs = re.search(r"USAGE_SECTIONS = \[([^\]]*)\]", reg)
     inv |= {("press", f"{p}-{slug(s)}") for s in re.findall(r"'([^']+)'", secs.group(1) if secs else "") for p in ("fold", "unfold", "card")}
     inv |= {("tool", t) for t in re.findall(r"tool\.register\(\{\s*name: '([a-z_]+)'", reg)}
-    inv |= {("skill", d) for d in os.listdir(f"{PLUGIN}/skills") if d != "rnd" and os.path.isfile(f"{PLUGIN}/skills/{d}/SKILL.md")}  # rnd: the old name, counted as retro
+    inv |= {("skill", d) for d in os.listdir(f"{PLUGIN}/skills") if os.path.isfile(f"{PLUGIN}/skills/{d}/SKILL.md")}
     inv |= {("doc", os.path.basename(f)) for f in glob.glob(f"{PLUGIN}/**/*.md", recursive=True)
             if os.path.basename(f) not in ("SKILL.md", "README.md")}
     ss = open(f"{PLUGIN}/skills/orchestrating-sessions/session-status", errors="replace").read()

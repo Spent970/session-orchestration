@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Retro run over the multi-session setup, one scope per run — a project's own sessions, or the plugin's view over every project — measuring how efficiently Claude Code sessions turn tokens into finished work (cost per merged PR, finished ticket and review, context size, waste counts, time to done), checking whether last run's proposals landed, and ranking the next changes. Use when invoked as /retro [project|plugin|both] (or its old name /rnd), when started as a scheduled retro (retro-run), or when asked to measure how the sessions perform.
+description: Retro run over the multi-session setup, one scope per run — a project's own sessions, or the plugin's view over every project — measuring how efficiently Claude Code sessions turn tokens into finished work (cost per merged PR, finished ticket and review, context size, waste counts, time to done), checking whether last run's proposals landed, and ranking the next changes. Use when invoked as /retro [project|plugin|both], when started as a scheduled retro (retro-run), or when asked to measure how the sessions perform.
 ---
 
 # retro
@@ -100,7 +100,7 @@ and no heading.
 1. Read the project's `CLAUDE.md`, its project memory if it names one (retro or R&D entries there override the
    yardstick below; with an index, read the topic files whose trigger is retro or R&D), and the baseline report
    with its "Next run" section. Project scope also reads the project's `retro-brief.md` (beside the memory file,
-   else `.claude/retro-brief.md`; the old `rnd-brief.md` when that is missing) if present. Settle the scope, the
+   else `.claude/retro-brief.md`) if present. Settle the scope, the
    sections (`retro.py sections`) and N as above.
 2. Run `retro.py` over 7 days into `<R>/retro/<scope>-<N>/`, only for the sections this run writes (`P` below is
    `--project <root>` in project scope, nothing in plugin scope). Look at three raw rows of each TSV before
@@ -242,7 +242,7 @@ else in `${XDG_STATE_HOME:-~/.local/state}` (`RETRO_LOG` overrides). It reads th
   `<checkout>/plugins/session-orchestration/skills/retro/retro-run <root>` (prefix `CLAUDE_CONFIG_DIR=…` for another
   account): the due check makes the reboot call start only a missed run. A systemd user timer with
   `Persistent=true` does the same.
-- **The old cron line** (`rnd-weekly` or `retro-weekly`) still works: both call `retro-run ROOT` and log the install
+- **The old cron line** (`retro-weekly`) still works: both call `retro-run ROOT` and log the install
   command. `--install` prints the command that removes that root's line.
 
 Self-tests: `bash retro.test.sh` and `bash retro-run.test.sh` (each prints `ok`).

@@ -46,14 +46,14 @@ tpl=$here/templates
 . "$here/../../lib.sh" || exit 1
 root=$(pwd -P)
 
-mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=() wrote_early=
+mode=propose own= delegate= shared= review_brief= retro_brief= over=() trust=() team_over= move= link= rest=()
 for a; do
   case $a in --move) move=1; continue ;; --link) link=1; continue ;; esac
   rest+=("$a")
   case $a in
     --check) mode=check ;; --write) mode=write ;; --own) own=1 ;; --delegate) delegate=1 ;; --shared) shared=1 ;;
     --trust=?*@?*) trust+=("${a#--trust=}") ;;
-    --review-brief) review_brief=1 ;; --retro-brief|--rnd-brief) retro_brief=1 ;;
+    --review-brief) review_brief=1 ;; --retro-brief) retro_brief=1 ;;
     team=?*) team_over=${a#team=}; over+=("$a") ;;
     *=*) over+=("$a") ;;
     *) echo "unknown argument: $a"; exit 2 ;;
@@ -301,8 +301,8 @@ if [ -n "$move$link" ]; then
     hb=${hand%.md}; items+=("line	$hand" "file	$hb" "file	$hb-archive" "file	$hb-archive.md")
   fi
   mb=$(at "${mem:-.claude/orchestration}")
-  for b in "$named_brief" "$mb/review-brief.md" "${hand:+$(dirname "$hand")/review-brief.md}" "$mb/retro-brief.md" "$mb/rnd-brief.md" \
-           "$root/.claude/retro-brief.md" "$root/.claude/rnd-brief.md" "$root/.claude/tasks"; do [ -z "$b" ] || items+=("file	$b"); done
+  for b in "$named_brief" "$mb/review-brief.md" "${hand:+$(dirname "$hand")/review-brief.md}" "$mb/retro-brief.md" \
+           "$root/.claude/retro-brief.md" "$root/.claude/tasks"; do [ -z "$b" ] || items+=("file	$b"); done
   moves=() conflicts=() relines=() lrel=() left=() seen=$'\n' claimed=$'\n'
   rl() { relines+=("$s	$d"); [ "$k" = file ] || lrel+=("$s	$d"); }   # lrel: the section lines' own (line, mem)
   # pair SRC DST: a missing DST takes SRC whole, two folders go entry by entry, anything else in the way is a conflict
@@ -530,10 +530,9 @@ bd=$orch; [ -z "$hand" ] || bd=$(dirname "$hand")
 done_rule="its session's done-when held (no command to count)"
 [ -n "$merge_cmd" ] && done_rule="its PR merged (the merge is the unit)"
 [ "$keys" = tracker ] && done_rule="its $key_example ticket moved to done (pass that command's regex as \`--done RX\`)"
-# The retro brief the retro skill reads: beside the memory (not one left outside), else .claude/ (older setups); the
-# old name rnd-brief.md when there's no retro-brief.md.
+# The retro brief the retro skill reads: beside the memory (not one left outside), else .claude/ (older setups).
 rbd=("$orch" .claude); [ -z "$mem_out" ] || rbd=(.claude)
-rb=$(for n in retro rnd; do for d in "${rbd[@]}"; do [ -e "$(at "$d")/$n-brief.md" ] && { echo "$d/$n-brief.md"; exit; }; done; done)
+rb=$(for n in retro; do for d in "${rbd[@]}"; do [ -e "$(at "$d")/$n-brief.md" ] && { echo "$d/$n-brief.md"; exit; }; done; done)
 # A brief the section names counts as present.
 briefs=$( [ -n "$review_brief$named_brief" ] || [ -e "$(at "$bd")/review-brief.md" ] || echo "--review-brief: a brief for PR reviewer sessions ($bd/review-brief.md)"
           [ -n "$retro_brief$rb" ] || echo "--retro-brief: what the weekly retro counts ($orch/retro-brief.md)")
@@ -608,10 +607,6 @@ adapter_tpl=session-status-adapter; [ -n "$gh" ] && [ "${#repos[@]}" = 1 ] && ad
 meminit=$(pm_dir)/skills/project-memory/memory-init || exit 1
 mem_args=("$orch" --root "$root" --topic coordinator.md "coordinating sessions" "acting as the coordinator, or messaging, resuming or handing work to another session")
 [ -z "$review_brief" ] || [ -n "$named_brief" ] || plan+=("review-brief.md	$bd/review-brief.md")
-# The old brief name: --write renames the one the retro reads, where it is (the alias period; the old name is read until then).
-if [ "$mode" = write ] && [ "${rb##*/}" = rnd-brief.md ]; then
-  mv "$(at "$rb")" "$(at "${rb%/*}")/retro-brief.md" || exit 1; wrote_early=${rb%/*}/retro-brief.md
-fi
 [ -z "$retro_brief" ] || [ -n "$rb$mem_out" ] || plan+=("retro-brief.md	$orch/retro-brief.md")
 todo=()
 for p in ${plan[@]+"${plan[@]}"}; do
@@ -666,7 +661,7 @@ fill() { # template, then flags: lines starting {{?FLAG}} kept when FLAG is set,
   done
   printf '%s' "$out"
 }
-wrote=(${wrote_early:+"$wrote_early"})
+wrote=()
 for p in ${todo[@]+"${todo[@]}"}; do
   t=${p%%	*} f=$(at "${p#*	}")
   mkdir -p "$(dirname "$f")" || exit 1

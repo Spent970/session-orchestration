@@ -1,5 +1,5 @@
 #!/bin/bash
-# Old entry point of the scheduled retro run (a crontab line may still name it, or rnd-weekly beside the old skill):
+# Old entry point of the scheduled retro run (a crontab line may still name it):
 # now retro-run beside it, with the due check once retro.schedule is set. Logs the command that replaces the cron
 # line. Removed one release after the alias period.
 here=$(cd "$(dirname "$0")" && pwd)
