@@ -1,7 +1,7 @@
 import type { On, ToolCallResult } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf, sectionSlug, sectionState, parseSections } from './register'
+import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf, sectionSlug, sectionState, parseSections, nativePath } from './register'
 
 test('status rows parse whatever the columns hold', async () => {
   const pad = (k: string, st: string) => `${k.padEnd(9)} ${st.padEnd(14)} `
@@ -1403,6 +1403,8 @@ const windows = (on: On, gitBash: boolean) => {
     const a = e.argv
     ran.push(a[0] ?? '')
     if (a[0] === 'bash') throw new Error('spawn bash ENOENT')
+    if (e.init?.cwd?.startsWith('/')) throw new Error(`spawn ${a[0]} ENOENT`) // a Windows spawn can't start in /c/…
+    if (e.init?.cwd) ran.push(`cwd ${e.init.cwd}`)
     if (a[0] === 'git' && !gitBash) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const stdout = a[0] === 'git' ? 'C:\\Program Files\\Git\\mingw64\\libexec\\git-core\n'
       : a.includes('--check') ? 'configured: /c/u/proj (proj-coordinator)\n' : a.includes('--root') ? '/c/u/proj' : a.includes('--name-check') ? 'free other\n' : ''
@@ -1418,9 +1420,17 @@ test('on Windows without bash on PATH, open_pane runs Git for Windows\' bash.exe
   expect(ran.filter(a => a === 'git')).toEqual(['git'])
   expect(ran).not.toContain('bash')
   expect(ran).toContain('C:/Program Files/Git/bin/bash.exe')
+  expect(ran).toContain('cwd C:/u/proj') // the name check runs in the root, as a Windows path
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
   await ui.press({ key: 'refresh' }) // joins the sweep the open started
   await ui.unmount()
+})
+
+test('nativePath turns Git Bash\'s drive path into a Windows one on Windows only (issue 71)', () => {
+  expect(nativePath('/c/w/proj', true)).toBe('C:/w/proj')
+  expect(nativePath('/d', true)).toBe('D:/')
+  expect(nativePath('/home/u/proj', true)).toBe('/home/u/proj')
+  expect(nativePath('/c/w/proj', false)).toBe('/c/w/proj')
 })
 
 test('on Windows with no bash at all, open_pane names bash as the cause instead of "No project root" (issue 71)', async ($, on) => {
