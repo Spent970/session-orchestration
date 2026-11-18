@@ -13,7 +13,7 @@ the project root, after confirming the session owns the task (`session-status --
 | Session is retired (still listed, but a send fails "not reachable") | `session-status --send-when-idle <id> '<text>'` ([below](#follow-ups-for-later); never a relayed approval in the text), or by hand ([Reviving](#reviving-a-retired-session)) |
 | Sessions ended while the background service was off (a reboot) or crashed | `session-status --resume-ended ID…`, after the one ask ([below](#after-a-restart)) |
 | The user must answer a prompt or approve a plan | Open its attach tab and queue one ask ([below](#permission-prompts-and-trust)) |
-| Finished session | `claude stop <id>` (the user's go first; a session replaced through `--handover` is stopped without asking, below) |
+| Finished session (under Leftovers) | The watcher stops it, no ask: a `--watch` poll stops each background one at rest and lists it under `Stopped`. One it leaves (interactive, on a prompt, waiting on the user, or the stop failed) stays a leftover: `claude stop <id>` on the user's go. A session replaced through `--handover` is stopped without asking, below |
 | Session under **Stale prompts** | `session-status --stop <id>` ([below](#stale-prompts)) |
 | Task session too big to resume (over 200K, exit 4) | `session-status --handover <id> -- '<what next>'` (below) |
 

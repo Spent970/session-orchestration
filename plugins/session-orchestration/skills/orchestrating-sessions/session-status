@@ -676,9 +676,27 @@ if [ "${1:-}" = --changes ]; then
   # Resolved needs nothing, so its section isn't compared (kept aside in $last.resolved): an item moving there
   # from Leftovers wakes no one, nor does it going away.
   : > "$last.resolved"
-  new=$(SESSION_STATUS_PRS_OUT=$last.prs.$$ SESSION_STATUS_NO_FEEDBACK=1 SESSION_STATUS_STRICT=1 "$SELF" "$@" | sed -E '/^  \* /!s/ \(PRs as of [0-9]{1,2}:[0-9]{2}\)//; /^  \* /!s/" (idle|busy)/"/; /^  \* /!s/ closed [0-9]+h/ closed/; /^  \* /!s/ \(maybe [0-9a-f]+: [0-9]+ mentions\)//; /^  \* \(failed\) .*auth/!s/^(  \* \(failed\) [^:]*):.*/\1/; s/^(  \* \(failed\) [^:]*):.*auth.*/\1: sign-in/' |
+  new=$(SESSION_STATUS_FINISHED_OUT=$last.fin.$$ SESSION_STATUS_PRS_OUT=$last.prs.$$ SESSION_STATUS_NO_FEEDBACK=1 SESSION_STATUS_STRICT=1 "$SELF" "$@" | sed -E '/^  \* /!s/ \(PRs as of [0-9]{1,2}:[0-9]{2}\)//; /^  \* /!s/" (idle|busy)/"/; /^  \* /!s/ closed [0-9]+h/ closed/; /^  \* /!s/ \(maybe [0-9a-f]+: [0-9]+ mentions\)//; /^  \* \(failed\) .*auth/!s/^(  \* \(failed\) [^:]*):.*/\1/; s/^(  \* \(failed\) [^:]*):.*auth.*/\1: sign-in/' |
     awk -v r="$RESOLVED:" -v out="$last.resolved" '/^fix:/ {next} $0 == "Other sessions:" || $0 == "Stale prompts:" {drop = 1; next} drop && /^  / {next} {drop = 0} $0 == r {skip = 1; next} skip && /^  / {print > out; next} {skip = 0; print}') ||
-    { echo "$new"; exit 1; }
+    { rm -f "$last.fin.$$"; echo "$new"; exit 1; }
+  # Under --watch, a committing run stops each finished task's background session at rest (Leftovers or Resolved; not
+  # one on a prompt, busy or waiting on the user): its line leaves the board and shows under Stopped, which is news.
+  # One --stop refuses stays a leftover. The watcher's peek names them (Stopping), so its confirming run follows even
+  # when nothing else changed.
+  stopped=
+  [ -z "${SESSION_STATUS_PEEK:-}" ] || [ ! -s "$last.fin.$$" ] ||
+    stopped=$(awk -F'\t' '{ printf "  * would stop: %s — \"%s\" (%s)\n", $2, $3, substr($1, 1, 8) }' "$last.fin.$$")$'\n'
+  if [ -n "${SESSION_STATUS_FORWARD:-}" ] && [ -z "${SESSION_STATUS_PEEK:-}" ] && [ -s "$last.fin.$$" ]; then
+    while IFS=$'\t' read -r id kl name; do
+      r=$("$SELF" --stop "$id" </dev/null 2>/dev/null) && [[ $r == stopped* ]] || continue
+      stopped+="  * $kl — \"$name\" (${id:0:8})"$'\n'
+      new=$(grep -vE " stop ${id:0:8}\$" <<<"$new")   # and from the baseline: its going isn't news beside Stopped
+      [ ! -f "$last" ] || { grep -vE " stop ${id:0:8}\$" "$last" > "$last.$$"; mv "$last.$$" "$last"; }
+    done < "$last.fin.$$"
+    # a Leftovers header with nothing left under it goes too
+    [ -z "$stopped" ] || new=$(awk '$0 == "Leftovers (task finished):" { h = $0; next } h != "" && /^  / { print h } { h = ""; print }' <<<"$new")
+  fi
+  rm -f "$last.fin.$$"
   # A worker under another account can't SendMessage this coordinator (features/accounts.md): its report reaches only
   # the replies folder. With accounts on, each <KEY>.md written there in the last day is a line, so writing one is
   # news; not a key a session of this account works on (it messages), nor the coordinator's own files (plans, briefs).
@@ -763,6 +781,7 @@ if [ "${1:-}" = --changes ]; then
   fwc=$(cat "$fw" 2>/dev/null)
   evl+=$(awk -F'\t' '$1 == "failed" { print "  * " $2 " (not forwarded: " $3 ")" }' <<<"$fwc")
   evl=$(grep . <<<"$evl"); ev=; [ -z "$evl" ] || ev=$'PR events (send each owner the nudge, SKILL.md):\n'$evl
+  [ -z "$stopped" ] || ev+=${ev:+$'\n'}$'Stopped (finished tasks\' sessions, by the watcher; tell the user in one line):\n'${stopped%$'\n'}
   sent=$(awk -F'\t' '$1 == "ok" { print "  * " $2 " (" $3 ")" }' <<<"$fwc")
   # A baseline another session wrote (a predecessor's, hours old) would wake this coordinator on rows and reports it
   # read at its --start: this run only records its own baseline, a peek too, so --watch's next poll diffs against it.
@@ -1768,6 +1787,7 @@ done)
 
 # Leftovers: running sessions and worktrees whose task is finished. Candidates are the pointed-at keys that
 # aren't rows; one adapter call checks them all.
+: > "$TMP/finished"
 pointed_keys | sort -u | grep -vxF -f <(printf '%s\n' $keys) > "$TMP/cand" || true
 for k in $keys; do awk -v k="$k" '$1==k {print $2}' "$TMP/owners.exact" "$TMP/owners.guess"; done | sort -u > "$TMP/busy_ids"
 if [ -s "$TMP/cand" ] && [ -n "$ADAPTER" ]; then
@@ -1783,6 +1803,11 @@ if [ -s "$TMP/cand" ] && [ -n "$ADAPTER" ]; then
       # Only an idle or done session: a blocked one still waits on someone, however old.
       awk -F'\t' -v id="$id" -v kl="$kl" -v old=$((t < NOW - RESOLVE_S)) \
         '$1==id {printf "%s\t  %s — session \"%s\": %s stop %s\n", old && $3 ~ /^(idle|done)$/, kl, $2, $4, substr(id,1,8)}' "$TMP/agents"
+      # For the watcher's stop (--changes): a background session at rest (idle or done, not on a prompt), quiet
+      # STOP_AFTER_S (its last steps had time), not waiting on the user, and neither the caller nor a coordinator.
+      grep -qxF "$id" "$TMP/listed.ids" || [ "$id" = "${CLAUDE_CODE_SESSION_ID:-}" ] || grep -q "/$id\.jsonl$" "$TMP/watchers" ||
+        [ "$t" -gt $(( NOW - ${SESSION_STATUS_STOP_AFTER_S:-600} )) ] ||
+        awk -F'\t' -v id="$id" -v kl="$kl" '$1==id && $3 ~ /^(idle|done)$/ && $7 == "background" && $8 != "busy" && $8 != "waiting" {print id "\t" kl "\t" $2}' "$TMP/agents" >> "$TMP/finished"
     done
     worktrees_for "$k" | while IFS=$'\t' read -r r wt; do
       base=$(git -C "$r" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/HEAD)
@@ -1811,6 +1836,7 @@ if [ -s "$TMP/cand" ] && [ -n "$ADAPTER" ]; then
   [ -s "$TMP/left" ] && printf '\nLeftovers (task finished):\n' && cat "$TMP/left"
   [ -s "$TMP/resolved" ] && printf '\n%s:\n' "$RESOLVED" && cat "$TMP/resolved"
 fi
+[ -z "${SESSION_STATUS_FINISHED_OUT:-}" ] || cp "$TMP/finished" "$SESSION_STATUS_FINISHED_OUT"
 
 # Other sessions (see the header). Leftovers' sessions are listed there already. A worker that ran the status
 # command for its own task isn't a coordinator here: only a coordinator ($TMP/watchers) is.

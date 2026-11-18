@@ -253,6 +253,12 @@ there; [resuming.md](resuming.md)); an all-merged one with no owner: revive or s
 its session for the deploy and the status move. Don't relay it to the user or ask first: it is the worker's own task.
 The script lists each PR, event and head SHA once.
 
+**The watcher stops finished sessions.** A background session under Leftovers or Resolved (its task finished: PR
+merged and released) that is at rest (idle or done, not on a prompt, not waiting on the user) and quiet 10 minutes
+(its after-release steps had time) is stopped by the watcher, with no ask; it shows under `Stopped (…)` in the
+change that wakes you: tell the user in one line. A leftover session it leaves (interactive, on a prompt, asking the
+user, or `--stop` refused) and removing a leftover's worktree and branch stay the user's call.
+
 ## Rules
 
 - **The only files you change are the memory files, the handoff file and your handover**, plus what these docs have
