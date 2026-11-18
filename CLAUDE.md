@@ -9,6 +9,8 @@
    minor, or the next patch when every commit of the change carries a `Release: patch` trailer
    (`git commit --trailer 'Release: patch'`). Docs on the branch say "from the release after <feature>", never a
    version that doesn't exist yet. A branch that bumped `version` in its last commit keeps that number.
+   A change to what setup writes, or to where a project's files live, ships its migration: see "Adding a migration" in
+   `plugins/session-orchestration/skills/setting-up-coordination/migrations.md`.
 2. Before committing: `claude plugin test plugins/<plugin>`, `tsc -p plugins/<plugin>` (needs the
    engine's generated `.claude-plugin/types/`, untracked), `claude plugin validate plugins/<plugin>` and
    `./scrub-check.sh` (no personal or company names: examples use `PROJ-123`, paths `/home/u/…`), and only the shell
