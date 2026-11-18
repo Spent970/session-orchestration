@@ -415,8 +415,9 @@ same way (**Stop all N**), each listed in the card.
 
 A project names its own pane actions, with no UI code, from two places. Each shows as a button under
 **Actions** beside the command it runs (its hotkey works while the pane has focus); pressing it runs
-it with `bash -c` in the project root (`session-status --root`), shows `✓`/`✗`, the label and the
-last line it printed, then refreshes the pane. One runs at a time, for up to 5 minutes.
+it as the coordinator's own Bash call (the press as the user's consent, in a subshell that `cd`s to the project root,
+`session-status --root`), shows `✓`/`✗`, the label and the
+last line it printed, then refreshes the pane. One runs at a time, for up to 5 minutes. A refused one goes to the coordinator to run itself ([pane.md](pane.md#project-actions)).
 
 1. **`.claude/coordinator-actions.json`** in the project root, a list:
    ```json
