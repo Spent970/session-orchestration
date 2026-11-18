@@ -1459,6 +1459,9 @@ echo '# Team review' > "$c/.claude/coordination/review-brief.md"
 init "$c" --check | grep -qx 'team: adapter (trusted)' || { echo "init (s2) team line, untracked files: $(init "$c" --check)"; exit 1; }
 git -C "$c" add -f .claude/coordination && gc "$c" -m 'team files'
 init "$c" --check | grep -qx 'team: memory, review-brief, adapter (trusted)' || { echo "init (s2) team line: $(init "$c" --check)"; exit 1; }
+printf '#!/bin/sh\n' > "$c/.claude/session-status-adapter"; chmod +x "$c/.claude/session-status-adapter"
+init "$c" --check | grep -qx 'team: memory, review-brief, adapter (trusted, local wins)' || { echo "init (s2) team line, local adapter: $(init "$c" --check)"; exit 1; }
+rm "$c/.claude/session-status-adapter"
 echo '# changed' >> "$c/.claude/coordination/session-status-adapter"
 [ -z "$(cd "$c" && HOME=$tmp "$here/session-status" --urls 2>/dev/null)" ] &&
   [ "$(cd "$c" && HOME=$tmp "$here/session-status" --urls 2>&1)" = "warning: session-status-adapter changed upstream: run setup to review it" ] ||
@@ -1470,6 +1473,9 @@ jq '.tracker = "github"' "$t/sail/.claude/coordination/coordination.json" > "$t/
 out=$(init "$t") && grep -F 'Team: sail/.claude/coordination/ is committed there, so its repo keys apply here (team=sail).' <<<"$out" >/dev/null &&
   init "$t" --write >/dev/null && [ "$(jq -r .team "$t/.claude/coordination.local.json")" = sail ] && [ ! -e "$t/.claude/coordination" ] &&
   [ "$(cd "$t" && "$here/session-status" --config tracker)" = github ] || { echo "init (s3) team: $out / $(cat "$t/.claude/coordination.local.json")"; exit 1; }
+# its --check team line names the team repo's folder, where the team files are read
+echo '# Team memory' > "$t/sail/.claude/coordination/memory.md"; git -C "$t/sail" add -f .claude/coordination/memory.md && gc "$t/sail" -m 'team memory'
+init "$t" --check | grep -q '^team (sail/.claude/coordination): memory' || { echo "init (s3) team line: $(init "$t" --check)"; exit 1; }
 # (s4) two team repos: team= picks one, and its committed code is shown for review.
 t2=$(mkdir -p "$tmp/init/tws2" && cd "$tmp/init/tws2" && pwd -P); git clone -q "$s" "$t2/one"; git clone -q "$c" "$t2/two"
 out=$(init "$t2" team=two) && grep -F "     two/.claude/coordination/session-status-adapter (sha256 " <<<"$out" >/dev/null ||

@@ -114,7 +114,7 @@ Installing the plugin adds these to every Claude Code session, in every project:
   the session. A folder's git dir sits outside it, unless the folder (or its parent) is the top of a repo with no
   remote, which is adopted with its history (so it replaces a hand-made auto-commit hook); a folder inside another
   is committed only to the outer repo, unless a repo of its own lies between them; a folder git tracks (the team
-  folder) is skipped. Never pushed, files over 1 MB left out. `session-status --git-history replies|handoff` reads it.
+  folder; one tracked file is enough) is skipped. Never pushed, files over 1 MB left out. `session-status --git-history replies|handoff` reads it.
   A project with none of them configured gets nothing.
 
 The background-session guards (no question box, plan mode or stray `EnterWorktree` in a `--bg` session; a compound
