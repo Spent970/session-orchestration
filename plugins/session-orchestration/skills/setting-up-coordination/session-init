@@ -23,8 +23,11 @@
 #                                   .claude/coordination/coordination.json (tracker, host, features.review_inbox) and
 #                                   .claude/coordination.local.json (features.accounts, terminal, approvals.delegate: true with
 #                                   --delegate, which also turns it on when set); both excluded up front, also in a
-#                                   folder set up already. --shared (shared mode) keeps the repo file out of the
-#                                   exclude, to be committed (a tracked one is never written). --trust=REL@SHA records
+#                                   folder set up already. --shared (shared mode) also commits the team files (the
+#                                   repo file's keys, a .gitattributes merge=union line for team memory) in a worktree
+#                                   from origin/<default> on coordination/setup-<date>, after a scrub (no home path,
+#                                   email, session name or ID, person key), and prints the push + PR command for one
+#                                   pane ask; the main checkout gets only personal, excluded files. --trust=REL@SHA records
 #                                   a committed .claude/coordination/REL (an adapter or module) as trusted, refused
 #                                   when its sha256 is no longer the SHA the proposal showed. In a workspace, the one
 #                                   repo one level down with a committed .claude/coordination/ becomes the team key.
@@ -676,8 +679,14 @@ cfg_repo=$root/.claude/coordination/coordination.json
 [ -n "$team" ] && cfg_repo=$root/$team/.claude/coordination/coordination.json
 [ -z "$sd" ] || [ -n "$team" ] || cfg_repo=$sd/coordination.json
 repo_tracked=; git -C "$(dirname "$cfg_repo")" ls-files --error-unmatch coordination.json >/dev/null 2>&1 && repo_tracked=1
-# A repo file there already that git sees: an earlier --shared made it visible, so a later --write doesn't hide it.
-repo_visible=; [ -e "$cfg_repo" ] && ! (cd "$root" && git check-ignore -q "$cfg_repo" 2>/dev/null) && repo_visible=1
+# Shared mode's repo (the team's in a workspace), its default branch, and the team PR's branch and worktree.
+trepo=$top; [ -z "$team" ] || trepo=$(cd "$root/$team" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || trepo=
+[ -z "$trepo" ] || trepo=$(cd "$trepo" && pwd -P)
+tdb=$default_branch
+if [ -n "$team" ] && [ -n "$trepo" ]; then tdb=$(git -C "$trepo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) && tdb=${tdb#origin/} || tdb=main; fi
+tb=coordination/setup-$(date +%F) wt=$trepo/.worktrees/coordination/setup-$(date +%F)
+trel=$(dirname "$cfg_repo"); trel=${trel#"$trepo"/}
+gattr="/$trel/memory/*.md merge=union"
 # key_pattern isn't written: the adapter answers it for session keys, and a tracker key's prefix would narrow the
 # default PROJ-123 pattern. It's the user's override only.
 # The features: the review inbox where the project names one (Bitbucket or Forgejo), accounts with a second one.
@@ -711,8 +720,7 @@ if [ "${#review[@]}" -gt 0 ]; then
   for t in "${review[@]}"; do shared_lines+="     ${sd#"$root"/}/${t%@*} (sha256 ${t##*@})"$'\n'; done
   shared_lines+="   To trust them as they are now: --trust=$(sed 's/ / --trust=/g' <<<"${review[*]}")$( [[ " ${review[*]} " == *" session-status-adapter@"* ]] && [ -z "$(adapter_path "$root" 2>/dev/null)" ] && printf ' (the committed adapter is then used, no local one written)')"$'\n'
 fi
-[ -z "$shared" ] || [ -n "$repo_tracked" ] || shared_lines+="   Shared: ${cfg_repo#"$root"/} stays out of the exclude, for you to commit (repo keys only: tracker, host, features.review_inbox)."$'\n'
-[ -z "$shared" ] || [ -z "$repo_tracked" ] || shared_lines+="   Shared: ${cfg_repo#"$root"/} is committed already: nothing to write there."$'\n'
+[ -z "$shared" ] || shared_lines+="   Shared (a team PR, read by every collaborator once merged): $([ -n "$repo_tracked" ] && printf '%s is committed already, so only ' "$trel/coordination.json" || printf '%s (repo keys only: tracker, host, features.review_inbox) and ' "$trel/coordination.json")the .gitattributes line $gattr, committed on $tb in a worktree from origin/$tdb. Personal (out of git, this machine only): everything else here."$'\n'
 cfg_line="tracker=$tracker host=$cfg_host features.review_inbox=$review_inbox features.accounts=$accounts terminal=$term_found$cfg_note$term_note"
 if [ "$state" = configured ] && [ "$mode" = propose ]; then
   if [ -z "$miss_repo$miss_person$shared_lines" ] && [ -n "$deleg_set" ]; then
@@ -759,6 +767,9 @@ if [ "$mode" = propose ]; then
   extra=
   [ -z "$noexec" ] || extra+=$'   .claude/session-status-adapter exists but is not executable: chmod +x it (not rewritten).\n'
   extra+=$shared_lines
+  # Others commit here: the default stays personal, and --shared is named once (the design's open question 1).
+  na=0; [ -z "$first" ] || na=$(git -C "$first" log -200 --format=%ae 2>/dev/null | sort -u | grep -c .)
+  [ -n "$shared$repo_tracked" ] || [ "$na" -lt 2 ] || extra+="   Others commit here too ($na authors): all of this stays personal. Say \"shared\" to also open a team PR with the repo keys (--shared)."$'\n'
   ! nocli=$(no_cli) || extra+="   $nocli"$'\n'
   [ "$term_found" = plain ] || extra+="   Terminal: $term_found found, so the pane's Attach in tab and Logs in split open there (terminal=$term_found). Say \"plain\" to copy the commands instead."$'\n'
   [ -z "$briefs" ] || extra+="6. Optional, off unless you say:"$'\n'"$(sed 's/^/   /' <<<"$briefs")"$'\n'
@@ -778,6 +789,37 @@ EOF
 fi
 
 # --- Write -------------------------------------------------------------------------------------------------------
+# Shared mode, checked before anything is written: the team files that origin/<default> lacks, each past the scrub.
+# Shared: what reaches the team PR (the repo file's keys, the .gitattributes line). Personal: all the rest, below.
+# team_scrub LABEL TEXT: each line of TEXT that must not reach a team file, as `LABEL:N: why: line`.
+team_scrub() {
+  local p
+  for p in '/(Users|home)/[^/" ]+	a home path' '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}	an email' \
+           '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}	a session ID' '-coordinator([^A-Za-z0-9_-]|$)	a session name'; do
+    grep -nE -- "${p%%	*}" <<<"$2" | while IFS=: read -r n l; do echo "$1:$n: ${p#*	}: $l"; done
+  done
+  [ "${#HOME}" -lt 2 ] || grep -nF -- "$HOME" <<<"$2" | while IFS=: read -r n l; do echo "$1:$n: a home path: $l"; done
+}
+tj= ga_need=
+if [ -n "$shared" ]; then
+  [ -n "$trepo" ] || { echo "refused: --shared needs a git repo for the team files (here, or the team repo in a workspace)"; exit 1; }
+  git -C "$trepo" fetch -q origin "$tdb" 2>/dev/null   # best effort: offline, the origin/$tdb fetched last
+  git -C "$trepo" rev-parse -q --verify "origin/$tdb^{commit}" >/dev/null ||
+    { echo "refused: --shared: no origin/$tdb in $trepo to branch the team PR from (push $tdb or fetch it, or say default_branch=…)"; exit 1; }
+  if ! git -C "$trepo" cat-file -e "origin/$tdb:$trel/coordination.json" 2>/dev/null; then
+    old='{}'; [ ! -e "$cfg_repo" ] || old=$(jq -c . "$cfg_repo") || exit 1
+    tj=$(jq -n --argjson n "$cfg_repo_json" --argjson o "$old" '$n * $o')   # this checkout's values win, as --write keeps them
+    msg=$(jq -r '.messages // empty | strings' "$person_src" 2>/dev/null)
+    pk=$(jq -rn --argjson a "$tj" --argjson b "$(jq -c "$(person_keys_drop "$msg")" <<<"$tj")" \
+      '[$a | paths(type != "object") | . as $p | select(($b | getpath($p)) == null) | join(".")] | join(", ")')
+    [ -z "$pk" ] || { echo "refused: --shared: ${cfg_repo#"$root"/} has person keys, which never go in a team file: $pk (move them to .claude/coordination.local.json); setup stopped before writing"; exit 1; }
+    bad=$(team_scrub "$trel/coordination.json" "$tj" | sort -u)
+    [ -z "$bad" ] || { echo "refused: --shared: these lines would put personal details in a team file (fix them in ${cfg_repo#"$root"/}); setup stopped before writing:"; sed 's/^/  /' <<<"$bad"; exit 1; }
+  fi
+  git -C "$trepo" show "origin/$tdb:.gitattributes" 2>/dev/null | grep -qxF -- "$gattr" || ga_need=1
+  [ -z "$tj$ga_need" ] || ! { git -C "$trepo" rev-parse -q --verify "refs/heads/$tb" >/dev/null || [ -e "$wt" ]; } ||
+    { echo "refused: --shared: $tb exists already ($wt): open its PR, or remove it (git -C $trepo worktree remove $wt; git -C $trepo branch -D $tb), then run this again"; exit 1; }
+fi
 key_re_flag=; [ "$keys" = session ] && key_re_flag=1   # the default pattern already matches PROJ-123
 tracker_keys=; [ "$keys" = tracker ] && tracker_keys=1
 fill() { # template, then flags: lines starting {{?FLAG}} kept when FLAG is set, {{?!FLAG}} when it isn't
@@ -822,25 +864,13 @@ fi
 if [ -n "$top" ]; then
   ex=$(git -C "$root" rev-parse --git-path info/exclude); case $ex in /*) ;; *) ex=$root/$ex ;; esac
   mkdir -p "$(dirname "$ex")"
-  # The config files up front, written or not: the repo file until shared mode commits it, the person's always.
+  # The config files up front, written or not: this checkout's repo file is personal too (shared mode commits the
+  # team's copy in its own worktree; once merged, the pull replaces this ignored one), the person's always.
   rel=${root#"$top"}; rel=${rel#/}; rel=${rel:+$rel/}
   for f in "/${rel}.claude/coordination/" "/${rel}.claude/coordination.local.json" "/${rel}.claude/coordination.local/"; do
     git -C "$root" ls-files --error-unmatch "$top$f" >/dev/null 2>&1 && continue   # tracked (shared mode): not ours to hide
-    [ -n "$shared" ] && [ "$f" = "/${rel}.claude/coordination/" ] && continue
-    [ -n "$repo_visible" ] && [ "$f" = "/${rel}.claude/coordination/" ] && continue   # shared mode, still to commit
     grep -qxF "$f" "$ex" 2>/dev/null || echo "$f" >> "$ex"
   done
-  # Shared mode: the repo file must be visible to git. Our own exclude line goes; an ignore from elsewhere (SAIL's
-  # exclude has .claude/*) gets a negation; one git can't undo (a whole folder above it ignored) is named.
-  neg=
-  if [ -n "$shared" ] && [ -z "$repo_tracked" ] && [ "$cfg_repo" = "$root/.claude/coordination/coordination.json" ]; then
-    f="/${rel}.claude/coordination/"
-    grep -qxF "$f" "$ex" 2>/dev/null && { grep -vxF "$f" "$ex" > "$ex.tmp"; mv "$ex.tmp" "$ex"; }
-    if (cd "$root" && git check-ignore -q "$cfg_repo"); then
-      echo "!$f" >> "$ex"; neg="${ex#"$top"/} (!$f: ${cfg_repo#"$root"/} was ignored)"
-      (cd "$root" && git check-ignore -q "$cfg_repo") && echo "warning: ${cfg_repo#"$root"/} is still ignored ($(cd "$root" && git check-ignore -v "$cfg_repo" | cut -f1)): git can't re-include a file under an ignored folder, so change that line"
-    fi
-  fi
   for w in ${wrote[@]+"${wrote[@]}"}; do
     case $w in *" (section appended)"|.claude/coordination*) continue ;; esac   # the user's file / the config, above
     case $w in "$orch"/*) w=$orch/ ;; esac   # the whole folder, so files added there later stay out too
@@ -850,10 +880,42 @@ if [ -n "$top" ]; then
     git -C "$root" ls-files --error-unmatch "$f" >/dev/null 2>&1 && continue   # tracked: not ours to hide
     grep -qxF "/${f#"$top"/}" "$ex" 2>/dev/null || echo "/${f#"$top"/}" >> "$ex"
   done
-  [ -z "$neg" ] || wrote+=("$neg")
 fi
 for t in ${trust[@]+"${trust[@]}"}; do wrote+=(".claude/coordination.local.json (trusted ${t%@*})"); done
 if [ "${#wrote[@]}" = 0 ]; then echo "Wrote: nothing (every file is there already)"
 else printf 'Wrote:\n'; printf '  %s\n' "${wrote[@]}"; fi
-[ -z "$shared" ] || [ -n "$repo_tracked" ] || echo "Shared: commit ${cfg_repo#"$root"/} yourself (git add, then your usual commit and PR)."
+# Shared mode: the team files, committed with the person's git identity in a worktree of their own (never the main
+# checkout), for one team PR.
+if [ -n "$shared" ]; then
+  echo "Personal: everything above, out of git (.git/info/exclude, $section_file, $P): this machine only."
+  if [ -z "$tj$ga_need" ]; then echo "Shared: origin/$tdb has the team files already: no team PR."
+  else
+    tf=()
+    git -C "$trepo" worktree add -q -b "$tb" "$wt" "origin/$tdb" 2>&1 || { echo "Shared: git worktree add failed: no team PR"; exit 1; }
+    tex=$(git -C "$trepo" rev-parse --git-path info/exclude); case $tex in /*) ;; *) tex=$trepo/$tex ;; esac
+    (cd "$trepo" && git check-ignore -q .worktrees/x) || echo /.worktrees/ >> "$tex"   # the main checkout stays clean
+    if [ -n "$tj" ]; then
+      mkdir -p "$wt/$trel" && printf '%s\n' "$tj" > "$wt/$trel/coordination.json" || exit 1
+      tf+=("$trel/coordination.json (repo keys: $(jq -r '[paths(type != "object") | join(".")] | join(", ")' <<<"$tj"))")
+    fi
+    if [ -n "$ga_need" ]; then
+      [ ! -s "$wt/.gitattributes" ] || [ -z "$(tail -c1 "$wt/.gitattributes")" ] || echo >> "$wt/.gitattributes"
+      printf '%s\n' "$gattr" >> "$wt/.gitattributes" || exit 1
+      tf+=(".gitattributes ($gattr: two people's team memory appends merge on rebase)")
+    fi
+    tmsg="coordination: shared setup ($([ -n "$tj" ] && printf 'repo keys, ')merge=union for team memory)"
+    # -f: an ignore rule (this clone's own exclude, or one like .claude/*) would hide the team folder
+    git -C "$wt" add -f -- ${tj:+"$trel/coordination.json"} ${ga_need:+.gitattributes} &&
+      git -C "$wt" commit -q -m "$tmsg" || { echo "Shared: the commit in $wt failed (see above): no team PR"; exit 1; }
+    turl=$(git -C "$trepo" config --get remote.origin.url); tslug=$(echo "$turl" | sed -E 's#\.git$##; s#^[a-z+]+://[^/]+/##; s#^[^@]+@[^:]+:##; s#^[A-Za-z0-9.-]+:##')
+    pr="git -C $wt push -u origin $tb"
+    case $turl in   # as configured, not insteadOf-rewritten: what gh resolves
+      *github.com*) pr+=" && gh pr create -R $tslug --base $tdb --head $tb --title '$tmsg' --body 'Shared coordination files: every collaborator reads them once this merges; personal files stay out of git.'" ;;
+      *) pr+=" (then open a PR from $tb into $tdb)" ;;
+    esac
+    echo "Shared: committed on $tb ($wt), for a team PR every collaborator sees:"
+    printf '  %s\n' "${tf[@]}"
+    echo "Team PR: show its diff in one pane ask (git -C $wt show), then on yes: $pr"
+  fi
+fi
 echo "Next: session-status --init --check (expect configured), then open_pane."
