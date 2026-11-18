@@ -47,6 +47,8 @@ declare module 'claude-code' {
       asks: Ask[]; board: Board | null; seq: number; refreshing: boolean
       // config pane.sections (slug → state), read each sweep and set by a title press; the hidden sections shown.
       paneSections: Record<string, SectionState>; showHidden: boolean
+      // The seen store (on-you section slug → item ids seen); null until this pane reads it.
+      seenItems: Record<string, string[]> | null
       selected: string | null; dismissed: string[]; rowsBusy: string[]
       actions: Actions | null; actionResult: ActionResult | null; actionBusy: string | null
       // session-status --activity's text: what each live session is doing (refreshed every minute).

@@ -28,6 +28,7 @@ const seq = atom({ plugin: 'session-orchestration', key: 'seq' } as const, 0)
 const refreshing = atom({ plugin: 'session-orchestration', key: 'refreshing' } as const, false)
 const paneSections = atom({ plugin: 'session-orchestration', key: 'paneSections' } as const, {})
 const showHidden = atom({ plugin: 'session-orchestration', key: 'showHidden' } as const, false)
+const seenItems = atom({ plugin: 'session-orchestration', key: 'seenItems' } as const, null)
 const selected = atom({ plugin: 'session-orchestration', key: 'selected' } as const, null)
 const dismissed = atom({ plugin: 'session-orchestration', key: 'dismissed' } as const, [])
 const rowsBusy = atom({ plugin: 'session-orchestration', key: 'rowsBusy' } as const, [])
@@ -987,6 +988,54 @@ async function projectRoot($: EngineInterface) {
   }
   return root
 }
+// What the user has seen in each on-you section (slug → item ids present when they last pressed its title): a
+// folded one draws only the items since. One file per project root, like the asks store, so a new coordinator's
+// pane doesn't show everything as new; no root: this pane only.
+// shortcut: read once (again at open_pane) and merged on write, so another coordinator's press shows here only after
+// its open_pane; an item that leaves and comes back under the same id before the next press stays seen.
+export const SEEN_DIR = '.cache/session-status/seen'
+const seenFile = async ($: EngineInterface) => {
+  const r = await projectRoot($)
+  return r ? `${await homePath($, SEEN_DIR)}/${await hex16(r)}.json` : undefined
+}
+export function parseSeen(text: string): Record<string, string[]> | undefined {
+  try {
+    const o: unknown = JSON.parse(text)
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return undefined
+    return Object.fromEntries(Object.entries(o).filter((e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every(isStr)))
+  } catch { return undefined }
+}
+const readSeen = async ($: EngineInterface, file: string | undefined) =>
+  (file ? parseSeen(String(await $.fs.read(file).catch(() => ''))) : undefined) ?? {}
+let seenRead = false
+// A section drawn with no entry yet (folded by config, never pressed): what it held at first sight counts as seen,
+// so a fold set before this release stays folded. A render can't write: the next sweep stores them (flushSeeds).
+const seenSeeds = new Map<string, string[]>()
+async function flushSeeds($: EngineInterface) {
+  const have = await read($, seenItems)
+  for (const [slug, ids] of seenSeeds) if (have && !have[slug]) await markItemsSeen($, slug, ids)
+  seenSeeds.clear()
+}
+let seenQueue: Promise<unknown> = Promise.resolve()
+// No root yet: left unread (null), tried again next sweep. A press before it keeps its slug over the disk's.
+async function loadSeen($: EngineInterface) {
+  if (seenRead) return
+  const file = await seenFile($)
+  if (!file) return
+  seenRead = true
+  const disk = await readSeen($, file)
+  await update($, seenItems, c => ({ ...disk, ...c }))
+}
+// Writes go one at a time, each merging into the file as it is then, so two quick presses don't drop one.
+function markItemsSeen($: EngineInterface, slug: string, ids: string[]) {
+  const run = seenQueue.then(async () => {
+    await update($, seenItems, c => ({ ...c, [slug]: ids }))
+    const file = await seenFile($)
+    if (file) await $.fs.write(file, JSON.stringify({ ...(await readSeen($, file)), [slug]: ids }))
+  }).catch((err: unknown) => $.ui.toast(`Seen items not saved (${err instanceof Error ? err.message : String(err)}): this pane only`))
+  seenQueue = run
+  return run
+}
 async function loadActions($: EngineInterface): Promise<Actions | null> {
   const root = await projectRoot($)
   if (!root) return null
@@ -1045,7 +1094,7 @@ function refresh($: EngineInterface) {
     const [status, pending, urls, acts, term] = await Promise.all([
       // A full sweep waits on the tracker, messages and accounts: ~5 min on a slow network; under the 10-min tick.
       runStatus($, [], { timeoutMs: 420_000 }), runStatus($, ['--pending']), runStatus($, ['--urls']), loadActions($),
-      runStatus($, ['--config', 'terminal']), refreshActivity($), secsRead,
+      runStatus($, ['--config', 'terminal']), refreshActivity($), secsRead, loadSeen($).then(() => flushSeeds($)).catch(() => undefined),
     ])
     await update($, actions, () => acts)
     // A name only: a failed run's `failed: …` text means none.
@@ -1508,6 +1557,7 @@ export const register: Register = on => {
     const inbox = init.inbox ? await watchInbox($, init.inbox) : ''
     // The asks the last coordinator left: the store of this (maybe just moved) root.
     asksFile = undefined
+    seenRead = false
     await loadAsks($, init.setUp).catch(() => undefined)
     const queued = queuedText(await liveAsks($), await $.clock.now())
     return { result: `${isPlaced ? 'Coordinator pane open.' : 'The pane is waiting: this terminal is too narrow, or this app draws no panes (a background session, the agent view, a Desktop session over WSL). Tell the user /coordinator opens it at any width; where none shows, ask in plain text.'} ${named}${init.text}${inbox}${queued}` }
@@ -1798,6 +1848,7 @@ export const register: Register = on => {
     const busy = await read($, refreshing)
     const secConf = await read($, paneSections)
     const unhide = await read($, showHidden)
+    const seenConf = await read($, seenItems)
     const sel = await read($, selected)
     const hidden = await read($, dismissed)
     const rowBusy = await read($, rowsBusy)
@@ -2005,7 +2056,9 @@ export const register: Register = on => {
     // toggles open and line and writes it to the person's config (session-status --pane-section); a section config
     // can't hold (an adapter's footer), or a failed write, folds for this pane only. A shown hidden one folds and writes
     // like any other (a way to unhide it); the last line hides them again.
-    // Folding Waiting on you or Decisions gives its rows no digit, so 1-9 go to the rows still drawn.
+    // Waiting on you, Decisions and Needs action pass their items (each with an id) so a folded one still draws
+    // those new since its title was last pressed (the seen store), with their digits, and says `· N new`; a title
+    // press marks every item there seen. The rows a fold leaves out get no digit, so 1-9 go to the rows drawn.
     // The section a row is drawn in, for its card- usage name (a fixed title, never the row's text).
     let curSec: string | undefined
     const inSection = <T,>(id: string, f: () => T) => { curSec = id; try { return f() } finally { curSec = undefined } }
@@ -2020,9 +2073,12 @@ export const register: Register = on => {
         </Button>
       </Box>
     )
-    const section = (id: string, count: number, body: (accent: Color) => RenderElement[]) => {
+    type Item = { id: string; draw: (accent: Color) => RenderElement[] }
+    const section = (id: string, count: number, body: ((accent: Color) => RenderElement[]) | Item[]) => {
       const state = sectionState(secConf, id)
       const slug = sectionSlug(id)
+      const items = typeof body === 'function' || !ON_YOU.includes(slug) ? undefined : body
+      const drawAll = (accent: Color) => (typeof body === 'function' ? body(accent) : body.flatMap(i => i.draw(accent)))
       if (state === 'hidden') { hiddenSecs.push(`${slug} ${count}`); if (!unhide) return false }
       const isOpen = state !== 'line' // a hidden one shown by the last line's press shows its rows; a press folds it
       const toggle = async () => {
@@ -2030,6 +2086,7 @@ export const register: Register = on => {
         logSection(isOpen ? 'fold' : 'unfold', id)
         secPressedAt.set(slug, ++secPresses)
         await update($, paneSections, c => ({ ...c, [slug]: next }))
+        if (items) void markItemsSeen($, slug, items.map(i => i.id))
         if (!PANE_SLUGS.has(slug)) return
         const r = await $.process.run(['bash', `${$.plugin.root}/skills/orchestrating-sessions/session-status`, '--pane-section', slug, next], { timeoutMs: 30_000 })
           .catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: err instanceof Error ? err.message : String(err) }))
@@ -2037,14 +2094,20 @@ export const register: Register = on => {
         secUnsaved.add(slug)
         $.ui.toast(`${id}: ${oneLine(r.stderr || r.stdout) || `exit ${r.exitCode}`}; ${next === 'line' ? 'folded' : 'opened'} for this pane only`)
       }
+      // Until the store is read nothing counts as new: no flash of every item. No entry yet: seenSeeds.
+      const seed = () => seenSeeds.get(slug) ?? (items ? seenSeeds.set(slug, items.map(i => i.id)).get(slug) : undefined)
+      const known = seenConf ? seenConf[slug] ?? seed() : undefined
+      const seenIds = new Set(known)
+      const fresh = !isOpen && items && known ? items.filter(i => !seenIds.has(i.id)) : []
       const accent = accentOf(id)
-      const head = `▌ ${id.toUpperCase()} ${count} ▾ `
+      const news = fresh.length ? ` · ${fresh.length} new` : ''
+      const head = `▌ ${id.toUpperCase()} ${count} ▾${news} `
       return (
         <Box flexDirection="column" marginTop={isOpen ? 1 : 0}>
           <Button key={`sec-${id}`} plain onPress={toggle}>
-            <Text color={accent}>▌</Text> <Text bold color={accent}>{id.toUpperCase()}</Text> <Text bold color={accent}>{count}</Text> <Text color={accent}>{isOpen ? '▾' : '▸'}</Text> <Text color={accent} dimColor wrap="truncate-end">{'─'.repeat(Math.max(cols - head.length, 0))}</Text>
+            <Text color={accent}>▌</Text> <Text bold color={accent}>{id.toUpperCase()}</Text> <Text bold color={accent}>{count}</Text> <Text color={accent}>{isOpen ? '▾' : '▸'}</Text>{news && <Text bold color="warning">{news}</Text>} <Text color={accent} dimColor wrap="truncate-end">{'─'.repeat(Math.max(cols - head.length, 0))}</Text>
           </Button>
-          {isOpen ? inSection(id, () => body(accent)) : []}
+          {isOpen ? inSection(id, () => drawAll(accent)) : inSection(id, () => fresh.flatMap(i => i.draw(accent)))}
         </Box>
       )
     }
@@ -2610,16 +2673,18 @@ export const register: Register = on => {
           </Text>] : []),
         ]) : false}
 
-        {waitItems.length + behind.length > 0 && section('Waiting on you', waitItems.length + behind.length, accent => [
+        {waitItems.length + behind.length > 0 && section('Waiting on you', waitItems.length + behind.length, [
           // 1-9 select them while the pane has focus (ctrl+x tab): the keyboard's way to what needs you.
-          ...waitItems.flatMap(i => footerItem('Waiting on you', i, accent, waitingOf(i) ? digit() : undefined)),
-          ...behind.flatMap(p => pendRow(p, ACCENT.Pending, true, digit())),
+          ...waitItems.map(i => ({ id: waitingOf(i)?.name ?? i, draw: (accent: Color) => footerItem('Waiting on you', i, accent, waitingOf(i) ? digit() : undefined) })),
+          ...behind.map(p => ({ id: p.text, draw: () => pendRow(p, ACCENT.Pending, true, digit()) })),
         ])}
-        {decisions.length > 0 && section('Decisions', decisions.length, () => decisions.flatMap(p => pendRow(p, ACCENT.Pending, true, digit())))}
+        {decisions.length > 0 && section('Decisions', decisions.length, decisions.map(p => ({ id: p.text, draw: () => pendRow(p, ACCENT.Pending, true, digit()) })))}
 
         {GROUPS.map(g => {
           const ts = orderTasks(st?.tasks.filter(t => groupOfT.get(t) === g) ?? [], factsOf)
-          return ts.length > 0 && section(g, ts.length, accent => ts.flatMap(t => taskRow(t, accent, g)))
+          return ts.length > 0 && section(g, ts.length, g === 'Needs action'
+            ? ts.map(t => ({ id: `${t.key} ${factsOf(t)[0].chip}`, draw: (accent: Color) => taskRow(t, accent, g) }))
+            : accent => ts.flatMap(t => taskRow(t, accent, g)))
         })}
 
         {st?.sections.filter(s => s !== waitSec && s.title !== RESOLVED).map(footer)}

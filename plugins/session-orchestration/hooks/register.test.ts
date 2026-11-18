@@ -1311,3 +1311,82 @@ Stale:
   expect(await ui.find({ type: 'Button', key: 'askrow-1' })).toBeUndefined()
   await ui.unmount()
 })
+
+// A folded on-you section still draws what is new since its title was last pressed (the seen store, per root).
+const DECIDE = [1, 2, 3, 4, 5].map(n => `- 2026-10-05 PROJ-100${n} on you: pick ${n}.`)
+function seenPane(on: On, pending: string, store: Record<string, string>) {
+  const writes: string[] = []
+  mock.env(on, { HOME: '/h' })
+  on('process.run', async (_, e) => {
+    const arg = e.argv[2]
+    const stdout = arg === '--root' ? '/work' : arg === '--pending' ? pending : arg === '--urls' ? URLS : arg === '--agents' ? AGENTS
+      : e.argv[3] === 'pane.sections' ? '{"decisions":"line","waiting-on-you":"line","needs-action":"line"}' : arg === '--pane-section' ? '' : STATUS
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('fs.read', async (_, e) => {
+    const t = store[e.path]
+    if (t === undefined) throw new Error('ENOENT')
+    return { value: t }
+  })
+  on('fs.write', async (_, e) => {
+    if (e.path.startsWith(SEEN)) writes.push(e.path)
+    store[e.path] = e.text
+    return { value: undefined }
+  })
+  on('session.id', async () => ({ value: 'sess-c' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  return writes
+}
+const SEEN = '/h/.cache/session-status/seen/'
+const seenStore = (o: Record<string, string[]>) => ({ [SEEN]: JSON.stringify(o) })
+// The store's path holds the root's hash: the test learns it from the first write, so seed every path under SEEN.
+function seeded(o: Record<string, string[]>) {
+  const store: Record<string, string> = {}
+  return new Proxy(store, { get: (t, k) => (typeof k === 'string' && k.startsWith(SEEN) ? t[k] ?? seenStore(o)[SEEN] : t[k as string]) })
+}
+
+test('a folded Decisions draws only its new items, keyed 1-9; a title press marks them all seen', async ($, on) => {
+  mock.clock(on)
+  const store = seeded({ decisions: ['PROJ-1001 on you: pick 1.', 'PROJ-1002 on you: pick 2.', 'PROJ-1003 on you: pick 3.'], 'waiting-on-you': ['pr review proj-4679'] })
+  const writes = seenPane(on, DECIDE.slice(0, 4).join('\n'), store)
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  await ui.press({ key: 'refresh' })
+  const dec = (n: number) => ui.find({ type: 'Button', key: `on-PROJ-100${n} on you: pick ${n}.:lead` })
+  // Waiting on you's one session is seen: folded, it draws nothing, so the new decision gets key 1.
+  expect((await ui.find({ type: 'Button', key: 'sec-Waiting on you' }))?.text).toMatch(/WAITING ON YOU 1 ▸ ─/)
+  expect((await ui.find({ type: 'Button', key: 'sec-Decisions' }))?.text).toMatch(/DECISIONS 4 ▸ · 1 new ─/)
+  expect((await dec(4))?.props.hotkey).toBe('1')
+  expect(await dec(1)).toBeUndefined()
+  // Needs action, folded by config before it had a store entry: what it holds now counts as seen
+  expect((await ui.find({ type: 'Button', key: 'sec-Needs action' }))?.text).toMatch(/NEEDS ACTION 1 ▸ ─/)
+  expect(await ui.find({ type: 'Button', key: 'task-PROJ-4679' })).toBeUndefined()
+  await ui.press({ key: 'refresh' }) // the next sweep stores it
+  // opening it draws all four and marks them seen, in the project's store
+  await ui.press({ key: 'sec-Decisions' })
+  expect((await ui.find({ type: 'Button', key: 'sec-Decisions' }))?.text).toMatch(/DECISIONS 4 ▾ ─/)
+  expect(await dec(1)).toBeDefined()
+  expect(new Set(writes)).toEqual(new Set([expect.stringMatching(/^\/h\/\.cache\/session-status\/seen\/[0-9a-f]{16}\.json$/)]))
+  expect(JSON.parse(store[writes[0] ?? ''] ?? '{}')).toEqual({
+    'needs-action': ['PROJ-4679 needs you'],
+    decisions: ['PROJ-1001 on you: pick 1.', 'PROJ-1002 on you: pick 2.', 'PROJ-1003 on you: pick 3.', 'PROJ-1004 on you: pick 4.'], 'waiting-on-you': ['pr review proj-4679'],
+  })
+  // folded again: nothing new
+  await ui.press({ key: 'sec-Decisions' })
+  expect((await ui.find({ type: 'Button', key: 'sec-Decisions' }))?.text).toMatch(/DECISIONS 4 ▸ ─/)
+  expect(await dec(4)).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a fresh pane reads the seen store: a folded Decisions still draws only the new one', async ($, on) => {
+  mock.clock(on)
+  const store = seeded({ decisions: ['PROJ-1001 on you: pick 1.', 'PROJ-1002 on you: pick 2.', 'PROJ-1003 on you: pick 3.', 'PROJ-1004 on you: pick 4.'], 'waiting-on-you': ['pr review proj-4679'] })
+  seenPane(on, DECIDE.join('\n'), store)
+  await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: PROPS })
+  await ui.press({ key: 'refresh' })
+  expect((await ui.find({ type: 'Button', key: 'sec-Decisions' }))?.text).toMatch(/DECISIONS 5 ▸ · 1 new ─/)
+  expect((await ui.find({ type: 'Button', key: 'on-PROJ-1005 on you: pick 5.:lead' }))?.props.hotkey).toBe('1')
+  expect(await ui.find({ type: 'Button', key: 'on-PROJ-1004 on you: pick 4.:lead' })).toBeUndefined()
+  await ui.unmount()
+})
