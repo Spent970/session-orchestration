@@ -924,6 +924,21 @@ grep -q '^cfg --bg --model haiku -n PROJ-9-c3b ' <<<"$c" || { echo "handover --m
 echo '{"type":"assistant","requestedModel":"claude-opus-5-5[1m]","effort":"high","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
 run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
 grep -qF 'cfg --bg --model claude-opus-5-5[1m] --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "handover lost [1m]: $c"; exit 1; }
+# The old session's advisor (advisorModel on its last reply) goes on too where it pairs with the successor's model:
+# kept on another model it still ranks above, dropped below the model (sonnet under opus) and under a fable main.
+cp "$proj/$kid.jsonl" "$tmp/kid-adv.jsonl"
+echo '{"type":"assistant","requestedModel":"claude-opus-5-5[1m]","effort":"high","advisorModel":"claude-opus-5-5","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -qF 'cfg --bg --model claude-opus-5-5[1m] --effort high --advisor opus -n PROJ-9-c3b ' <<<"$c" || { echo "handover lost its advisor: $c"; exit 1; }
+run --handover "$kid" --model haiku -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model haiku --advisor opus -n PROJ-9-c3b ' <<<"$c" || { echo "handover --model lost the advisor: $c"; exit 1; }
+echo '{"type":"assistant","effort":"high","advisorModel":"claude-sonnet-5-5","message":{"model":"claude-opus-5-5"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model claude-opus-5-5 --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept an advisor below its model: $c"; exit 1; }
+echo '{"type":"assistant","effort":"high","advisorModel":"claude-fable-5-2","message":{"model":"claude-fable-5-2"}}' >> "$proj/$kid.jsonl"
+run --handover "$kid" -- 'x' >/dev/null; c=$(calls)
+grep -q '^cfg --bg --model claude-fable-5-2 --effort high -n PROJ-9-c3b ' <<<"$c" || { echo "handover kept an advisor on fable: $c"; exit 1; }
+cp "$tmp/kid-adv.jsonl" "$proj/$kid.jsonl"
 # --escalate: one rung above what it would get (effort first, then haiku → sonnet → opus, then max); the top rung or an
 # unknown effort is refused before anything is stopped.
 out=$(run --handover "$kid" --escalate -- 'x'); c=$(calls)
@@ -1050,6 +1065,13 @@ printf '%s\n' '{"type":"assistant","effort":"high","message":{"model":"claude-fa
   '{"type":"assistant","message":{"model":"<synthetic>"}}' > "$proj/$o.jsonl"
 out=$(as "$o" --successor) && rc=0 || rc=$?
 [ "$rc" = 2 ] && grep -qF "claude --model claude-fable-5-2 --effort high -n p-coordinator-next" <<<"$out" || { echo "--successor kept no model: $rc $out"; exit 1; }
+# Its advisor too, where it pairs (a fable one the user picked by hand stays while config fable.accounts is unset).
+echo '{"type":"assistant","effort":"high","advisorModel":"claude-fable-5-2","message":{"model":"claude-opus-5-5"}}' >> "$proj/$o.jsonl"
+out=$(as "$o" --successor) && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "claude --model claude-opus-5-5 --effort high --advisor fable -n p-coordinator-next" <<<"$out" || { echo "--successor lost its advisor: $rc $out"; exit 1; }
+echo '{"type":"assistant","effort":"high","advisorModel":"claude-fable-5-2","message":{"model":"claude-fable-5-2"}}' >> "$proj/$o.jsonl"
+out=$(as "$o" --successor) && rc=0 || rc=$?
+[ "$rc" = 2 ] && grep -qF "claude --model claude-fable-5-2 --effort high -n p-coordinator-next" <<<"$out" || { echo "--successor kept an advisor on fable: $rc $out"; exit 1; }
 # Its account's Fable limit hit (the overall one not): the config's coordinator model instead, until it resets.
 u=$tmp/.cache/session-status/usage; mkdir -p "$u"; printf 'ffffffff-0000-0000-0000-000000000000\trow-f\n' > "$u/cfg.fable"
 printf '{"type":"assistant","uuid":"row-f","quotaLimits":{"status":"rejected","rateLimitType":"seven_day_overage_included","resetsAt":%s}}\n' $(( $(date +%s) + 3600 )) > "$proj/ffffffff-0000-0000-0000-000000000000.jsonl"
@@ -2081,6 +2103,22 @@ echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low",
   [ "$(run --kind scan:S a 2>/dev/null)" = '--model haiku --effort low' ] &&
   [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/;s/"sess":"[0-9a-f]+"/"sess":H/')" = '{"t":T,"k":"start","what":"scan","model":"haiku","effort":"low","sess":H,"size":"S"}' ] &&
   ! run --kind build:L 2>/dev/null && ! run --kind build:X a 2>/dev/null && ! run --kind build:l 2>/dev/null || { echo "--kind with a size"; tail -2 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
+# plan.advisor.KIND (the advisor trial): unset, no --advisor (every check above); set, --advisor A printed and logged
+# only where it pairs with the kind's model (not below it, nor a fable one where the account has no fable), else one
+# stderr line why; a value other than fable, opus or sonnet is ignored.
+echo '{"telemetry": "local", "plan": {"advisor": {"build": "opus", "mechanical": "sonnet", "research": "sonnet", "scan": "fable", "retro": "haiku"}}}' > "$tmp/.config/session-orchestration/config.json"
+[ "$(run --kind build kind-adv)" = '--model opus --effort medium --advisor opus' ] &&
+  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/;s/"sess":"[0-9a-f]+"/"sess":H/')" = '{"t":T,"k":"start","what":"build","model":"opus","effort":"medium","sess":H,"advisor":"opus"}' ] &&
+  [ "$(run --kind mechanical)" = '--model sonnet --effort medium --advisor sonnet' ] &&
+  [ "$(run --kind research 2>&1)" = "$(printf 'plan.advisor.research=sonnet doesn'"'"'t pair with opus (an advisor ranks at or above the model, none on fable): no --advisor\n--model opus --effort high')" ] &&
+  [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = '{"t":T,"k":"start","what":"research","model":"opus","effort":"high"}' ] &&
+  [ "$(run --kind scan 2>&1)" = "$(printf 'plan.advisor.scan=fable: this account has no fable (config fable.accounts, or its Fable limit is hit): no --advisor\n--model haiku --effort low')" ] &&
+  [ "$(run --kind retro 2>/dev/null)" = '--model opus --effort xhigh' ] && [ "$(run --kind review)" = '--model opus --effort xhigh' ] ||
+  { echo "--kind with plan.advisor"; tail -2 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }
+echo '{"fable": {"accounts": ["~/cfg"]}, "plan": {"advisor": {"scan": "fable", "design": "fable"}}}' > "$tmp/.config/session-orchestration/config.json"
+[ "$(run --kind scan)" = '--model haiku --effort low --advisor fable' ] && [ "$(run --kind design 2>/dev/null)" = '--model fable --effort xhigh' ] ||
+  { echo "--kind with a fable advisor"; exit 1; }
+echo '{"telemetry": "local", "plan": {"models": {"scan": "claude-fable-5-1/low", "review": "sonnet/high"}}}' > "$tmp/.config/session-orchestration/config.json"
 (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state bash -c '. "$0"; usage task escalate sonnet xhigh PROJ-9' "$here/../../lib.sh")
 [ "$(tail -1 "$tmp/state/session-orchestration/usage.jsonl" | sed -E 's/"t":[0-9]+/"t":T/')" = "{\"t\":T,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"sonnet\",\"effort\":\"xhigh\",\"sess\":\"$(printf PROJ-9 | shasum -a 256 | cut -c1-12)\"}" ] ||
   { echo "usage escalate line"; tail -1 "$tmp/state/session-orchestration/usage.jsonl"; exit 1; }

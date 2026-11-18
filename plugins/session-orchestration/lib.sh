@@ -183,8 +183,10 @@ coord_start() {
   # SESSION_STATUS_CLAUDE: the claude command, as for --successor (a dev build's `claude --plugin-dir DIR`).
   local me   # ROOT's config, not the caller's
   me=$(cd "$1" 2>/dev/null && config plan.models.coordinator 2>/dev/null)
+  local a   # config plan.advisor.coordinator, where it pairs (as session-status --kind)
+  a=$(cd "$1" 2>/dev/null && a=$(config plan.advisor.coordinator 2>/dev/null) && advisor_ok "${me%%/*}" "$a" && echo "$a")
   # %q: a [1m] model would glob in the shell that runs cmd
-  cmd="${SESSION_STATUS_CLAUDE:-claude}${me:+ --model $(printf %q "${me%%/*}") --effort ${me#*/}} -n $n 'Act as a coordinator'"
+  cmd="${SESSION_STATUS_CLAUDE:-claude}${me:+ --model $(printf %q "${me%%/*}") --effort ${me#*/}}${a:+ --advisor $a} -n $n 'Act as a coordinator'"
   load_terminal; out=$(open_view "$n" "$1" "$cmd" 2>&1); rc=$?
   case $rc in
     0) [ "${out#reused}" = "$out" ] || { echo "a tab titled \"$n\" is open already ($out), so nothing started: close it, or run $cmd there"; return 1; }
@@ -281,6 +283,8 @@ detect_host() {
 #                       (coordinator: what coord_start, the feature doc's start and --successor fall back to when the
 #                       predecessor's transcript names none; fable/medium under an account fable.accounts lists;
 #                       design, review, retro: fable/xhigh there)
+#   plan.advisor.KIND   fable | opus | sonnet: session-status --kind KIND adds `--advisor A` for that kind's task
+#                       starts, only where advisor_ok holds (the advisor trial; KIND as plan.models)   default unset: off
 #   handoff.at.KIND     integer tokens, 0 = off: context where hooks/context-watch.sh asks a session to hand off,
 #                       KIND chunk | task | coordinator (person only)   default 125000, 145000, 145000 (a task's
 #                       successor starts at ~45K: at 120K, handed-over review rounds handed off again within minutes)
@@ -342,6 +346,22 @@ escalate_rung() {
     *) return 1 ;;
   esac
 }
+# advisor_ok MODEL ADVISOR: ADVISOR (fable, opus or sonnet) pairs with a MODEL main session: at or above it (opus takes
+# fable or opus, sonnet and haiku take any), never on a fable main (only fable pairs there: the same model again), and
+# fable only where fable_ok (FABLE_OK=1: anyway, as model_ok). Claude Code drops an advisor below its main model
+# silently, so nothing prints one that doesn't pair.
+advisor_ok() {
+  case $2 in fable) [ "${FABLE_OK:-}" = 1 ] || fable_ok ;; opus|sonnet) ;; *) false ;; esac &&
+    case $1 in *fable*) false ;; *opus*) [ "$2" != sonnet ] ;; *sonnet*|*haiku*) ;; *) false ;; esac
+}
+# last_advisor TRANSCRIPT: the advisor (fable, opus or sonnet) its session last ran with (advisorModel on its last
+# main-thread reply), else nothing.
+last_advisor() {
+  local a
+  a=$(grep '"type":"assistant"' "$1" 2>/dev/null | jq -r 'select(.type == "assistant" and .isSidechain != true) | .advisorModel // ""' 2>/dev/null | tail -1)
+  [[ $a =~ (fable|opus|sonnet) ]] && echo "${BASH_REMATCH[1]}"
+  return 0
+}
 # last_model TRANSCRIPT: "MODEL EFFORT" its session last ran on (its last main-thread reply; EFFORT is empty from a
 # Claude Code that didn't record it), fable included; prints nothing when no reply names a valid one.
 last_model() {
@@ -358,9 +378,10 @@ config() {
     tracker|host|key_pattern|approvals.delegate|approvals.pr_create|features.accounts|features.accounts_weekly_switch|features.review_inbox|features.notify|start.mode|start.kinds.feedback_apply|terminal|messages|feedback.mode|feedback.repo_dir|feedback.project_dir|telemetry|pending.file|history.dirs|fable.accounts) ;;
     features.retro|retro.scope|retro.schedule|retro.account|retro.sections) ;;
     plan.enabled|plan.max_parallel|plan.models.design|plan.models.build|plan.models.mechanical|plan.models.review|plan.models.release|plan.models.scan|plan.models.coordinator|plan.models.retro|plan.models.research) ;;
+    plan.advisor.design|plan.advisor.build|plan.advisor.mechanical|plan.advisor.review|plan.advisor.release|plan.advisor.scan|plan.advisor.coordinator|plan.advisor.retro|plan.advisor.research) ;;
     handoff.at.chunk|handoff.at.task|handoff.at.coordinator|handoff.hard_after|handoff.stop_room|compact.window) ;;
     pane.sections) pane_sections; return 0 ;;
-    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window pane.sections)" >&2; return 2 ;;
+    *) echo "unknown config key: ${key:-(none)} (one of tracker host key_pattern approvals.delegate approvals.pr_create features.accounts features.accounts_weekly_switch features.review_inbox features.notify start.mode start.kinds.feedback_apply features.retro retro.scope retro.schedule retro.account retro.sections terminal messages feedback.mode feedback.repo_dir feedback.project_dir telemetry pending.file history.dirs fable.accounts plan.enabled plan.max_parallel plan.models.{design,build,mechanical,review,release,scan,coordinator,retro,research} plan.advisor.{design,build,mechanical,review,release,scan,coordinator,retro,research} handoff.at.{chunk,task,coordinator} handoff.hard_after handoff.stop_room compact.window pane.sections)" >&2; return 2 ;;
   esac
   v=$(coord_json | jq -r --arg k "$key" 'getpath($k | split(".")) | if . == null then empty else tostring end')
   [ -n "$v" ] && case $key in
@@ -389,6 +410,7 @@ config() {
     history.dirs|fable.accounts) local l; l=$(jq -r 'if type == "array" and all(.[]; type == "string" and length > 0 and (test("\n") | not)) then .[] else error end' <<<"$v" 2>/dev/null) && v=$l && ok=1 ;;
     plan.max_parallel) [[ $v =~ ^[1-9][0-9]{0,2}$ ]] && ok=1 ;;
     plan.models.*) [[ $v == */* ]] && model_ok "${v%%/*}" "${v#*/}" && ok=1 ;;
+    plan.advisor.*) case $v in fable|opus|sonnet) ok=1 ;; esac ;;
     handoff.*|compact.window) [[ $v =~ ^(0|[1-9][0-9]{0,6})$ ]] && ok=1 ;;
     features.notify) [[ $v =~ ^(0|[1-9][0-9]{0,2})$ ]] && ok=1 ;;
     feedback.repo_dir) [[ $v == '~'/* ]] && v=$HOME/${v#'~/'}; [ -d "$v" ] && ok=1 ;;
@@ -402,7 +424,7 @@ config() {
     approvals.pr_create) local pr; pr=$(plugin_root) && [ "$pr" = "$(find_root)" ] && echo true || echo false ;;
     approvals.delegate|features.*) echo false ;; terminal) echo plain ;; messages) echo none ;;
     start.mode) echo read_only ;; start.kinds.feedback_apply) config start.mode ;;
-    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts|retro.schedule|retro.sections) ;;
+    feedback.mode) echo auto ;; feedback.repo_dir|feedback.project_dir|pending.file|history.dirs|fable.accounts|retro.schedule|retro.sections|plan.advisor.*) ;;
     retro.scope) echo project ;; retro.account) echo "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ;; telemetry) [ -n "$v" ] && echo off || echo full ;;   # a mistyped value opts out
     plan.enabled) echo true ;; plan.max_parallel) echo 3 ;;
     plan.models.*) case ${key#plan.models.} in design|review) v=opus/xhigh ;; build|coordinator) v=opus/medium ;;
@@ -460,7 +482,8 @@ pane_section_set() {
 # est and act in K of context growth; act may be left out) or start (session-status --kind: a plain task start, NAME
 # its kind, then its model, effort and optionally the -n session name, logged as sess: the first 12 hex of its sha256,
 # so retro can join a start to its session by hashing session names; the name isn't in clear, but someone who knows or
-# guesses a name can confirm it; then optionally its size S, M or L, logged as size) or escalate (session-status
+# guesses a name can confirm it; then optionally its size S, M or L, logged as size; env ADVISOR, the advisor it
+# starts with, logged as advisor) or escalate (session-status
 # --handover --escalate: NAME task or chunk, then the successor's model and effort and the old session's name, as
 # sess). With telemetry=full only, the fault kinds too, as `usage NAME KIND [N [AT]]`, each with the plugin's version
 # as v: block (a hook's deny or ask: NAME approved-action-deny|-ask or coordinator-guard-cd|-edit, AT the hook file:line
@@ -485,6 +508,7 @@ usage() {
     x=",\"model\":\"$3\",\"effort\":\"$4\""
     [ $# -ge 5 ] && x+=",\"sess\":\"$(sha256_of <(printf %s "$5") | cut -c1-12)\""
     [ $# = 6 ] && x+=",\"size\":\"$6\""
+    [ "$2" = start ] && [[ ${ADVISOR:-} =~ ^(fable|opus|sonnet)$ ]] && x+=",\"advisor\":\"$ADVISOR\""
   elif [ "${2:-}" = chunk ]; then
     [[ ${3:-} =~ ^[a-z][a-z0-9.-]{0,39}$ && ${4:-} =~ ^(low|medium|high|xhigh|max)$ && ${5:-} =~ ^[0-9]{1,4}$ &&
        ${6:-0} =~ ^[0-9]{1,5}$ && $# -le 6 ]] || return 0

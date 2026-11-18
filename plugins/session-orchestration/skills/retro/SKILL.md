@@ -80,7 +80,10 @@ and no heading.
 - `kinds [days]` reads the usage log's `start` lines (`session-status --kind KIND NAME`), joins each to its session
   by hashed name (and the successors it handed over to), and gives per kind, model and effort: starts, joined, cost,
   share reaching `reply … done`, handovers, nudges (every cross-session message in, answers and approvals too),
-  minutes to done and escalations (`--handover --escalate`); an S or L start (`--kind build:L`) is its own row.
+  minutes to done and escalations (`--handover --escalate`); an S or L start (`--kind build:L`) is its own row, and
+  so is a start with an advisor (config `plan.advisor.KIND`, as `build+fable`), with `advisor_calls_median` and
+  `advisor_usd` (its subagents' calls too, which `usd` leaves out: it isn't a share of `usd`; from the release after
+  plan.advisor).
   Every command's cost uses each request's model's list rates (from the release after the `kinds`
   report; before it, all at Opus rates): to compare with a run from before that, rerun its window with `--until`.
 - Replies folder: the one the project's `CLAUDE.md` names (its "Replies folder" line). None named: stop and

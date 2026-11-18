@@ -27,6 +27,13 @@ export RETRO_NOW; RETRO_NOW=$(at '2026-11-16 13:00')
 out=$(run "$root" --dry-run)
 grep -q '^due: project' <<<"$out" && grep -q '^due: plugin' <<<"$out" && grep -q 'claude --bg --model opus --effort xhigh -n retro-plugin-' <<<"$out" &&
   [ "$(calls)" = 0 ] && [ ! -e "$replies/retro-project.stamp" ] || fail "--dry-run: both due, nothing started, no stamp" "$out"
+# The dry run shows --kind's --advisor too (plan.advisor.retro), only where it pairs.
+cp "$root/.claude/coordination.local.json" "$tmp/cfg.bak"
+echo '{"features":{"retro":true},"retro":{"scope":"both","schedule":"mon 12:00"},"plan":{"advisor":{"retro":"opus"}}}' > "$root/.claude/coordination.local.json"
+out=$(run "$root" --dry-run); grep -q 'claude --bg --model opus --effort xhigh --advisor opus -n retro-plugin-' <<<"$out" || fail "--dry-run: the advisor" "$out"
+echo '{"features":{"retro":true},"retro":{"scope":"both","schedule":"mon 12:00"},"plan":{"advisor":{"retro":"sonnet"}}}' > "$root/.claude/coordination.local.json"
+out=$(run "$root" --dry-run); grep -q 'claude --bg --model opus --effort xhigh -n retro-plugin-' <<<"$out" || fail "--dry-run: no advisor below the model" "$out"
+cp "$tmp/cfg.bak" "$root/.claude/coordination.local.json"
 run "$root" --scheduled
 [ "$(calls)" = 2 ] && grep -q '^--bg --model opus --effort xhigh -n retro-project-.* Session task: retro run, scope project\.' "$tmp/claude.calls" &&
   grep -q -- '-n retro-plugin-.*scope plugin\.' "$tmp/claude.calls" || fail "due: both scopes start one session each" "$(cat "$tmp/claude.calls")"

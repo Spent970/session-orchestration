@@ -371,7 +371,7 @@ printf '%s\n' "{\"t\":1791824400,\"k\":\"start\",\"what\":\"build\",\"model\":\"
   "{\"t\":1791825000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" \
   "{\"t\":1791820000,\"k\":\"escalate\",\"what\":\"task\",\"model\":\"opus\",\"effort\":\"high\",\"sess\":\"$(h kind-worker)\"}" >> "$st/usage.jsonl"
 out=$(XDG_STATE_HOME=$tmp/state retro kinds 7)
-[ "$(grep -v '^kind' <<<"$out")" = $'build\topus\tmedium\t2\t1\t10.0\t10.0\t1.00\t1\t1\t30\t1\nscan\thaiku\tlow\t1\t1\t1.0\t1.0\t0.00\t0\t0\t-\t0' ] ||
+[ "$(grep -v '^kind' <<<"$out")" = $'build\topus\tmedium\t2\t1\t10.0\t10.0\t1.00\t1\t1\t30\t1\t0\t0.0\nscan\thaiku\tlow\t1\t1\t1.0\t1.0\t0.00\t0\t0\t-\t0\t0\t0.0' ] ||
   fail "kinds: join by hashed name and Supersedes:, haiku rates, done, handovers, nudges, minutes, escalations after the start" "$out"
 out=$(RATES=1,1,1,1 XDG_STATE_HOME=$tmp/state retro kinds 7)
 grep -q $'^build\topus\tmedium\t2\t1\t2.0\t' <<<"$out" || fail "kinds: RATES prices every model alike" "$out"
@@ -387,6 +387,19 @@ echo "{\"t\":1791828000,\"k\":\"start\",\"what\":\"review\",\"model\":\"opus\",\
 out=$(XDG_STATE_HOME=$tmp/state retro kinds 7)
 grep -q $'^scan\thaiku\tlow\t1\t1\t1.0\t' <<<"$out" && grep -q $'^review:L\topus\txhigh\t1\t1\t21.25\t' <<<"$out" ||
   fail "kinds: a reused name joins the later start only; older opus and 5-minute cache-write rates" "$out"
+# kind-adv started with a fable advisor (plan.advisor.build): its own request is 1M opus input ($5) plus one advisor
+# call of 1M fable input ($8, left out of the request's totals); a subagent's call, logged twice, is 1M sonnet ($3).
+cat > "$a/dddddd05-1111.jsonl" <<'EOF'
+{"type":"custom-title","customTitle":"kind-adv"}
+{"type":"user","timestamp":"2026-10-12T17:00:10.000Z","message":{"content":"Work on kind-adv: go"}}
+{"type":"assistant","timestamp":"2026-10-12T17:00:11.000Z","requestId":"d6","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1000000,"iterations":[{"type":"message","input_tokens":1000000},{"type":"advisor_message","model":"claude-fable-5-2","input_tokens":1000000}]}}}
+EOF
+mkdir -p "$a/dddddd05-1111/subagents"
+for i in 1 2; do echo '{"type":"assistant","timestamp":"2026-10-12T17:01:00.000Z","message":{"id":"m7","model":"claude-haiku-5-5","usage":{"iterations":[{"type":"advisor_message","model":"claude-sonnet-5-5","input_tokens":1000000}]}}}'; done > "$a/dddddd05-1111/subagents/agent-x.jsonl"
+echo "{\"t\":1791824400,\"k\":\"start\",\"what\":\"build\",\"model\":\"opus\",\"effort\":\"medium\",\"sess\":\"$(h kind-adv)\",\"advisor\":\"fable\"}" >> "$st/usage.jsonl"
+out=$(XDG_STATE_HOME=$tmp/state retro kinds 7)
+grep -q $'^build+fable\topus\tmedium\t1\t1\t13.0\t13.0\t0.00\t0\t0\t-\t0\t2\t11.0$' <<<"$out" && grep -q $'^build\topus\tmedium\t2\t1\t10.0\t' <<<"$out" ||
+  fail "kinds: an advisor start is its own arm; fable rates; advisor calls and cost, subagents' once each" "$out"
 
 # handoff: a coordinated root with one open entry (reworded once) and one resolved twice (recurring), whose history
 # one session read
