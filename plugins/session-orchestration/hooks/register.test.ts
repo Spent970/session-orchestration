@@ -824,7 +824,8 @@ test('cancel_approval removes asks by key, by id or by question, and a stale cli
     tool: 'mcp__session-orchestration__ask_approval', key, question, options: [`Yes, ${question}`, `No, ${key}`],
   })
   let cancelled: unknown
-  on('ui.press', async (_, e, next) => {
+  // The Button is the plugin's: from engine 2.1.327 a hook that doesn't name the plugin doesn't see its press.
+  on('ui.press', { plugin: 'session-orchestration' }, async (_, e, next) => {
     if (e.element === 'ask-6-0') cancelled = (await cancel('PROJ-2')).result
     return next(e)
   })
