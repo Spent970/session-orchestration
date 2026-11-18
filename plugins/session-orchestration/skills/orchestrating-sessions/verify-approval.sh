@@ -39,7 +39,7 @@ case "$PWD/" in "$cwd"/*) ;; *) case "$cwd/" in "$PWD"/*) ;; *) reject "source c
 . "$(dirname "$0")/../../lib.sh" || reject "lib.sh not found"
 CUR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}; CUR=${CUR%/}
 IFS=$'\037' read -r _ s_name _ _ _ s_cwd s_kind _ <<<"$(list_sessions | awk -F'\t' -v id="$id" '$1 == id' | head -1 | tr '\t' '\037')"
-f=$CUR/projects/$(printf '%s' "$cwd" | sed 's/[^A-Za-z0-9]/-/g')/$id.jsonl
+f=$CUR/projects/$(enc_path "$cwd")/$id.jsonl
 ref=$(date +%s)
 if [ -n "$s_name$s_cwd" ]; then
   [ "$s_name" = "$sender" ] || reject "sender isn't the source session"

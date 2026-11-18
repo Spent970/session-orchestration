@@ -285,7 +285,7 @@ ROOT=$(find_root); cd "$ROOT" || exit 1
 # This project's coordinator names (and its handoff's -next, -prev-K): never read as a task key, which a name-shaped
 # key_pattern (tracker none) would otherwise match (issue 44).
 CNRE="$(coord_name "$ROOT")(-next)?(-prev-[0-9]+)?"
-ENC=$(sed 's/[^A-Za-z0-9]/-/g' <<<"$ROOT")
+ENC=$(enc_path "$ROOT")
 RESOLVED='Resolved (idle a week)'   # the pane's RESOLVED (hooks/register.tsx)
 NOW=$(date +%s); RESOLVE_S=$(( ${SESSION_STATUS_RESOLVE_DAYS:-7} * 86400 ))
 
@@ -1093,7 +1093,7 @@ if [ -n "$YDAY" ]; then
   # The project's transcript folders and those of folders under it (worktrees, child repos).
   # ponytail: `/` and `-` encode alike, so a sibling `ROOT-x` counts too.
   tdirs=$( { echo "$ROOT"; adapter session-dirs 2>/dev/null | sed "s#^~#$HOME#"; } | grep . | while read -r d; do
-    e=$CUR/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$d"); ls -d "$e" "$e"-* 2>/dev/null; done | sort -u)
+    e=$CUR/projects/$(enc_path "$d"); ls -d "$e" "$e"-* 2>/dev/null; done | sort -u)
   # The user's commits since an epoch, merges left out (the code host reports those): repo, time, source ref,
   # unpushed (1: on no remote branch), subject.
   commits() {

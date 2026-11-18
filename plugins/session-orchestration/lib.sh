@@ -135,7 +135,10 @@ replies_path() {
 }
 # proj_dir [ROOT]: ROOT's own folder in the state dir (replies/, memory.md, the handoff file, the briefs, tasks/), outside
 # every checkout so a worktree-isolated session writes there; ROOT's physical path, other characters as -.
-proj_dir() { local r=${1:-${ROOT:-$(find_root)}}; echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$r")"; }
+proj_dir() { local r=${1:-${ROOT:-$(find_root)}}; echo "${XDG_STATE_HOME:-$HOME/.local/state}/session-orchestration/projects/$(enc_path "$r")"; }
+# enc_path PATH: PATH as one folder name, each character but a letter or digit a - (Claude Code's project folders, the
+# state folders). project-memory's cases and memory-init spell it out: that plugin can't source this file.
+enc_path() { sed 's/[^A-Za-z0-9]/-/g' <<<"$1"; }
 # pending_path [ROOT]: config pending.file, absolute (relative: to ROOT); empty when unset.
 pending_path() {
   local p; p=$(config pending.file 2>/dev/null) && [ -n "$p" ] || return 0
