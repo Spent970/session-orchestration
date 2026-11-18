@@ -12,7 +12,9 @@
    A change to what setup writes, or to where a project's files live, ships its migration: see "Adding a migration" in
    `plugins/session-orchestration/skills/setting-up-coordination/migrations.md`.
 2. Before committing: `claude plugin test plugins/<plugin>`, `tsc -p plugins/<plugin>` (needs the
-   engine's generated `.claude-plugin/types/`, untracked), `claude plugin validate plugins/<plugin>` and
+   engine's generated `.claude-plugin/types/`, untracked: copy it from the main checkout into a new worktree first, or
+   tsc finds no tsconfig and writes stray `.js` next to the sources; if `claude plugin test` fails, compare with
+   main before blaming your change), `claude plugin validate plugins/<plugin>` and
    `./scrub-check.sh` (no personal or company names: examples use `PROJ-123`, paths `/home/u/…`), and only the shell
    suites (`*.test.sh`) beside the files you changed. In `session-status.test.sh` run only the sections your change
    touches: `bash session-status.test.sh NAME…`, picking each `if section NAME; then` block that runs the option or
