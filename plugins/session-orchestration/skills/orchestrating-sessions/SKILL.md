@@ -154,7 +154,7 @@ or blocked. When finished: reply with done and the check that proves it.'`
 - Its closing line stays, for every kind: Sonnet and Haiku sessions (mechanical, scan) skip a done report the brief
   doesn't ask for, and you end up polling and nudging them.
 - `--model`/`--effort`: size the task into a `plan.models` kind with the `choosing-model-effort` skill, run
-  `session-status --kind <kind> <session-name>` first (the `-n` value), as its own call, and paste the `--model M --effort E` it prints
+  `session-status --kind <kind> <session-name>` first (the `-n` value), as its own call, and paste the flags it prints whole (`--model M --effort E`, and ` --advisor A` when config `plan.advisor.<kind>` sets one)
   (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for retro. `fable` only as `--kind` prints it
   (config `fable.accounts`, `choosing-model-effort`) or when the user names it: then set it by hand. A handover or fresh restart of that task takes the same flags without running `--kind` again, so the task logs
   one start.

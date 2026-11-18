@@ -24,6 +24,7 @@ changes. It only measures and proposes; the user approves.
 | `retro.sections` | JSON list of section names: `units`, `context`, `waste`, `feedback`, `coordinator`, `memory`, `protocol`, `features`, `sizing` | unset: every section of the scope |
 | `plan.models.retro` | `model/effort` a retro run starts on (`session-status --kind retro NAME`) | `fable/xhigh` under an account `fable.accounts` lists, else `opus/xhigh` |
 | `plan.models.research` | `model/effort` for a research task (`--kind research`): a question answered from sources outside the project | `opus/high` |
+| `plan.advisor.<kind>` | `fable` \| `opus` \| `sonnet`: the advisor trial's arm for that kind (`--kind` adds `--advisor A` where it pairs); `kinds` reports it as its own row (`build+fable`) | unset: off |
 
 A value outside its set falls back to the default with one warning line.
 

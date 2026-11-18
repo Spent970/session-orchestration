@@ -40,7 +40,9 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project
   kinds [days=7]                  per kind/model/effort of the usage log's start lines (session-status --kind KIND NAME),
                                   joined to sessions by hashed name and their successors: starts, joined, USD (sum,
                                   median), share reaching `reply … done`, handovers, nudges, median minutes to done,
-                                  escalations; a sized start (--kind build:L) groups as build:L
+                                  escalations, median advisor calls per start and their USD (subagents' too); a
+                                  sized start (--kind build:L) groups as build:L, one with an advisor
+                                  (plan.advisor.KIND) as build+fable
   trial [days=28]                 the planner trial's arms side by side (tasks with a chunk session vs the rest):
                                   units, median USD and tokens per unit, peak, compactions, handoffs, /code-review
                                   findings and runs per unit, step-ins per unit
@@ -66,17 +68,18 @@ Transcripts: <account>/projects/*/*.jsonl for every account dir ($CLAUDE_CONFIG_
 each distinct projects/ tree once (accounts that share one through a symlink are read once).
 The window is the `days` before --until (UTC, default now): rerun an old window with --until.
 Cost prices each request at its model's list rates (USD/Mtok in, out, cache read, 1-hour cache write: opus 5,25,0.5,10,
-sonnet 3,15,0.3,6, haiku 1,5,0.1,2, older opus 4/4.1 and haiku 3/3.5 at theirs; any other model, fable too, as opus;
-5-minute cache writes at 1.25x input); env RATES="in,out,cr,cw" prices every model alike.
+sonnet 3,15,0.3,6, haiku 1,5,0.1,2, fable 8,40,0.8,16, older opus 4/4.1 and haiku 3/3.5 at theirs; any other model as
+opus; 5-minute cache writes at 1.25x input); env RATES="in,out,cr,cw" prices every model alike. A request's advisor calls
+(usage.iterations of type advisor_message, left out of its totals) are added at the advisor model's rates.
 """
 import glob, html, json, os, re, statistics, sys, time
 from datetime import datetime, timezone
 
 # Model id pattern -> list rates, first match wins: older generations before their family.
-# shortcut: fable and unknown models are priced as opus; add a row when their list rate is known.
+# shortcut: unknown models are priced as opus; add a row when their list rate is known.
 RATES = [(r"opus-4-(?:1-)?2025|3-opus", (15, 75, 1.5, 30)), (r"3-5-haiku", (0.8, 4, 0.08, 1.6)),
          (r"3-haiku", (0.25, 1.25, 0.03, 0.5)), (r"opus", (5, 25, 0.5, 10)), (r"sonnet", (3, 15, 0.3, 6)),
-         (r"haiku", (1, 5, 0.1, 2))]
+         (r"haiku", (1, 5, 0.1, 2)), (r"fable", (8, 40, 0.8, 16))]
 RATES_ALL = tuple(map(float, os.environ["RATES"].split(","))) if os.environ.get("RATES") else None
 HOME = os.path.expanduser("~")
 P = lambda s: datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -158,6 +161,18 @@ def req_tokens(u):
             cw - w5 * 0.375)
 
 
+def advisor(u):
+    """A request's advisor calls as (calls, USD): its usage.iterations of type advisor_message, each a read of the
+    transcript at the advisor model's rates, which the request's own token totals leave out."""
+    its = [x for x in u.get("iterations") or [] if isinstance(x, dict) and x.get("type") == "advisor_message"]
+    return len(its), sum(usd(*req_tokens(x), x.get("model")) for x in its)
+
+
+def req_usd(u, model):
+    """A request's cost: its own tokens at MODEL's rates plus its advisor calls."""
+    return usd(*req_tokens(u), model) + advisor(u)[1]
+
+
 def clip(s, n=220):
     return re.sub(r"\s+", " ", str(s))[:n]
 
@@ -192,7 +207,7 @@ def sessions(days=7):
                     seen.add(rid)
                     ctx = u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0)
                     peak = max(peak, ctx)
-                    cost += usd(*req_tokens(u), m.get("model"))
+                    cost += req_usd(u, m.get("model"))
                     out += u.get("output_tokens", 0); cw += u.get("cache_creation_input_tokens", 0)
                     cr += u.get("cache_read_input_tokens", 0); inp += u.get("input_tokens", 0)
                 for b in c if isinstance(c, list) else []:
@@ -325,7 +340,7 @@ def requests(f, whole=False):
         m = o.get("message") or {}
         u = m.get("usage") or {}
         yield ts, u.get("input_tokens", 0) + u.get("cache_read_input_tokens", 0) + u.get("cache_creation_input_tokens", 0), \
-            usd(*req_tokens(u), m.get("model"))
+            req_usd(u, m.get("model"))
 
 
 def context(days=7, split="", project=""):
@@ -547,10 +562,11 @@ SUP = re.compile(r"(?:Supersedes: |[Yy]ou replace (?:session )?)([0-9a-f]{8})")
 
 def stat(f):
     """One session's numbers inside the window, for chunks and trial. growth: the sum of context increases between
-    requests (each message id once), not counting a session's first request or the one after a compaction."""
+    requests (each message id once), not counting a session's first request or the one after a compaction. adv, adv_usd:
+    its advisor calls and their cost, its subagents' included (usd has only its own thread's, as for every request)."""
     s = dict(sid=os.path.basename(f)[:8], first="", ts0="", ts1="", growth=0, peak=0, inp=0, out=0, cr=0, cw=0,
              turns=0, comp=0, models={}, findings=0, reviews=0, steps=0, done_t=set(), usd=0.0, names=set(), nudges=0,
-             done_at="")
+             done_at="", adv=0, adv_usd=0.0)
     seen, prev, done_ids, reply_ids = set(), None, set(), set()
     for _, o in lines(f):
         ts, t = o.get("timestamp") or "", o.get("type")
@@ -580,7 +596,8 @@ def stat(f):
                 s["inp"] += u.get("input_tokens", 0); s["out"] += u.get("output_tokens", 0)
                 s["cr"] += u.get("cache_read_input_tokens", 0); s["cw"] += u.get("cache_creation_input_tokens", 0)
                 s["turns"] += 1
-                s["usd"] += usd(*req_tokens(u), m.get("model"))
+                n, c = advisor(u); s["adv"] += n; s["adv_usd"] += c
+                s["usd"] += usd(*req_tokens(u), m.get("model")) + c   # req_usd, its advisor scanned once
                 s["ts1"] = max(s["ts1"], ts)
                 mod = re.search(r"opus|sonnet|haiku|fable", str(m.get("model")))
                 if mod:
@@ -620,10 +637,16 @@ def stat(f):
         return None
     # /code-review runs in a subagent (the session's subagents/ transcripts): it reports through ReportFindings, or as
     # a ```json list of findings (each with a failure_scenario) in its last message.
+    # Each subagent consults the advisor on its own: its calls count too (each message id once).
     for sub in glob.glob(f"{f[:-6]}/subagents/*.jsonl"):
-        last = ""
+        last, sub_seen = "", set()
         for _, o in lines(sub):
             if o.get("type") == "assistant" and not out_of(o.get("timestamp") or ""):
+                m = o.get("message") or {}
+                rid = m.get("id") or o.get("requestId")
+                if rid and rid not in sub_seen:
+                    sub_seen.add(rid)
+                    n, c = advisor(m.get("usage") or {}); s["adv"] += n; s["adv_usd"] += c
                 for b in (o.get("message") or {}).get("content") or []:
                     if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "ReportFindings":
                         s["findings"] += len((b.get("input") or {}).get("findings") or [])
@@ -660,7 +683,7 @@ def stats():
 
 def log_lines(k):
     """The usage log's lines of kind K (lib.sh usage), up to the window's end: chunk {t, what, model, effort, est, act},
-    start {t, what, model, effort, sess, size}, escalate {t, what, model, effort, sess}."""
+    start {t, what, model, effort, sess, size, advisor}, escalate {t, what, model, effort, sess}."""
     log = os.path.join(STATE, "usage.jsonl")
     if not os.path.exists(log):
         return []
@@ -674,7 +697,8 @@ def kinds(days=7):
     Supersedes: successors),
     USD (sum, median per start), the share whose `reply … done` the gate let through, handovers, nudges (cross-session
     messages in), median minutes from start to done, escalations (session-status --handover --escalate). KIND carries the
-    start's size (build:L) when it had one. A start without sess (before the name was logged) is unjoined."""
+    start's size (build:L) when it had one and its advisor (build+fable) when it logged one, and advisor calls per start
+    (median) and their USD sum, subagents' included. A start without sess (before the name was logged) is unjoined."""
     import hashlib
     window(days)
     ss = stats()
@@ -702,8 +726,10 @@ def kinds(days=7):
         hs = {o.get("sess")} | {hashlib.sha256(n.encode()).hexdigest()[:12] for s in g for n in s["names"]}
         e = sum(1 for x in escs if x.get("sess") and x.get("sess") in hs and o["t"] <= x["t"] < nxt)
         kind = o.get("what", "?") + (f":{o['size']}" if o.get("size") in ("S", "L") else "")   # M: as configured
+        kind += f"+{o['advisor']}" if o.get("advisor") and isinstance(o["advisor"], str) else ""   # a trial arm: build+fable
         groups.setdefault((kind, o.get("model", "?"), o.get("effort", "?")), []).append((o["t"], g, e))
-    print("kind\tmodel\teffort\tstarts\tjoined\tusd\tusd_median\tdone_share\thandovers\tnudges\tminutes_to_done\tescalations")
+    print("kind\tmodel\teffort\tstarts\tjoined\tusd\tusd_median\tdone_share\thandovers\tnudges\tminutes_to_done\tescalations"
+          "\tadvisor_calls_median\tadvisor_usd")
     for (kind, model, effort), rows in sorted(groups.items()):
         j = [(t, g) for t, g, _ in rows if g]
         cost = [sum(s["usd"] for s in g) for _, g in j]
@@ -714,7 +740,9 @@ def kinds(days=7):
                                   f"{len(mins) / len(j):.2f}" if j else "-",
                                   sum(1 for _, g in j for s in g if s.get("handoff")),
                                   sum(s["nudges"] for _, g in j for s in g),
-                                  round(statistics.median(mins)) if mins else "-", sum(e for _, _, e in rows)])))
+                                  round(statistics.median(mins)) if mins else "-", sum(e for _, _, e in rows),
+                                  statistics.median(sum(s["adv"] for s in g) for _, g in j) if j else "-",
+                                  round(sum((s["adv_usd"] for _, g in j for s in g), 0.0), 2)])))
 
 
 def chunks(days=7, *opts):
@@ -1125,7 +1153,7 @@ def triggers(sid, days=7):
             u = m.get("usage") or {}
             a = agg.setdefault(cur, [0, 0, 0.0])
             a[1] += 1
-            a[2] += usd(*req_tokens(u), m.get("model"))
+            a[2] += req_usd(u, m.get("model"))
     for k, (w, n, d) in sorted(agg.items(), key=lambda x: -x[1][2]):
         print(f"{sid}\t{k}\twakes={w}\trequests={n}\tusd={d:.2f}\tper_wake={d / max(w, 1):.2f}")
 

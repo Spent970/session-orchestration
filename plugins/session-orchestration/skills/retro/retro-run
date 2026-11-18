@@ -116,7 +116,8 @@ run)
     name=retro-$sc-$(date +%F)
     task="Session task: retro run, scope $sc. Use the session-orchestration:retro skill and follow it."
     if [ -n "$dry" ]; then   # --config: no start line for a run that starts nothing
-      me=$(cfg plan.models.retro) && me="--model ${me%%/*} --effort ${me#*/}" || me=
+      me=$(cfg plan.models.retro) && { a=$(cfg plan.advisor.retro 2>/dev/null) && (cd "$root" && advisor_ok "${me%%/*}" "$a") && a=" --advisor $a" || a=
+        me="--model ${me%%/*} --effort ${me#*/}$a"; } || me=   # --kind's --advisor, as the real run gets it
     else me=$(cd "$root" && bash "$ss" --kind retro "$name") || me=; fi
     read -ra me <<<"$me"   # words, not globs: a [1m] model stays literal
     cmd=(claude --bg ${me[@]+"${me[@]}"} -n "$name" "$task")

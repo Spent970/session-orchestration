@@ -148,7 +148,8 @@
 #        session-status --pane-section SLUG open|line|hidden   how the coordinator pane draws a section (config
 #                       pane.sections), written to the project's .claude/coordination.local.json; a title press runs it
 #        session-status --kind KIND[:S|M|L] [NAME]   `--model M --effort E` from plan.models.KIND for a task start (a
-#                       size moves the effort a step), logged as a usage start line (NAME, the -n session name, hashed)
+#                       size moves the effort a step), logged as a usage start line (NAME, the -n session name, hashed);
+#                       ` --advisor A` too where config plan.advisor.KIND is set and pairs with the model
 #        session-status --plan FILE [--check | --next | --brief N | --done N]   a design's plan table: waves and chunk
 #                       states, its problems (exit 1), the `claude --bg` lines of the runnable chunks, row N's brief
 #                       skeleton, or (run by chunk N once it landed) its usage chunk line
@@ -196,15 +197,22 @@ fi
 # --kind KIND [NAME]: `--model M --effort E` from plan.models.KIND for a plain task start's `claude --bg` line, logged as
 # a usage start line (lib.sh usage) with NAME (the -n session name) hashed, so `retro.py kinds` ties a kind to its
 # session's cost and outcome. KIND:S | KIND:M | KIND:L sizes it: S one effort step down, L one up (low…max, held at
-# the ends), M as configured; a size needs NAME, and is logged with it.
+# the ends), M as configured; a size needs NAME, and is logged with it. config plan.advisor.KIND set (the advisor
+# trial): ` --advisor A` too, logged on the start line, only where it pairs with the model (lib.sh advisor_ok); else
+# left off with one stderr line saying why.
 if [ "${1:-}" = --kind ]; then
   k=${2:-} sz=; [[ $k =~ ^(.+):([SML])$ ]] && { k=${BASH_REMATCH[1]}; sz=${BASH_REMATCH[2]}; }
   { { [ $# = 2 ] && [ -z "$sz" ]; } || { [ $# = 3 ] && [[ $3 =~ ^[A-Za-z0-9._-]{1,80}$ ]]; }; } && me=$(config "plan.models.$k" 2>/dev/null) ||
     { echo "usage: session-status --kind design|build|mechanical|review|release|scan|coordinator|retro|research[:S|M|L] [SESSION-NAME]" >&2; exit 2; }
   m=${me%%/*} e=${me#*/}
   case $sz in S) e=$(effort_step "$e" -1) ;; L) e=$(effort_step "$e" 1) ;; esac
-  usage "$k" start "$m" "$e" ${3:+"$3"} ${sz:+"$sz"}
-  echo "--model $(printf %q "$m") --effort $e"; exit   # %q: a [1m] model would glob where it's pasted
+  a=$(config "plan.advisor.$k" 2>/dev/null) adv=
+  if [ -z "$a" ]; then :
+  elif ! FABLE_OK=1 advisor_ok "$m" "$a"; then echo "plan.advisor.$k=$a doesn't pair with $m (an advisor ranks at or above the model, none on fable): no --advisor" >&2
+  elif ! advisor_ok "$m" "$a"; then echo "plan.advisor.$k=fable: this account has no fable (config fable.accounts, or its Fable limit is hit): no --advisor" >&2
+  else adv=$a; fi
+  ADVISOR=$adv usage "$k" start "$m" "$e" ${3:+"$3"} ${sz:+"$sz"}
+  echo "--model $(printf %q "$m") --effort $e${adv:+ --advisor $adv}"; exit   # %q: a [1m] model would glob where it's pasted
 fi
 # prev_name NAME: NAME-prev-K, the name a session takes when it hands off (its successor keeps NAME). NAME loses any
 # -prev-K first; K is the lowest number no session of a listed account (lib.sh list_sessions --all: live or
@@ -502,7 +510,10 @@ if [ "${1:-}" = --successor ]; then
   read -r sm se < <(last_model "$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id".jsonl 2>/dev/null | head -1)")
   [[ ${sm:-} != *fable* ]] || ! fable_no "$acct" || sm=   # no fable there (or its Fable limit is hit): config's
   [ -n "${sm:-}" ] || { cm=$(FABLE_ACCT=$acct config plan.models.coordinator 2>/dev/null); sm=${cm%%/*}; se=${cm#*/}; }   # never config's effort on another model
-  cmd="${SESSION_STATUS_CLAUDE:-claude} --model $(printf %q "$sm")${se:+ --effort $se} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
+  # its advisor too, where it still pairs with that model and, for fable, the account has it (the terminal line only)
+  sa=$(last_advisor "$(ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$id".jsonl 2>/dev/null | head -1)")
+  [ -z "$sa" ] || { FABLE_OK=1 advisor_ok "$sm" "$sa" && { [ "$sa" != fable ] || ! fable_no "$acct"; }; } || sa=
+  cmd="${SESSION_STATUS_CLAUDE:-claude} --model $(printf %q "$sm")${se:+ --effort $se}${sa:+ --advisor $sa} -n $n-next 'Act as a coordinator. You succeed \"$n\" (${id:0:8}): end your Start with the successor step (${SELF%/*}/handover.md).'"
   next="Then arm \`$SELF --await ready\` (Bash, run_in_background) and end your turn. From now on act on no message: forward each to the inbox (\`$SELF --inbox-add --from '<sender name> (<id8>)'\`, its text on stdin)."
   # Desktop (claude-desktop, claude-desktop-3p), same account: the coordinator starts the successor as an app session
   # (start_session), so it stays in the sidebar. The successor records its id first: whether start_session's title
@@ -1454,6 +1465,9 @@ fi
 # --escalate: the successor runs one rung above that model/effort (lib.sh escalate_rung: effort up to xhigh, then
 # haiku → sonnet → opus, then max), for a session that failed the same way twice (SKILL.md Rules); refused (exit 2,
 # nothing stopped) at the top rung or when the old model or effort is unknown. Logs a usage escalate line.
+# The old session's advisor (lib.sh last_advisor) goes onto the line as --advisor A, where it still pairs with the
+# successor's model (lib.sh advisor_ok: none once that is fable, an --escalate to fable too) and, for fable, the
+# account it starts under has it.
 if [ -n "$HANDOVER" ]; then
   self= model= effort= esc=
   if [ "${1:-}" = --self ]; then self=1; want=${CLAUDE_CODE_SESSION_ID:-}; shift; else want=${1:-}; [ $# -gt 0 ] && shift; fi
@@ -1551,6 +1565,9 @@ if [ -n "$HANDOVER" ]; then
     [[ $model == *'[1m]' ]] && model='opus[1m]' || model=opus
     pm=" --model $(printf %q "$model")${effort:+ --effort $effort}"
   fi
+  oa=$(last_advisor "$f")
+  [ -z "$oa" ] || { [ -n "$model" ] && FABLE_OK=1 advisor_ok "$model" "$oa" && { [ "$oa" != fable ] || ! fable_no "$(pre_dir "$acct")"; }; } || oa=
+  pm+=${oa:+ --advisor $oa}
   out=$(bash -c "$(bg_cmd "$acct")$pm -n \"\$0\" \"\$1\"" "$new" "$text" 2>&1)
   nid=$(grep -oE 'backgrounded · [0-9a-f]{8}' <<<"$out" | tail -1); nid=${nid##* }
   [ -n "$nid" ] || { echo "${pid:+stopped \"$name\" (${id:0:8}), but }the new session didn't start: $(tail -1 <<<"$out")"; exit 1; }
