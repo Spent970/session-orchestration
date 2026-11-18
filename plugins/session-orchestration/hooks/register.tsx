@@ -10,9 +10,10 @@
 // A session's card also has Peek (its recent turns, session-status --peek), Diff (its worktree against its base,
 // --diff; the patch one press further), and, with a terminal configured (config terminal, e.g. ghostty), Attach in
 // tab / Logs in split (session-status --open; when it opens nothing, the command copied). The header's "all projects"
-// adds OTHER PROJECTS: the live sessions of every other project, every account session-status asks. Its "yesterday" swaps the board
-// for what was worked on since the last working day (session-status --yesterday), for the daily standup, written as
-// a few spoken sentences by a small model (standup-summary), the raw list one key away.
+// adds OTHER PROJECTS: the live sessions of every other project, every account session-status asks. Its "brief" swaps the board
+// for the daily brief since the last working day (session-status --yesterday --json): what moved, what waits on the
+// user, whom they wait on, what is new, what was worked on, a task's own list one press away; on top the standup,
+// written after the project's template by a small model (standup-summary).
 import { atom, read, update } from 'claude-code'
 import type { Color, EngineInterface, Register, RenderElement, RenderNode, SessionRateLimit, ToolCallResult, UiPressArgument } from 'claude-code'
 
@@ -286,7 +287,7 @@ export const fixesOf = (all: Fact[]) => FIXES.filter(f => all.some(x => x.fix ==
 export const BUILTIN_KEYS: Record<string, string> = {
   r: 'Refresh', ...Object.fromEntries(FIXES.map(f => [f.hotkey, f.label])), a: 'Attach', u: 'Refresh (row)',
   k: 'Ask', x: 'Dismiss', c: 'Copy command', z: 'Compact', p: 'Peek', d: 'Diff', w: 'All projects', e: 'Archive',
-  t: 'Attach in tab', l: 'Logs in split', y: 'Yesterday', b: 'Earlier day', n: 'Later day', s: 'Summary or list',
+  t: 'Attach in tab', l: 'Logs in split', y: 'Daily brief', b: 'Earlier day', n: 'Later day', s: 'Brief or list',
 }
 const taken = (key: string) => /^\d$/.test(key) ? 'a 1-9 item key' : BUILTIN_KEYS[key]
 
@@ -298,7 +299,7 @@ const taken = (key: string) => /^\d$/.test(key) ? 'a 1-9 item key' : BUILTIN_KEY
 export const USAGE_EXTRA = ['Stop', 'Run handed','Copy handed', 'Dismiss handed', 'Approval answer', 'Project action', 'Cancel stale']
 // The sections whose title and row presses are logged as fold-SLUG and card-SLUG (retro.py inventories them); a
 // footer the status command or an adapter adds later isn't logged until it's listed here.
-export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Worked on', 'Other work']
+export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Moved', 'Waits on you', 'You wait on', 'New for you', 'Worked on', 'Tasks']
 // Its slug: the title, lowercase, its "(…)" dropped; the ones config pane.sections keeps (lib.sh PANE_SLUGS).
 export const sectionSlug = (title: string) => usageName(title.replace(/\s*\(.*$/, ''))
 const ON_YOU = ['waiting-on-you', 'decisions', 'needs-action']
@@ -532,30 +533,68 @@ export function elsewhereOf(acts: Activity[], agents: string, root: string | und
   const rank = (a: Activity) => (isRunning(a.state) ? 0 : a.status === 'waiting' ? 1 : a.state === 'idle' || a.status === 'idle' ? 2 : 3)
   return acts.filter(a => !here.has(a.id) && !under(root, a.cwd)).sort((a, b) => rank(a) - rank(b) || a.cwd.localeCompare(b.cwd))
 }
-// session-status --yesterday's text: `Since: DAY WEEKDAY (HOW)`, the project's `Note: TEXT` lines (skipped: they're
-// for the summary), an optional `Tracker lookup failed:` with its
-// message indented, then per task `KEY<TAB>STATUS<TAB>TITLE` (a keyless session: `"NAME"`) and its events
-// `  WEEKDAY HH:MM<TAB>TEXT`. A line of none of these (an error) lands in `other`.
-export type YdTask = { key: string; status: string; title: string; events: { when: string; text: string }[] }
-export function parseYesterday(text: string) {
-  const out = { since: '', failed: [] as string[], tasks: [] as YdTask[], other: [] as string[] }
-  let failing = false
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue
-    // Not trimmed at the end: a row with no status and title (`KEY<TAB><TAB>`) keeps its tabs.
-    const [first = '', ...rest] = line.replace(/^ +/, '').split('\t')
-    const last = out.tasks.at(-1)
-    if (line.startsWith('Since: ')) out.since = line.slice(7)
-    else if (line.startsWith('Note: ')) continue // the project's notes for the summary, not for the list
-    else if (line === 'Tracker lookup failed:') failing = true
-    else if (line.startsWith('  ') && rest.length && last) last.events.push({ when: first, text: rest.join('\t') })
-    else if (line.startsWith('  ') && failing) out.failed.push(line.trim())
-    else if (rest.length || /^"[^"]*"$/.test(line)) {
-      failing = false
-      out.tasks.push({ key: first, status: rest[0] ?? '', title: rest.slice(1).join('\t'), events: [] })
-    } else out.other.push(line)
+// session-status --yesterday --json: the daily brief (its format: skills/orchestrating-sessions/session-brief.jq).
+// An item is one fact: its kind (what it is to the user), task key ('': none; a keyless session: `"NAME"`), the
+// people in it, where it is from (commit, session, pr, jira, teams…) and when (epoch seconds). Text that isn't a
+// brief (an error) lands in `other`.
+export type BriefItem = { kind: string; key: string; people: string[]; source: string; at: number; text: string }
+export type Brief = {
+  since: string; how: string; template: string; failed: string[]
+  tasks: Record<string, { status: string; title: string }>; items: BriefItem[]; other: string[]
+}
+export function parseBrief(text: string): Brief {
+  const rec = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null && !Array.isArray(v) ? { ...v } : {})
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  let o: Record<string, unknown> = {}
+  try {
+    o = rec(JSON.parse(text))
+  } catch {
+    // not JSON: shown as it is, below
   }
-  return out
+  if (typeof o.since !== 'string')
+    return { since: '', how: '', template: '', failed: [], tasks: {}, items: [], other: text.split('\n').filter(l => l.trim()) }
+  return {
+    since: o.since, how: str(o.how), template: str(o.template), failed: strs(o.failed), other: [],
+    tasks: Object.fromEntries(Object.entries(rec(o.tasks)).map(([k, v]) => [k, { status: str(rec(v).status), title: str(rec(v).title) }])),
+    items: (Array.isArray(o.items) ? o.items : []).map(rec).map(i => ({
+      kind: str(i.kind), key: str(i.key), people: strs(i.people), source: str(i.source), at: typeof i.at === 'number' ? i.at : 0, text: str(i.text),
+    })),
+  }
+}
+// The brief's sections and the kinds each holds, as session-brief.jq's text view has them. A discussed item shows
+// only in its task's own list (and the standup).
+export const BRIEF_SECTIONS: [string, string[]][] = [
+  ['Moved', ['moved', 'comment']], ['Waits on you', ['todo']], ['You wait on', ['asked', 'waiting']], ['New for you', ['new']], ['Worked on', ['worked']],
+]
+// A section's rows: one per task (an item of no task is its own), the task with the latest item first.
+export function briefRows(items: BriefItem[]) {
+  const rows = new Map<string, BriefItem[]>()
+  items.forEach((it, i) => rows.set(it.key || `~${i}`, [...(rows.get(it.key || `~${i}`) ?? []), it]))
+  const last = (r: BriefItem[]) => Math.max(...r.map(i => i.at))
+  return [...rows.values()].sort((a, b) => last(b) - last(a))
+}
+// An item's text, with the people it doesn't already name.
+export const briefText = (i: BriefItem) => {
+  const who = i.people.filter(p => !i.text.includes(p))
+  return who.length ? `${i.text} (${who.join(', ')})` : i.text
+}
+// A row of sessions under no task key, with nothing but their own text: the brief counts these in one line.
+export const isLoose = (items: BriefItem[]) => !!items[0]?.key.startsWith('"') && items.every(i => i.source === 'session')
+const passing = (i: BriefItem) => i.kind === 'moved' || i.kind === 'comment'
+// A row's line: its sessions as a count (their texts are long), commits without their last subject, of what moved
+// or was said only the latest from each source (where it stands now), the rest whole.
+export function briefLine(items: BriefItem[]) {
+  const sessions = items.filter(i => i.source === 'session').length
+  const rest = items.filter((i, n) => i.source !== 'session' && !(passing(i) && items.slice(n + 1).some(j => j.kind === i.kind && j.source === i.source)))
+    .map(i => (i.kind === 'worked' ? i.text.replace(/ — last: .*/, '') : briefText(i)))
+  return [...(sessions ? [`${sessions} session${sessions === 1 ? '' : 's'}`] : []), ...new Set(rest)].join('; ')
+}
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// An item's time as the brief's text has it: `Wed 10:52`, local.
+const whenOf = (at: number) => {
+  const d = new Date(at * 1000)
+  return `${WEEKDAYS[d.getDay()]} ${d.toTimeString().slice(0, 5)}`
 }
 // The weekday before (-1) or after (1) DAY (YYYY-MM-DD), skipping Saturday and Sunday.
 export function stepDay(day: string, dir: -1 | 1) {
@@ -658,6 +697,8 @@ export const STALE = 'Stale prompts'
 const ACCENT = {
   'Waiting on you': 'warning', Decisions: 'warning', [STALE]: 'inactive', [STALE_ITEMS]: 'inactive', 'Needs action': 'error', 'In review': 'ide', Working: 'suggestion', Landing: 'success',
   Idle: 'inactive', Notices: 'ide', Actions: 'claude', Pending: 'planMode', [RESOLVED]: 'inactive', [OTHER_PROJECTS]: 'inactive',
+  // The brief's (BRIEF_SECTIONS); Worked on takes suggestion.
+  Moved: 'success', 'Waits on you': 'warning', 'You wait on': 'ide', 'New for you': 'permission',
 } as const satisfies Record<string, Color>
 const accentOf = (title: string): Color => (ACCENT as Record<string, Color>)[title] ?? 'suggestion'
 const sessLabel = (s: Sess) => (s.state === 'none' ? `no session${s.maybe && ` (maybe ${s.maybe})`}` : `${s.name} ${s.state}`)
@@ -1395,29 +1436,28 @@ async function togglePeek($: EngineInterface, row: string, kind: Peek['kind'], a
   // Still the one asked for: a press elsewhere meanwhile wins.
   await update($, peek, p => (p?.row === row && p.kind === kind ? { row, kind, text } : p))
 }
-// The Yesterday tab's reading for the picked day (null: the last working day), session-status --yesterday:
-// slow (the tracker), so the last reading stays shown, marked loading, until the new one lands.
+// The brief tab's reading for the picked day (null: the last working day), session-status --yesterday --json:
+// slow (the tracker, the chats), so the last reading stays shown, marked loading, until the new one lands.
 async function loadYesterday($: EngineInterface) {
   const day = await read($, ydDay)
   await update($, ydText, cur => ({ day, text: cur?.text ?? '', at: cur?.at ?? '', loading: true as const }))
-  const text = await runStatus($, ['--yesterday', ...(day ? [day] : [])])
+  const text = await runStatus($, ['--yesterday', '--json', ...(day ? [day] : [])])
   const at = new Date(await $.clock.now()).toTimeString().slice(0, 5)
   // Still the day asked for: a step meanwhile started its own reading.
   if ((await read($, ydDay)) !== day) return
   await update($, ydText, () => ({ day, text, at }))
   await summarize($, text)
 }
-// The reading as a few spoken standup sentences (standup-summary: a small model, cached per day until the day's data
-// changes). The list shows meanwhile and when it fails; the summary is drawn only beside the reading it was made of.
-// Not while the list is chosen (s): a run is a paid model call; switching back starts one. While it runs, the same
-// day's last summary stays up. Only the latest run lands (a refresh meanwhile starts its own).
+// The standup, written from the reading after the project's template (standup-summary: a small model, cached per
+// day until the day's data changes); a brief without a template has none. It is drawn only beside the reading it
+// was made of. While it runs, the same day's last one stays up. Only the latest run lands (a refresh meanwhile
+// starts its own).
 let sumSeq = 0
 async function summarize($: EngineInterface, of: string) {
-  if (!of.startsWith('Since: ')) return update($, ydSum, () => null)
-  if (await read($, ydList)) return
+  const { since, template } = parseBrief(of)
+  if (!template) return update($, ydSum, () => null)
   const mine = ++sumSeq
-  const dayOf = (t: string) => t.slice(0, t.indexOf(' ', 7))
-  await update($, ydSum, s => ({ of, text: s && dayOf(s.of) === dayOf(of) ? s.text : '', loading: true as const }))
+  await update($, ydSum, s => ({ of, text: s && parseBrief(s.of).since === since ? s.text : '', loading: true as const }))
   let text = ''
   let failed: string | undefined
   try {
@@ -2494,64 +2534,90 @@ export const register: Register = on => {
       )
     }
 
-    // The Yesterday tab: what was worked on since the start of the last working day (or the picked one), per
-    // task with its events oldest first, the task with the latest event first. b/n step the start a weekday
-    // back or on; stepping on to today goes back to the last working day.
+    // The brief tab (y): the daily brief since the start of the last working day (or the picked one). A section per
+    // thing it is to the user (BRIEF_SECTIONS), a row per task, the task with the latest item first; a row opens
+    // to the task's own list: every item of it, oldest first. s shows that list for every task instead. On top the
+    // standup, when the project has a template. b/n step the start a weekday back or on; stepping on to today goes
+    // back to the last working day.
     const ydView = () => {
-      const r = parseYesterday(ydRead?.text ?? '')
+      const r = parseBrief(ydRead?.text ?? '')
       // Steps go from the picked day, else the one shown (the last reading stays up while the next loads).
-      const shown = ydPicked ?? r.since.split(' ')[0] ?? ''
+      const shown = ydPicked ?? r.since
       const today = localDay(now)
       const pick = (day: string | null) => async () => {
         await update($, ydDay, () => day)
         await loadYesterday($)
       }
       const later = ydPicked && stepDay(ydPicked, 1)
-      // The summary of the reading shown, unless the list is asked for (s); none yet or failed: the list.
+      // The standup of the reading shown.
       const sum = ydS && ydS.of === ydRead?.text ? ydS : undefined
-      const summary = !ydRaw && sum?.text
-      const keyed = r.tasks.filter(t => !t.key.startsWith('"'))
-      const loose = r.tasks.filter(t => t.key.startsWith('"'))
-      const taskLines = (ts: YdTask[], accent: Color) => ts.flatMap(t => {
-        const href = !t.key.startsWith('"') && !t.key.includes('#') ? linkFor(b?.urls ?? '', 'ticket', { key: t.key }) : undefined
+      const since = r.since && `${r.since} ${WEEKDAYS[new Date(`${r.since}T12:00:00Z`).getUTCDay()]} (${r.how})`
+      const ticket = (key: string) => (key && !key.startsWith('"') && !key.includes('#') ? linkFor(b?.urls ?? '', 'ticket', { key }) : undefined)
+      const events = (its: BriefItem[], accent: Color) => its.map(i =>
+        detail(accent, '│', <Text wrap="wrap"><Text dimColor>{whenOf(i.at)} {i.source}</Text> {briefText(i)}</Text>))
+      const briefRow = (sec: string, its: BriefItem[], accent: Color) => {
+        const [first] = its
+        if (!first) return []
+        const { key } = first
+        const id = `yd-${sec}-${key || `${first.at} ${first.text}`}`
+        const t = r.tasks[key]
+        return row(id, accent, wordChip(its.at(-1)?.source ?? '', accent), [
+          ...(key ? [keySeg(id, key), seg(' ')] : []),
+          ...(t?.title ? [seg(`${t.title} `, { dimColor: true })] : []),
+          ...(key ? [seg('— ', { dimColor: true })] : []),
+          seg(briefLine(its)),
+        ], () => [
+          ...events(key ? r.items.filter(i => i.key === key) : its, accent),
+          link(accent, ticket(key), `${key}${t?.status ? ` · ${t.status}` : ''}`),
+        ].filter((l): l is RenderElement => !!l))
+      }
+      // The list (s): every task with all its items.
+      const tasks = ydRaw ? briefRows(r.items) : []
+      const taskLines = (accent: Color) => tasks.flatMap((its, n) => {
+        const key = its[0]?.key ?? ''
+        const t = r.tasks[key]
+        const href = ticket(key)
         return [
-          <Text key={`yd-${t.key}`} wrap="truncate-end">
+          <Text key={`yd-${key || `#${n}`}`} wrap="truncate-end">
             <Text color={accent}>▸ </Text>
-            {href ? <Link href={href} label={t.key} /> : <Text bold>{t.key}</Text>}
-            {t.status && <Text color={accent}> {t.status}</Text>}
-            {t.title && <Text dimColor> {t.title}</Text>}
+            {href ? <Link href={href} label={key} /> : <Text bold>{key || its[0]?.source}</Text>}
+            {t?.status && <Text color={accent}> {t.status}</Text>}
+            {t?.title && <Text dimColor> {t.title}</Text>}
           </Text>,
-          ...t.events.map((ev, i) => (
-            <Text key={`yd-${t.key}-${i}`} wrap="truncate-end">{'    '}<Text dimColor>{ev.when}</Text>  {ev.text}</Text>
-          )),
+          ...events(its, accent),
         ]
       })
       return (
         <Box flexDirection="column">
           <Box marginTop={1} columnGap={2}>
-            <Text bold>Since {(ydRead?.loading ? '' : r.since) || (ydPicked ?? 'the last working day')}</Text>
+            <Text bold>Since {(ydRead?.loading ? '' : since) || (ydPicked ?? 'the last working day')}</Text>
             {shown && <Button key="yd-earlier" plain hotkey="b" dimColor label="‹ earlier" onPress={() => (logPress($, 'Earlier day'), pick(stepDay(shown, -1))())} />}
             {ydPicked && <Button key="yd-later" plain hotkey="n" dimColor label="later ›" onPress={() => (logPress($, 'Later day'), pick(later && later < today ? later : null)())} />}
             {ydPicked && <Button key="yd-auto" plain dimColor label="last working day" onPress={pick(null)} />}
-            <Button key="yd-list" plain hotkey="s" dimColor label={ydRaw ? 'summary' : 'list'} onPress={async () => { logPress($, 'Summary or list');
-              await update($, ydList, v => !v)
-              const of = (await read($, ydText))?.text ?? ''
-              if (!(await read($, ydList)) && (await read($, ydSum))?.of !== of) await summarize($, of)
-            }} />
+            <Button key="yd-list" plain hotkey="s" dimColor label={ydRaw ? 'brief' : 'list'} onPress={() => (logPress($, 'Brief or list'), update($, ydList, v => !v))} />
           </Box>
-          {ydRead?.loading && <Text dimColor>Reading sessions, commits and the tracker… (half a minute)</Text>}
-          {!ydRaw && sum?.loading && <Text dimColor>{sum.text ? 'Checking the summary against the new reading…' : 'Writing the standup summary… the list meanwhile.'}</Text>}
-          {!ydRaw && sum?.failed && <Text color="warning" wrap="wrap">Summary failed ({sum.failed}): the list instead.</Text>}
-          {summary && (
+          {ydRead?.loading && <Text dimColor>Reading sessions, commits, the tracker and the chats… (half a minute)</Text>}
+          {sum?.loading && <Text dimColor>{sum.text ? 'Checking the standup against the new reading…' : 'Writing the standup…'}</Text>}
+          {sum?.failed && <Text color="warning" wrap="wrap">Standup not written ({sum.failed}).</Text>}
+          {sum?.text && (
             <Box key="yd-summary" marginTop={1} borderStyle="round" borderColor="claude" paddingX={1}>
-              <Text wrap="wrap">{summary}</Text>
+              <Text wrap="wrap">{sum.text}</Text>
             </Box>
           )}
-          {r.failed.length > 0 && <Text color="warning">Tracker lookup failed: {r.failed.join(' ')}</Text>}
+          {r.failed.map((f, i) => <Text key={`yd-failed-${i}`} color="warning" wrap="wrap">Lookup failed: {f}</Text>)}
           {r.other.length > 0 && <Text color="warning">{r.other.join('\n')}</Text>}
-          {ydRead && !ydRead.loading && !r.tasks.length && <Text dimColor>Nothing found for that day.</Text>}
-          {!summary && keyed.length > 0 && section('Worked on', keyed.length, accent => taskLines(keyed, accent))}
-          {!summary && loose.length > 0 && section('Other work', loose.length, accent => taskLines(loose, accent))}
+          {ydRead && !ydRead.loading && r.since && !r.items.length && <Text dimColor>Nothing found since then.</Text>}
+          {!ydRaw && r.items.length > 0 && r.items.every(i => i.kind === 'discussed') && <Text dimColor>Only discussions since then (s lists them).</Text>}
+          {!ydRaw && BRIEF_SECTIONS.map(([title, kinds]) => {
+            const all = briefRows(r.items.filter(i => kinds.includes(i.kind)))
+            const rows = all.filter(its => !isLoose(its))
+            const loose = all.length - rows.length
+            return all.length > 0 && section(title, all.length, accent => [
+              ...rows.flatMap(its => briefRow(title, its, accent)),
+              ...(loose ? [<Text key={`yd-${title}-loose`} dimColor wrap="truncate-end">  {loose} session{loose === 1 ? '' : 's'} on no task (s lists them)</Text>] : []),
+            ])
+          })}
+          {tasks.length > 0 && section('Tasks', tasks.length, taskLines)}
           {hiddenLine()}
         </Box>
       )
@@ -2568,7 +2634,7 @@ export const register: Register = on => {
             {counts && <Text dimColor>  {counts}</Text>}
           </Text>
           <Box flexShrink={0} columnGap={2}>
-            <Button key="yesterday" plain hotkey="y" dimColor label={`yesterday ${yd ? '●' : '○'}`} onPress={async () => { logPress($, 'Yesterday');
+            <Button key="yesterday" plain hotkey="y" dimColor label={`brief ${yd ? '●' : '○'}`} onPress={async () => { logPress($, 'Daily brief');
               let opening = false
               await update($, yesterdayTab, v => (opening = !v))
               // Read afresh each time it opens (a reading from before midnight is another day's), unless one runs.

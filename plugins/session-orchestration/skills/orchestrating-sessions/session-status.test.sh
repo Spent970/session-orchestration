@@ -1029,8 +1029,9 @@ setacct cfg "$(sess "$pid" here idle 1),$(cat "$tmp/e.json")"
   [ "$(run --activity | awk -F'\t' '{print NF "|" $12}')" = "13|$root" ] || { echo "all projects failed"; run --activity --all-projects; exit 1; }
 
 # --yesterday on Monday 2030-01-07: Friday has no prompt of the user's (a day off), so it starts Thursday, and
-# Saturday's work is in. Wednesday's isn't, nor a coordinator's, nor a keyless session that wrote nothing. The
-# adapter's rows give ABC-60 its status and title and add ABC-70; tasks order by their latest event.
+# Saturday's work is in. Wednesday's isn't, nor a coordinator's, nor a keyless session that wrote nothing. The brief
+# is data (--json) that passes its format's check: each item its kind, key, source, time, people and text. An older
+# adapter's `yesterday` rows give ABC-60 its status and title and add ABC-70, as moved items.
 y1=dddddddd-0001-3333-4444-555555555555 y2=dddddddd-0002-3333-4444-555555555555 y3=dddddddd-0003-3333-4444-555555555555
 y4=dddddddd-0004-3333-4444-555555555555 y5=dddddddd-0005-3333-4444-555555555555
 hu() { printf '{"type":"user","origin":{"kind":"human"},"timestamp":"%s","message":{"content":"%s"}}\n' "$1" "$2"; }
@@ -1048,26 +1049,104 @@ cat > "$root/.claude/session-status-adapter" <<EOF
 echo "\$*" > $tmp/yargs
 printf 'ABC-60\tIn Review\tFix it\n  %s\tJira: A → B\nABC-70\tDone\tOther\n  %s\tJira: moved\n' \$((\$2 + 3600)) \$((\$2 + 7200))
 EOF
-out=$(SESSION_STATUS_TODAY=2030-01-07 TZ=UTC run --yesterday | sed $'s/\t*$//')
-diff <(echo "$out") - <<EOF || { echo "yesterday failed"; exit 1; }
-Since: 2030-01-03 Thu (last working day)
-Note: Staging is unreachable by design: never mention it.
-ABC-61
-  Sat 10:00	session "${y2:0:8}" (10:00–10:00): Weekend fix.
-ABC-60	In Review	Fix it
-  Thu 01:00	Jira: A → B
-  Thu 10:30	session "${y1:0:8}" (10:00–10:30): Pushed the fix.
-"probe"
-  Thu 09:00	session "probe" (09:00–09:00): Probe done.
-ABC-70	Done	Other
-  Thu 02:00	Jira: moved
+yd() { SESSION_STATUS_TODAY=2030-01-07 TZ=UTC XDG_CACHE_HOME=$tmp/ycache run --yesterday "$@"; }
+fields='.items[] | [.kind, .key, .source, .at, (.people | join(", ") | if . == "" then "-" else . end), .text] | @tsv'
+out=$(yd --json) && jq --arg mode check -f "$here/session-brief.jq" <<<"$out" || { echo "yesterday: not a brief: $out"; exit 1; }
+diff <(jq -r ".since, .from, .how, .notes[], .template, (.tasks | to_entries[] | \"\(.key) \(.value.status) \(.value.title)\"), ($fields)" <<<"$out") - <<EOF || { echo "yesterday data failed"; exit 1; }
+2030-01-03
+1893628800
+last working day
+Staging is unreachable by design: never mention it.
+
+ABC-60 In Review Fix it
+ABC-70 Done Other
+moved	ABC-60	tracker	1893632400	-	Jira: A → B
+moved	ABC-70	tracker	1893636000	-	Jira: moved
+worked	"probe"	session	1893661200	-	session "probe" (09:00–09:00): Probe done.
+worked	ABC-60	session	1893666600	-	session "${y1:0:8}" (10:00–10:30): Pushed the fix.
+worked	ABC-61	session	1893837600	-	session "${y2:0:8}" (10:00–10:00): Weekend fix.
 EOF
 [ "$(cat "$tmp/yargs")" = "yesterday 1893628800 ABC-60 ABC-61" ] || { echo "yesterday adapter args: $(cat "$tmp/yargs")"; exit 1; }
-# A picked day: Wednesday's work comes in; a failing adapter is shown, indented, and the rest still is.
+# The text view of that data: a line per task under what it is to the user, a task's latest first. No template: no standup.
+diff <(yd) - <<EOF || { echo "yesterday text failed"; exit 1; }
+Since: 2030-01-03 Thu (last working day)
+
+MOVED
+  ABC-70 Other — Jira: moved
+  ABC-60 Fix it — Jira: A → B
+
+WORKED ON
+  ABC-61 — 1 session
+  ABC-60 Fix it — 1 session
+  1 session on no task
+EOF
+# An adapter with `brief`: its items and task heads (JSON lines) go in as they are, key and people optional; a line
+# that isn't JSON, or an object that isn't an item, is reported. With its `standup-template` the text view ends with
+# the standup, written from the data by standup-summary (the model stubbed: it gets the template and the items).
+cat > "$root/.claude/session-status-adapter" <<EOF
+#!/bin/sh
+case \$1 in
+  brief) echo "\$*" > $tmp/yargs
+    echo '{"task":"ABC-60","status":"In Review","title":"Fix it"}'
+    echo '{"kind":"discussed","key":"ABC-60","people":["Ann Lee"],"source":"teams","at":'\$((\$2 + 60))',"text":"the retry limit"}'
+    echo '{"kind":"asked","key":"OPS-7","people":["Bo"],"source":"jira","at":'\$((\$2 + 120))',"text":"a staging database"}'
+    echo '{"kind":"todo","key":"ABC-60","source":"pr","at":'\$((\$2 + 180))',"text":"answer the review"}'
+    echo '{"kind":"waiting","key":"ABC-61","people":["Cy"],"source":"pr","at":'\$((\$2 + 240))',"text":"review by Cy"}'
+    echo '{"kind":"new","people":["Di"],"source":"teams","at":'\$((\$2 + 300))',"text":"can you look at the build?"}'
+    echo '{"kind":"nope","key":"ABC-60","source":"jira","at":1,"text":"x"}'
+    echo 'chats: signed out' ;;
+  standup-template) echo 'Yesterday I worked on <tasks>. Today I will work on <tasks>.' ;;
+  *) exit 2 ;;
+esac
+EOF
+out=$(yd --json) && jq --arg mode check -f "$here/session-brief.jq" <<<"$out" || { echo "yesterday: adapter brief isn't a brief: $out"; exit 1; }
+diff <(jq -r ".template, .failed[], (.tasks | keys[]), ($fields | select(test(\"^worked\") | not))" <<<"$out") - <<EOF || { echo "yesterday adapter brief failed"; exit 1; }
+Yesterday I worked on <tasks>. Today I will work on <tasks>.
+chats: signed out
+not a brief item: {"kind":"nope","key":"ABC-60","source":"jira","at":1,"text":"x"}
+ABC-60
+discussed	ABC-60	teams	1893628860	Ann Lee	the retry limit
+asked	OPS-7	jira	1893628920	Bo	a staging database
+todo	ABC-60	pr	1893628980	-	answer the review
+waiting	ABC-61	pr	1893629040	Cy	review by Cy
+new		teams	1893629100	Di	can you look at the build?
+EOF
+[ "$(cat "$tmp/yargs")" = "brief 1893628800 ABC-60 ABC-61" ] || { echo "brief adapter args: $(cat "$tmp/yargs")"; exit 1; }
+cp "$tmp/bin/claude" "$tmp/claude.keep"
+{ echo '#!/bin/sh'; echo '[ "$1" != -p ] || { cat > '"$tmp"'/ymodel; echo "$*" > '"$tmp"'/ymodel.args; echo "{\"result\":\"Yesterday I fixed it.\"}"; exit 0; }'
+  sed 1d "$tmp/claude.keep"; } > "$tmp/bin/claude"
+diff <(yd) - <<EOF || { echo "yesterday standup failed"; exit 1; }
+Since: 2030-01-03 Thu (last working day)
+Lookup failed: chats: signed out
+Lookup failed: not a brief item: {"kind":"nope","key":"ABC-60","source":"jira","at":1,"text":"x"}
+
+WAITS ON YOU
+  ABC-60 Fix it — answer the review
+
+YOU WAIT ON
+  ABC-61 — review by Cy
+  OPS-7 — a staging database (Bo)
+
+NEW FOR YOU
+  can you look at the build? (Di)
+
+WORKED ON
+  ABC-61 — 1 session
+  ABC-60 Fix it — 1 session
+  1 session on no task
+
+STANDUP
+  Yesterday I fixed it.
+EOF
+grep -qF 'Today I will work on <tasks>.' "$tmp/ymodel.args" && grep -q '"kind":"discussed".*"people":\["Ann Lee"\].*"title":"Fix it"' "$tmp/ymodel" ||
+  { echo "yesterday: the model didn't get the template and the items: $(cat "$tmp/ymodel")"; exit 1; }
+mv "$tmp/claude.keep" "$tmp/bin/claude"
+# A picked day: Wednesday's work comes in; a failing adapter is reported, and the rest still is.
 printf '#!/bin/sh\necho "signed out"; exit 1\n' > "$root/.claude/session-status-adapter"
-out=$(SESSION_STATUS_TODAY=2030-01-07 TZ=UTC run --yesterday 2030-01-02)
-[ "$(head -3 <<<"$out")" = "$(printf 'Since: 2030-01-02 Wed (picked)\nTracker lookup failed:\n  signed out')" ] &&
-  grep -qF '(Wed 10:00–Thu 10:30): Pushed the fix.' <<<"$out" && [ "$(run --yesterday 2030-13-01; echo "rc $?")" = "$(printf 'usage: session-status --yesterday [YYYY-MM-DD]\nrc 2')" ] ||
+out=$(yd 2030-01-02)
+[ "$(head -2 <<<"$out")" = "$(printf 'Since: 2030-01-02 Wed (picked)\nLookup failed: signed out')" ] &&
+  yd --json 2030-01-02 | jq -r '.items[].text' | grep -qF '(Wed 10:00–Thu 10:30): Pushed the fix.' &&
+  [ "$(run --yesterday 2030-13-01; echo "rc $?")" = "$(printf 'usage: session-status --yesterday [YYYY-MM-DD] [--json]\nrc 2')" ] ||
   { echo "yesterday picked day failed: $out"; exit 1; }
 
 # Waiting on you keeps itself current: of blocked sessions, only one whose last turn asks the user (q1) or that

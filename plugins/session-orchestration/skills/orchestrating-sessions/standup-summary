@@ -1,47 +1,60 @@
 #!/bin/bash
-# standup-summary: session-status --yesterday's text on stdin → what the user would say at the daily standup, a few
-# spoken sentences, written by a small model (`claude -p --model haiku`, no tools, no plugins or hooks, no transcript;
-# about $0.003 and 5-15s a run). The pane's Yesterday tab shows it in place of the lists (s swaps).
+# standup-summary: the brief (session-status --yesterday --json) on stdin → the user's standup, written from its
+# items after its `template` (the adapter's `standup-template`: the wording, with a <placeholder> per part) by a
+# small model (`claude -p --model haiku`, no tools, no plugins or hooks, no transcript; about $0.003 and 5-15s a
+# run). A brief without a template gets no standup: nothing printed, exit 0. The pane's brief shows it on top.
 # ponytail: no lock, so two refreshes on one cache miss both pay a run; the pane only starts one per reading.
 # Cached per start day in ${XDG_CACHE_HOME:-~/.cache}/session-orchestration/standup/DAY.txt and written again only
-# when that day's data changes: its fingerprint leaves out sessions' spans and last text lines, which move at every
-# refresh while a session works. Exit 1 with the reason on stdout when the model call fails (or takes over 90s).
+# when that day's data changes: its fingerprint leaves out sessions' times and texts, which move at every refresh
+# while a session works. Exit 1 with the reason on stdout when the model call fails (or takes over 90s).
 # SESSION_STATUS_SUMMARY_MODEL picks another model; standup-summary.test.sh runs it against a stub claude.
 set -uo pipefail
 
-PROMPT="You turn a developer's raw activity log into what they would say at the daily standup: first person, plain
-spoken text, 3 to 5 short sentences, about 60 to 90 words. No lists, no markdown, no times, no commit or PR numbers.
-The log's first line is today, the second since when: if that day is the weekday before today, talk about it as
-yesterday; else say \"on Friday\", \"since Thursday\" and so on. Lead with what got finished (merged, moved to test),
-then what went to review or is in progress, then what waits on someone else. Mention at most the five things that
-matter most.
-Say what each piece of work is in a few plain words a teammate would understand. An uppercase tracker key (like
-ABC-123) may stay, once, followed by those words; never a key alone. Never say a session name or a lowercase task id:
-quoted names and lowercase slugs (like \"cache-ttl-cleanup\") are labels, not speech; say what the work did instead
-(\"shortened how long the cache keeps entries\"), taken from the log's titles and text. Sessions' lines address the
-developer as \"you\": you are the developer, so \"until you grant me access\" becomes \"waiting on access\".
+PROMPT="You write a developer's daily standup update from their activity data, following the template at the end:
+its wording and order, in the first person. Each <…> placeholder says what goes in its place: fill it from the data.
+Drop a clause whose placeholder has nothing in the data; \"etc.\" stands for more clauses of the same kind, never
+print it. Write exactly the template's sentences, no more: one sentence where it has one, a clause where it has a
+clause, and nothing it has no place for. Keep it short enough to say aloud in half a minute: a few words per task,
+similar small tasks as one phrase (\"six small API fixes\"), the least important ones left out. In the template \"I\" and \"me\" are the developer, \"you\" is their AI assistant, whose sessions work for
+them. Output only the standup, as plain spoken text: no lists, no markdown, no times, no commit or PR numbers.
+The data starts with today and the day it goes back to: when that is the weekday before today the template's
+\"yesterday\" holds, else say \"on Friday\", \"since Thursday\" and so on. Then one JSON object per line, each a fact:
+kind, key (the task; title and status are the tracker's), people, source, when, text. The kinds:
+worked: the developer's commits and their sessions' work (source says which); moved: a merge, a deploy, a status
+change; comment: someone's comment for them; discussed: they talked about it with these people; asked: they asked
+these people for it; waiting: they wait on these people (a review, a merge); todo: it needs the developer or their
+assistant next; new: a message, mention or ticket new for them.
+Say what each piece of work is in a few plain words a teammate would understand, from its title and text. An
+uppercase tracker key (like ABC-123) may stay, once, followed by those words; never a key alone. Never say a session
+name or a lowercase task id: quoted names and lowercase slugs (like \"cache-ttl-cleanup\") are labels, not speech.
+Name people as the data does. Sessions' texts address the developer as \"you\": you are the developer.
 Lines starting with \"Note:\" are facts about the project from the developer: follow them, never repeat them.
-Skip noise: probes, sessions that did nothing, tickets only someone else touched. If the log shows nothing, say so in
-one sentence."
+Skip noise: probes, sessions that did nothing, tickets only someone else touched. Mention each task once per part.
+The template:"
 
 summarize() {
-  local input day fp cache out
+  local input day template fp cache
   input=$(cat)
-  day=$(sed -n '1s/^Since: \([0-9-]*\).*/\1/p' <<<"$input")
-  [ -n "$day" ] || { echo "no Since: line in the input"; return 1; }
+  day=$(jq -r '.since // empty' <<<"$input" 2>/dev/null)
+  [ -n "$day" ] || { echo "not a brief on stdin (session-status --yesterday --json)"; return 1; }
+  template=$(jq -r '.template // ""' <<<"$input")
+  [ -n "$template" ] || return 0
   local model=${SESSION_STATUS_SUMMARY_MODEL:-haiku} d pid w rc out err text
-  # The session lines' format is session-status --yesterday's (`session "NAME" (SPAN): LAST`): keep the two in step.
-  # The model and prompt count too, so changing either writes it again.
-  fp=$( { echo "$model"; echo "$PROMPT"; sed -E 's/^(  [^	]*	)?(session|reviewed in session) ("[^"]*").*/\2 \3/' <<<"$input" |
-    sort -u; } | shasum -a 256 | cut -c1-16)
+  # The model, prompt and template count too, so changing any writes it again.
+  # Sorted: items come ordered by time, and two working sessions swap places between refreshes.
+  fp=$( { echo "$model"; echo "$PROMPT"; jq -c '.template, .notes, .tasks, (.items[] | if .source == "session" then {kind, key, text: (.text | sub("\\(.*"; ""))} else . end)' <<<"$input" | LC_ALL=C sort -u
+    } | shasum -a 256 | cut -c1-16)
   cache=${XDG_CACHE_HOME:-$HOME/.cache}/session-orchestration/standup
   mkdir -p "$cache" || return 1
   if [ "$(head -1 "$cache/$day.txt" 2>/dev/null)" = "$fp" ]; then tail -n +2 "$cache/$day.txt"; return 0; fi
   # Its own empty folder: a print run still reads the cwd's settings, and nothing here is the project's. exec: the
   # pid killed at 90s is claude's own; files, not a pipe, so nothing waits on it after.
   d=$(mktemp -d) || return 1
+  # The model reads each item with its task's title and status and a local weekday and time.
   ( cd "$d" && exec claude -p --model "$model" --tools "" --safe-mode --no-session-persistence --max-budget-usd 0.1 \
-    --system-prompt "$PROMPT" --output-format json ) <<<"Today: $(date '+%a %F')"$'\n'"$input" > "$d/out" 2> "$d/err" &
+    --system-prompt "$PROMPT"$'\n'"$template" --output-format json ) > "$d/out" 2> "$d/err" <<<"Today: $(date '+%a %F')
+$(jq -r '.tasks as $t | "Since: \(.since) \(.from | strflocaltime("%a"))", (.notes[] | "Note: \(.)"),
+  (.items[] | . + ($t[.key] // {}) + {when: (.at | strflocaltime("%a %H:%M"))} | del(.at) | tojson)' <<<"$input")" &
   pid=$!
   # &&: a sleep killed below skips the kill, so a reaped pid that got reused is never hit.
   { sleep "${STANDUP_SUMMARY_CAP_S:-90}" && kill "$pid"; } >/dev/null 2>&1 & w=$!

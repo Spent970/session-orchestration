@@ -139,8 +139,40 @@ path with every non-alphanumeric character turned into `-` (`/home/a.b/proj` →
 | `session-status --activity` | What each live session is doing, read fresh from its transcript (no tracker calls, ~1s): id, name, state, transcript written, doing, since, last text line, context tokens, context window, status, kind (tabs; times in epoch seconds). Context tokens are the last main-thread reply's input + cache read + cache creation, or a later `/compact`'s postTokens; the window is 1M when the session's model id has `[1m]` or its context already holds more than 200k tokens, else 200k. Doing is its `in_progress` todo (TodoWrite, TaskCreate/TaskUpdate), else its latest tool call's description, else that call in a few words, else its last text line. Since is when that activity started. Then cwd (where it started) and its command prefix. `--activity --all-projects`: every project's live sessions, in every account it asks. `session-activity.jq` |
 | `session-status --peek ID [N]` | A session's last N (default 12) main-thread entries as markdown, without attaching: the prompts it got, its own text (each cut to 600 characters), its tool calls as `→ Tool: what` lines, then `_Now: …_` (what `--activity` says it does). `session-peek.jq`. The pane's **Peek** |
 | `session-status --search TEXT [DAYS]` | Which session said something, without opening transcripts: one line per hit of TEXT (case- and whitespace-insensitive) in the last DAYS (default 7) of every project and account, newest first, as `NAME (ID8) · YYYY-MM-DD HH:MM · WHO: SNIPPET` (local time, as `--peek` shows it; a session found under two accounts is one session). WHO is `you` (a prompt), `msg` (a message from another session) or `claude` (the session's own text); tool calls and results, subagents and the calling session aren't searched. The snippet starts up to 80 characters before the hit and is capped at 220, with emails, credentials (`token=…`, `Bearer …`, known key prefixes), long opaque strings (keys, SHAs) masked and the home folder shown as `~` (search `~/…` for it). Masked text is never found. Masking is a heuristic: a secret in plain words (`the password is …`) isn't caught. At most 3 hits a session and 30 lines, then `… N more (sessions: M)`; exit 1 with no hit. `--peek ID` reads around a hit. `retro.py search` |
-| `session-status --yesterday [DAY]` | What was worked on from the start of DAY (YYYY-MM-DD; default the last working day: the latest weekday before today with a prompt of the user's in a project transcript or a commit of theirs, within 14 days) up to now, so Monday's covers Friday and the weekend. `Since: DAY WEEKDAY (HOW)`, the adapter's `standup-notes` as `Note: TEXT` lines, then per task `KEY<TAB>STATUS<TAB>TITLE` and its events `  WEEKDAY HH:MM<TAB>TEXT` oldest first, the task with the latest event first. Events: each session active in the window (`session "NAME" (from–to): its last text line`, keyed by its first prompt's key and its `Session task:` markers; a keyless session shows as `"NAME"`; the coordinator is left out), the user's own commits per branch (pushed or not), and the adapter's `yesterday` rows. `session-day.jq`. The pane's **Yesterday** tab |
+| `session-status --yesterday [DAY] [--json]` | The daily brief, from the start of DAY (YYYY-MM-DD; default the last working day: the latest weekday before today with a prompt of the user's in a project transcript or a commit of theirs, within 14 days) up to now, so Monday's covers Friday and the weekend. It is data first: `--json` prints it (The brief, below), the text is a view of that data. `Since: DAY WEEKDAY (HOW)`, a `Lookup failed: TEXT` line per failure, then the sections that have something: `MOVED`, `WAITS ON YOU`, `YOU WAIT ON`, `NEW FOR YOU`, `WORKED ON`, one line per task, the latest first (`KEY TITLE — what happened; …`: sessions as a count, of what moved or was said only the latest from each source, the people a text doesn't name in brackets; sessions under no task as one `N sessions on no task` line). When the adapter has a `standup-template`: `STANDUP` and the text `standup-summary` writes from the data (`not written: REASON` when that fails). `session-day.jq`, `session-brief.jq`. The pane's **brief** tab |
 | `session-status --dir KEY\|ID…` / `--diff KEY\|ID…` | Where a task or session works: a KEY's worktree, else an ID's latest transcript cwd (it follows `cd` and EnterWorktree) as its git top; the first argument that resolves. `--diff` prints `DIR · vs BASE`, `git diff --stat` against the merge-base with the first of `origin/HEAD`, `origin/main`, `origin/master`, `@{upstream}` (none: the uncommitted changes against HEAD), the untracked `?? FILE`s, a blank line, then the patch (cut at 200k; the pane draws 40k). A session that works in a worktree by absolute path (`git -C`) without `cd` resolves to its start folder: pass its task key. The pane's **Diff** |
+
+### The brief
+
+`session-status --yesterday --json` prints one JSON object; `jq --arg mode check -f session-brief.jq` checks one
+against this format (exit 1 and what is wrong on stderr):
+
+```
+{since: "YYYY-MM-DD", from: EPOCH, how: "last working day" | "picked", notes: [TEXT], template: TEXT,
+ failed: [TEXT], tasks: {KEY: {status, title}}, items: [ITEM]}
+ITEM = {kind, key, people: [NAME], source, at: EPOCH, text}
+```
+
+`notes` and `template` are the adapter's `standup-notes` and `standup-template` (`""`: none, so no standup),
+`failed` what couldn't be looked up, `tasks` the status and title of the keys the adapter knows. An item is one fact:
+`key` its task (`""`: none; a session that names no key has `"NAME"`), `people` who else is in it, `source` where it
+comes from as a lowercase word (`session`, `commit`, `pending`, `pr`, `jira`, `teams`, `mail`, `deploy`…), `at` when
+(seconds), `text` one line. Its `kind` says what it is to the user:
+
+| Kind | Meaning | Section |
+|---|---|---|
+| `worked` | The user worked on it: a session active in the window (`session "NAME" (from–to): its last text line`, keyed by its first prompt's key and its `Session task:` markers; the coordinator is left out), their own commits per branch, pushed or not | Worked on |
+| `moved` | It changed state: merged, deployed, a status move, a pending entry resolved | Moved |
+| `comment` | Someone else commented on or reviewed it | Moved |
+| `discussed` | The user talked about it with `people` | (list and standup only) |
+| `asked` | The user asked `people` for something | You wait on |
+| `waiting` | It waits on someone else: a human review, a merge | You wait on |
+| `todo` | It needs the user or their sessions: a ticket to start or continue, a question they were asked | Waits on you |
+| `new` | New for the user: a direct message, a mention, a ticket assigned to them | New for you |
+
+The plugin itself supplies the sessions and commits (`worked`), the resolved pending entries (`moved`, source
+`pending`) and the messages module's current lines (`new`, source `teams` or `mail`). Everything else is the
+adapter's `brief`.
 
 ### Plans and chunks
 
@@ -227,8 +259,10 @@ called with the cwd at the root:
 | `repos` | Git repos holding the worktrees, relative to the root. Default: the root if it's a repo, else its child repos |
 | `pending` | The coordinator's handoff text (decisions waiting on the user, open requests), e.g. `cat` of the project's pending file. Shown in the coordinator pane |
 | `urls` | Link templates for the coordinator pane, one per line: `ticket https://…/{key}` and `pr https://…/repos/{repo}/pull-requests/{id}` (a PR shows in EXTRA as `repo#id`) |
-| `yesterday EPOCH KEY…` | The tracker's and code host's side of `--yesterday` since EPOCH (seconds), for the given keys and whatever else the user touched: per task `KEY<TAB>STATUS<TAB>TITLE`, then `  EPOCH<TAB>TEXT` events (PRs opened, merged, reviewed; status moves; comments). Exit 1: the lookup failed, its message on stdout (shown under `Tracker lookup failed:`); any other non-zero: not supported |
-| `standup-notes` | Facts the standup summary should know about the project, one per line (e.g. a known-down environment it must not mention). `--yesterday` prints them as `Note: TEXT`; the summary follows them and never repeats them, the list leaves them out. Optional |
+| `brief EPOCH KEY…` | The project's side of the daily brief (`--yesterday`) since EPOCH (seconds), for the given keys and whatever else concerns the user: the tracker, the code host, the chats. One JSON object per line: an item (The brief: `kind`, `source`, `at`, `text`, and `key` and `people` when it has them) or a task's head `{"task": KEY, "status": …, "title": …}`. A line that isn't JSON is a failure message: it shows as `Lookup failed: TEXT` and the rest still counts, so one source that is down doesn't lose the others. An object that is no item is named there too. Exit 1: the lookup failed, its message on stdout; any other non-zero: not supported, and `yesterday` is asked instead. Optional |
+| `yesterday EPOCH KEY…` | The older form of `brief`, still read when `brief` isn't answered (and by the retro run for merges): per task `KEY<TAB>STATUS<TAB>TITLE`, then `  EPOCH<TAB>TEXT` events (PRs opened, merged, reviewed; status moves; comments). Its events become `moved` items of source `tracker`. Exit 1: the lookup failed, its message on stdout; any other non-zero: not supported |
+| `standup-template` | The standup the user gives, as text with `<…>` placeholders that say what goes where (`Yesterday I worked on <tasks with commits>, discussed <tasks> with <people>. Today I will work on <tasks that need me>.`). With it, `--yesterday` and the pane's brief tab add a standup: `standup-summary` fills the template from the brief's items. Without it there is the brief only. Optional |
+| `standup-notes` | Facts the standup should know about the project, one per line (e.g. a known-down environment it must not mention). They are the brief's `notes`; the standup follows them and never repeats them. Optional |
 | `session-dirs` | More directories (absolute or `~/…`, one per line) whose sessions belong to the project, e.g. a tooling repo its coordinator starts sessions in. Their sessions never own a task: they show under Other sessions. Default: the root only |
 | `mine` | The person's own task keys, one per line (whose messages the coordinator forwards: a messages module's `mine` field; default the keys of the last sweep's rows). The GitHub template lists the keys of your open PRs and `#N` of open issues assigned to you, or unassigned and closed by one of your PRs. Optional |
 | `notices` | Short lines about things outside the tracker (a new chat message, a mention), one per item. Sweep only, run in parallel with `tasks`, printed under a **Notices** footer. Keep a line identical while its item is unchanged. `--changes` reports a new or changed notice but not one that went away, so reading a message doesn't wake the watcher. Chat and mail belong in a messages module (Modules), whose lines come first |
@@ -328,18 +362,21 @@ the user) and **Logs in split** (`l`: `claude logs` beside it); neither on an in
 command and says why, another failure shows as a toast. What the terminal does is in its doc
 (`terminals/<name>.md`). One Peek or Diff shows at a time; a second press or closing the card hides it. The header's
 **all projects** toggle (`w`) also reads every other project's live sessions, in every account it asks, into an
-**Other projects** section (project folder, what it does, attach with its account prefix, Peek, Diff). The header's **yesterday** toggle (`y`) swaps the task board for the Yesterday tab
-(`session-status --yesterday`, about half a minute with the tracker): **Worked on** lists each task with
-its status, title (the key links to the ticket) and events, **Other work** the keyless sessions. `b` and
-`n` step the start day a weekday back or on (on to today: the last working day again); `r` reads it again.
-Once read, `standup-summary` turns the reading into what you'd say at the daily (3–5 spoken sentences, by
-`claude -p --model haiku` with no tools, plugins or transcript: about $0.003 and 5–15s a run; another model with
-`SESSION_STATUS_SUMMARY_MODEL`). It names work in a few plain words (a tracker key may stay), never by session name or
-task id, and follows the adapter's `standup-notes`. It shows in place of the lists; `s` swaps to the list and back. It's cached per start
-day under `~/.cache/session-orchestration/standup/` and written again only when that day's data changes (sessions'
-spans and last lines left out, they move at every refresh; the model and prompt count). While a refresh checks it,
-the day's last summary stays up; while a first one is written, or when the call fails or passes 90s, the list shows,
-with the reason. With the list chosen, no summary runs until `s` switches back. With the pane focused (ctrl+x tab), `1`–`9`
+**Other projects** section (project folder, what it does, attach with its account prefix, Peek, Diff). The header's **brief** toggle (`y`) swaps the task board for the daily brief
+(`session-status --yesterday --json`, about half a minute with the tracker and the chats; The brief, above): the
+sections **Moved**, **Waits on you**, **You wait on**, **New for you** and **Worked on**, each a row per task saying
+what happened to it, the latest first. A row opens to that task's own list: every item of it, oldest first, as
+`WEEKDAY HH:MM source text (people)`, and its ticket link. `s` swaps the brief for the list of every task (**Tasks**:
+key, status, title, then its items) and back. `b` and `n` step the start day a weekday back or on (on to today: the
+last working day again); `r` reads it again. When the brief has a template (the adapter's `standup-template`),
+`standup-summary` writes the standup from the brief's items after it (by `claude -p --model haiku` with no tools,
+plugins or transcript: about $0.003 and 5–15s a run; another model with `SESSION_STATUS_SUMMARY_MODEL`), shown in a
+box above the brief or the list. It names work in a few plain words (a tracker key may stay), never by session name or
+task id, and follows the adapter's `standup-notes`. It's cached per start day under
+`~/.cache/session-orchestration/standup/` and written again only when that day's data changes (sessions' spans and
+last lines left out, they move at every refresh; the model, prompt and template count). While a refresh checks it,
+the day's last standup stays up; when the call fails or passes 90s, the reason shows in its place. A project without
+a template gets the brief alone, and no model runs. With the pane focused (ctrl+x tab), `1`–`9`
 select the Waiting on you items, then the Decisions, in order. Once the pane is open, the status line under the prompt
 carries the header's count (`◆ N on you`), so it shows while the pane is hidden. The pane only
 exists in an interactive session that has the plugin loaded. The agent view (`claude agents`) can't
@@ -386,7 +423,7 @@ last line it printed, then refreshes the pane. One runs at a time, for up to 5 m
    check run in the root at each sweep (10s cap); exit 0 shows the action. The file is read again at
    each sweep. The pane's own keys are taken: `r` refresh, `o` `f` `m` the card fixes, `a` attach,
    `u` row refresh, `k` ask, `x` dismiss, `c` copy, `z` compact, `p` peek, `d` diff,
-   `w` all projects, `t` attach in tab, `l` logs in split, `y` yesterday, `b`/`n` earlier/later day, `s` summary or list, `1`–`9`. A bad entry (not JSON, a missing or
+   `w` all projects, `t` attach in tab, `l` logs in split, `y` daily brief, `b`/`n` earlier/later day, `s` brief or list, `1`–`9`. A bad entry (not JSON, a missing or
    empty field, a taken or repeated hotkey, a repeated label, an unknown field) shows as a red line
    under Actions and is left out; the rest load.
 2. **`fix:` lines from the status output**: `fix: LABEL → COMMAND` (or `->`) at the start of a line,
