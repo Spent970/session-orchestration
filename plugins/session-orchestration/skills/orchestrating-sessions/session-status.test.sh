@@ -1,9 +1,24 @@
 #!/usr/bin/env bash
 # Self-check for session-status without an adapter: a throwaway repo with one worktree, a worker and a coordinator
 # transcript, and a stubbed `claude agents`. Also --coordinator, --watch, an adapter's notices in --changes, and
-# --changes skipping a session that only started working. Run: bash session-status.test.sh  (prints "ok" or the diff).
+# --changes skipping a session that only started working. Run: bash session-status.test.sh [SECTION…]  (prints "ok: SECTIONS" or
+# each failed section's output). Each `if section NAME; then … fi` below runs alone, in its own process on a fresh
+# fixture (its own $tmp): all of them with no argument, the named ones otherwise; TEST_JOBS at a time (default the CPU
+# count, 1 = one after another).
 set -euo pipefail; unset XDG_CONFIG_HOME XDG_CACHE_HOME   # the person-wide config.json and stamps: never the real ones
 here=$(cd "$(dirname "$0")" && pwd)
+if [ -z "${TEST_SECTION:-}" ]; then
+  all=$(sed -n 's/^if section \([^ ;]*\); then$/\1/p' "$0"); [ $# -gt 0 ] || set -- $all
+  for s; do grep -qx -- "$s" <<<"$all" || { echo "no section $s; sections:" $all; exit 2; }; done
+  out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
+  printf '%s\n' "$@" | xargs -P "${TEST_JOBS:-$(getconf _NPROCESSORS_ONLN)}" -I{} \
+    bash -c 'TEST_SECTION=$2 bash "$0" > "$1/$2" 2>&1 || mv "$1/$2" "$1/$2.failed"' "$0" "$out" {} ||
+    { echo "xargs failed: a section didn't run (killed?)"; exit 1; }   # each wrapper exits 0, failed or not
+  failed=$(cd "$out" && ls | sed -n 's/\.failed$//p')
+  for s in $failed; do echo "== section $s failed (alone: bash $0 $s)"; cat "$out/$s.failed"; done
+  [ -z "$failed" ] || exit 1; echo "ok:" "$@"; exit 0
+fi
+section() { [ "$1" = "$TEST_SECTION" ]; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; trap 'echo "failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 root=$(mkdir -p "$tmp/proj" && cd "$tmp/proj" && pwd -P)
 sid=11111111-2222-3333-4444-555555555555 cid=99999999-2222-3333-4444-555555555555
@@ -19,6 +34,53 @@ printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"c
 chmod +x "$tmp/bin/claude"
 
 run() { (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH "$here/session-status" "$@"); }
+# Helpers more than one section uses (each section's own setup calls the ones it needs).
+mkdir -p "$root/.claude"
+# The terminal it runs in: none, unless T_PROG (TERM_PROGRAM) or T_MUX (TMUX) says.
+init() { (cd "$1" && shift && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
+# pof ROOT: ROOT's state folder (lib.sh proj_dir), where setup puts the replies, memory, handoff and briefs
+pof() { echo "$tmp/state/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$1")"; }
+gc() { git -C "$1" -c user.name=t -c user.email=t@t commit -q "${@:2}"; }
+gh_offline() { printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/gh" && chmod +x "$tmp/bin/gh"; }   # gh present, offline: the GitHub adapter, no PRs
+# $a: a GitHub repo with ACME keys and a tracked CLAUDE.md, not set up yet
+acme_repo() { a=$(mkdir -p "$tmp/init/acme" && cd "$tmp/init/acme" && pwd -P)
+  git -C "$a" init -q -b main && git -C "$a" remote add origin git@github.com:acme/app.git && echo '# app' > "$a/CLAUDE.md"
+  git -C "$a" add CLAUDE.md && gc "$a" -m 'ACME-1: init' && gc "$a" --allow-empty -m 'ACME-12: work' && gc "$a" --allow-empty -m typo; }
+hu() { printf '{"type":"user","origin":{"kind":"human"},"timestamp":"%s","message":{"content":"%s"}}\n' "$1" "$2"; }
+sess() { printf '{"sessionId":"%s","name":"%s","cwd":"%s","kind":"%s","status":"%s","state":"blocked","pid":%s}' "$1" "$2" "$root" "${5:-background}" "$3" "$4"; }
+setacct() { echo "[$2]" > "$tmp/agents-$1.json"; }
+calls() { cat "$tmp/calls" 2>/dev/null; : > "$tmp/calls"; }
+# An adapter whose tasks row ($tmp/prs: its PRs) and notices ($tmp/notices, exit $tmp/rc) the test sets; $tmp/fail
+# fails tasks, $tmp/stale marks the PRs stale, $tmp/fix adds a fix line.
+notices_adapter() { cat > "$root/.claude/session-status-adapter" <<EOF
+#!/bin/sh
+case \$1 in
+  tasks) [ -f $tmp/fail ] && { echo boom; exit 1; }; printf 'ABC-12\t-\t\t%s\n' "\$([ -f $tmp/stale ] && echo '(PRs as of 04:13) ')\$(cat $tmp/prs 2>/dev/null)"; [ ! -f $tmp/fix ] || echo 'fix: Sign in → gh auth login' ;;
+  notices) cat $tmp/notices; exit \$(cat $tmp/rc) ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$root/.claude/session-status-adapter"; : > "$tmp/notices"; echo 0 > "$tmp/rc"; }
+# A claude that logs its calls and answers per account: this one (cfg) and another sharing its transcript store
+# (.claude-work), its sessions set by setacct.
+accounts_claude() { mkdir -p "$tmp/.claude-work"; ln -sfn "$tmp/cfg/projects" "$tmp/.claude-work/projects"
+cat > "$tmp/bin/claude" <<EOF
+#!/bin/sh
+acct=\$(basename "\${CLAUDE_CONFIG_DIR:-none}")
+echo "\$acct \$*" >> "$tmp/calls"
+case "\$1" in
+  agents) f="$tmp/agents-\$acct.json"; [ -f "\$f" ] || { echo '[]'; exit 0; }
+    if echo "\$*" | grep -q -- --all; then cat "\$f"; else jq '[.[]? | select(.pid != null)]' "\$f"; fi ;;
+  stop) f="$tmp/agents-\$acct.json"   # its process ends: no pid from now on
+    jq --arg id "\$2" '[.[]? | if (.sessionId | startswith(\$id)) then .pid = null else . end]' "\$f" > "\$f.t" && mv "\$f.t" "\$f"
+    echo "stopped \$2" ;;
+  --bg) [ "\$acct" != "\${FAIL_BG_IN:-}" ] || { echo "Workspace not trusted"; exit 1; }
+    [ "\$2" != --resume ] && echo "backgrounded · abcdef12 · x" || echo "backgrounded · \$(printf %s "\$3" | cut -c1-8) · x" ;;
+esac
+EOF
+chmod +x "$tmp/bin/claude"; : > "$tmp/calls"; }
+
+if section board; then
 [ "$(run --coordinator)" = coord ] && [ -z "$(CLAUDE_CODE_SESSION_ID=$cid run --coordinator)" ] || { echo "--coordinator failed"; exit 1; }
 # --coordinator-of: a subproject with its own config has its own coordinator; a plain subfolder is this one's.
 mkdir -p "$root/sub/.claude" "$root/plain" "$tmp/bin2"; echo '{}' > "$root/sub/.claude/coordination.local.json"
@@ -74,15 +136,7 @@ mv "$tmp/t.keep" "$proj/$sid.jsonl"
 
 # Notices: a new one is a change, one going away isn't; a failure keeps the last good ones, and its wording changing
 # isn't a change; exit 2 = unsupported.
-mkdir -p "$root/.claude"; cat > "$root/.claude/session-status-adapter" <<EOF
-#!/bin/sh
-case \$1 in
-  tasks) [ -f $tmp/fail ] && { echo boom; exit 1; }; printf 'ABC-12\t-\t\t%s\n' "\$([ -f $tmp/stale ] && echo '(PRs as of 04:13) ')\$(cat $tmp/prs 2>/dev/null)"; [ ! -f $tmp/fix ] || echo 'fix: Sign in → gh auth login' ;;
-  notices) cat $tmp/notices; exit \$(cat $tmp/rc) ;;
-  *) exit 2 ;;
-esac
-EOF
-chmod +x "$root/.claude/session-status-adapter"; : > "$tmp/notices"; echo 0 > "$tmp/rc"
+notices_adapter
 run --changes >/dev/null; echo "DM from Ann: hi" > "$tmp/notices"
 [ "$(run --changes)" = "now:   * DM from Ann: hi" ] && [ "$(run ABC-12 | grep -c Notices)" = 0 ] &&
   echo "no login" > "$tmp/notices" && echo 1 > "$tmp/rc" && [ "$(run --changes)" = "now:   * (failed) no login" ] && [ "$(run | grep -c 'Ann: hi')" = 1 ] &&
@@ -93,11 +147,11 @@ run --changes >/dev/null; echo "DM from Ann: hi" > "$tmp/notices"
   echo junk > "$tmp/notices" && echo 2 > "$tmp/rc" && [ "$(run | grep -c Notices)" = 0 ] || { echo "notices failed"; exit 1; }
 # A reader that stops early (`| head -1`) ends the run: the EXIT trap's killtree (a notices source ran) once read the
 # unsent output as child pids and recursed for days. Only bash 3.2 (macOS's /bin/bash) shows it, so the run uses
-# /bin/bash; the alarm (142) turns the hang into a failure and kills the run's whole process group, so no stuck child
-# outlives the test. Then killtree still kills a live tree, leaves first.
+# /bin/bash; the alarm (142, long enough for a loaded machine) turns the hang into a failure and kills the run's whole
+# process group, so no stuck child outlives the test. Then killtree still kills a live tree, leaves first.
 rc=0; (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH \
   perl -e '$p = fork // die; if (!$p) { setpgrp(0, 0); exec @ARGV } $SIG{ALRM} = sub { kill "KILL", -$p; exit 142 };
-    alarm 20; waitpid $p, 0; exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' /bin/bash "$here/session-status") 2>/dev/null | head -1 >/dev/null || rc=${PIPESTATUS[0]}
+    alarm 120; waitpid $p, 0; exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' /bin/bash "$here/session-status") 2>/dev/null | head -1 >/dev/null || rc=${PIPESTATUS[0]}
 [ "$rc" != 142 ] || { echo "a closed reader hangs the exit"; exit 1; }
 eval "$(sed -n '/^killtree() {/,/^}/p' "$here/session-status")"
 bash -c 'sleep 300 & bash -c "sleep 300 & wait" & wait' & tree=$!
@@ -203,7 +257,10 @@ out=$(run); [ "$(head -1 <<<"$out")" = "adapter tasks failed (exit 2): oops: bad
 printf '#!/bin/sh\necho "fix: Sign in → gh auth login"; exit 2\n' > "$root/.claude/session-status-adapter"
 [ "$(run ABC-12 | tail -1)" = "fix: Sign in → gh auth login" ] || { echo "exit 2 fix line: $(run ABC-12)"; exit 1; }
 mv "$tmp/adapter.keep" "$root/.claude/session-status-adapter"
+fi
 
+if section changes; then
+notices_adapter
 # A worker at rest whose task only waits on a reviewer isn't waiting on you: idle on its row, no Waiting on you.
 # Approved (the merge call) or with something to fix, it still is.
 cp "$root/.claude/session-status-adapter" "$tmp/adapter.keep"
@@ -284,6 +341,13 @@ out=$(run --changes); grep -qxF '  * app#1,app#2 all-merged (ABC-12, -) → "fix
   rm "$tmp/prs" && run --changes >/dev/null && sed -i.bak '/^#all-merged$/d' "$tmp/.cache/session-status/"*.pr-events &&
   echo 'app#1 MERGED | ' > "$tmp/prs" && ! run --changes | grep -q 'all-merged' && grep -qx '#all-merged' "$tmp/.cache/session-status/"*.pr-events &&
   rm "$tmp/prs" && run --changes >/dev/null || { echo "all-merged failed: $out"; exit 1; }
+fi
+
+if section watch; then
+# Setup: the adapter, a stub claude whose session state is $tmp/state, and a PR events record (an open PR, recorded).
+notices_adapter; echo blocked > "$tmp/state"
+printf '#!/bin/sh\nprintf %s "$(cat %s/state)"\n' "'[{\"sessionId\":\"$sid\",\"name\":\"fix it\",\"cwd\":\"$root\",\"state\":\"%s\"}]'" "$tmp" > "$tmp/bin/claude"
+run --changes >/dev/null; echo 'app#1 OPEN | ' > "$tmp/prs"; run --changes >/dev/null; rm "$tmp/prs"; run --changes >/dev/null
 # Under --watch (SESSION_STATUS_FORWARD) a committing run sends the nudge itself (here a resume: the stub lists no pid)
 # and lists it under Forwarded beside other news, never as news alone; a peek sends nothing.
 ss=$tmp/.cache/session-status; e=$(ls "$ss/"*.pr-events); e=${e%.last.pr-events}
@@ -387,11 +451,13 @@ out=$(SESSION_STATUS_PEEK=1 SESSION_STATUS_FORWARD=1 run --changes) && [ ! -s "$
   [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] && [ "$(cat "$tmp/stops")" = aaaaaaaa ] ||
   { echo "watcher's stop failed: $out / $(cat "$tmp/stops")"; exit 1; }
 mv "$tmp/claude.keep" "$tmp/bin/claude"; unset SESSION_STATUS_STOP_AFTER_S
+fi
 
+if section owners; then
 # Owners: a review session (newest, `Session task: ABC-12 review`) doesn't take ABC-12 from its worker; a brief sent
 # through a tool (`Session task: ABC-77` in a SendMessage) names no owner, nor does the ~ guess count a session whose
 # first prompt names another key (ABC-56), however often it mentions ABC-77. No adapter: rows are the keys asked.
-rm "$root/.claude/session-status-adapter"
+rm -f "$root/.claude/session-status-adapter"
 rid=22222222-2222-3333-4444-555555555555 bid=33333333-2222-3333-4444-555555555555
 printf '%s\n' '{"type":"user","message":{"content":"Session task: ABC-12 review. Review the PR"}}' \
   '{"type":"assistant","timestamp":"2026-10-13T10:00:00.000Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git diff","description":"Read the diff"}},{"type":"text","text":"Reading.\nLooks fine so far"}]}}' > "$proj/$rid.jsonl"
@@ -485,30 +551,16 @@ printf '%s\n' '{"type":"attachment","attachment":{"type":"model","identity":{"mo
 printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$rid\",\"name\":\"ABC-12 review\",\"cwd\":\"$root\",\"state\":\"blocked\",\"status\":\"idle\",\"kind\":\"background\",\"pid\":1}]'" > "$tmp/bin/claude"
 [ "$(run --activity | awk -F'\t' -v id="$rid" '$1 == id {print $8 "|" $9 "|" $10 "|" $11}')" = "620002|1000000|idle|background" ] ||
   { echo "activity ctx failed"; run --activity; exit 1; }
+fi
 
-# --compact and --send-when-idle, against a stub claude that logs its calls and answers per account: this one
-# (cfg) and another sharing its transcript store (.claude-work). Retired sessions (pid null) show only with --all.
-# The other account is asked only with features.accounts on (the person file); off, it isn't.
-mkdir -p "$tmp/.claude-work"; ln -s "$tmp/cfg/projects" "$tmp/.claude-work/projects"
-cat > "$tmp/bin/claude" <<EOF
-#!/bin/sh
-acct=\$(basename "\${CLAUDE_CONFIG_DIR:-none}")
-echo "\$acct \$*" >> "$tmp/calls"
-case "\$1" in
-  agents) f="$tmp/agents-\$acct.json"; [ -f "\$f" ] || { echo '[]'; exit 0; }
-    if echo "\$*" | grep -q -- --all; then cat "\$f"; else jq '[.[]? | select(.pid != null)]' "\$f"; fi ;;
-  stop) f="$tmp/agents-\$acct.json"   # its process ends: no pid from now on
-    jq --arg id "\$2" '[.[]? | if (.sessionId | startswith(\$id)) then .pid = null else . end]' "\$f" > "\$f.t" && mv "\$f.t" "\$f"
-    echo "stopped \$2" ;;
-  --bg) [ "\$acct" != "\${FAIL_BG_IN:-}" ] || { echo "Workspace not trusted"; exit 1; }
-    [ "\$2" != --resume ] && echo "backgrounded · abcdef12 · x" || echo "backgrounded · \$(printf %s "\$3" | cut -c1-8) · x" ;;
-esac
-EOF
-chmod +x "$tmp/bin/claude"
-sess() { printf '{"sessionId":"%s","name":"%s","cwd":"%s","kind":"%s","status":"%s","state":"blocked","pid":%s}' "$1" "$2" "$root" "${5:-background}" "$3" "$4"; }
-setacct() { echo "[$2]" > "$tmp/agents-$1.json"; }
-calls() { cat "$tmp/calls" 2>/dev/null; : > "$tmp/calls"; }
-: > "$tmp/calls"
+if section accounts; then
+# --compact and --send-when-idle, against accounts_claude. Retired sessions (pid null) show only with --all.
+# The other account is asked only with features.accounts on (the person file); off, it isn't. rid: a review session
+# whose last reply holds 620k tokens.
+accounts_claude
+rid=22222222-2222-3333-4444-555555555555
+u='{"type":"assistant","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":600000,"cache_creation_input_tokens":20000},"content":[{"type":"text","text":"hi"}]}}'
+printf '%s\n' '{"type":"user","message":{"content":"Session task: ABC-12 review. Review the PR"}}' "$u" > "$proj/$rid.jsonl"
 # Compact: idle → stopped, then resumed under its id with /compact. Busy, waiting or interactive: refused, untouched.
 setacct cfg "$(sess "$rid" rev idle 1)"
 run --compact "${rid:0:8}" | grep -q 'is compacting' && [ "$(calls | grep -v ' agents ')" = "$(printf 'cfg stop 22222222\ncfg --bg --resume %s /compact' "$rid")" ] ||
@@ -589,7 +641,11 @@ rm "$proj/$s1.jsonl" "$proj/$s2.jsonl"; setacct cfg ""
 # accounts off with a second account sharing the transcripts: an unlisted session may be live there, so no resume
 rm "$root/.claude/coordination.local.json"
 [ "$(run --send-when-idle "${rid:0:8}" "Back" >/dev/null; echo $?)" = 2 ] && ! calls | grep -q -- '--bg' || { echo "send unlisted, accounts off, resumed"; exit 1; }
+fi
 
+if section handover; then
+accounts_claude   # and an adapter, so --init --check is configured:
+printf '#!/bin/sh\nexit 2\n' > "$root/.claude/session-status-adapter"; chmod +x "$root/.claude/session-status-adapter"
 # --handover: refused with no replies/KEY.md, mid-turn, or on a prompt; else stopped, and a fresh session named
 # KEY-<old name> started with a brief that supersedes the old one.
 hid=88888888-2222-3333-4444-555555555555 nid=aaaaaaaa-2222-3333-4444-555555555555
@@ -886,7 +942,10 @@ setacct cfg "$(sess "$k2" "PROJ-9-c3b" idle 1),$(sess "$kid" "PROJ-9-c3b-prev-1"
   [ "$(run --prev-name other)" = other-prev-1 ] && ! run --prev-name 2>/dev/null || { echo "--prev-name failed"; exit 1; }
 setacct cfg "$(sess "$kid" "x-prev-1" idle 1)"
 [ "$(CLAUDE_CODE_SESSION_ID=$kid run --prev-name)" = x-prev-1 ] || { echo "--prev-name renamed an already-renamed caller"; exit 1; }
+fi
 
+if section coordinator; then
+accounts_claude; printf -- '- Replies folder (for reports): `replies/`.\n' > "$root/CLAUDE.md"; mkdir -p "$root/replies"
 # Coordinator handover: old (o) starts its successor (x) as NAME-next; x's Start ends with --await name (the ready
 # mark), o's --await ready sees it, o renames, x's --await name finds NAME free, o's --successor --done, x's --await
 # done ends it (the plain terminal closes nothing). --name-check tells a successor from a second coordinator.
@@ -1052,23 +1111,25 @@ grep -q '^Work on ABC-50$' <<<"$out" && grep -q '^Running them\.$' <<<"$out" && 
 # --dir: a session's latest cwd, as its git top; a task key, its worktree. --diff: against its merge-base with origin/HEAD,
 # with the untracked files, then the patch.
 [ "$(run --dir "${pid:0:8}")" = "$root/wt" ] && [ "$(run --dir ABC-12)" = "$root/wt" ] || { echo "dir failed"; run --dir "$pid"; exit 1; }
-echo a > "$root/wt/f"; git -C "$root/wt" add f; git -C "$root/wt" -c user.name=t -c user.email=t@t commit -qm f; echo b > "$root/wt/f"
+git -C "$root" update-ref refs/remotes/origin/main HEAD; git -C "$root" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main; echo a > "$root/wt/f"; git -C "$root/wt" add f; git -C "$root/wt" -c user.name=t -c user.email=t@t commit -qm f; echo b > "$root/wt/f"
 out=$(run --diff ABC-12 "$pid")
 [ "$(head -1 <<<"$out")" = "$root/wt · vs origin/main" ] && grep -q "^ f | 1 +$" <<<"$out" && grep -q '^?? dirty$' <<<"$out" && grep -q '^+b$' <<<"$out" ||
   { echo "diff failed: $out"; exit 1; }
 # --activity lists this project's sessions; --all-projects also another project's.
+gid=bbbbbbbb-2222-3333-4444-555555555555; echo '{"type":"user","message":{"content":"Work on ABC-41"}}' > "$proj/$gid.jsonl"
 sess "$gid" elsewhere idle 1 | sed "s#$root#$tmp/elsewhere#" > "$tmp/e.json"
 setacct cfg "$(sess "$pid" here idle 1),$(cat "$tmp/e.json")"
 [ "$(run --activity | cut -f2)" = here ] && [ "$(run --activity --all-projects | cut -f2 | sort | tr '\n' ' ')" = 'elsewhere here ' ] &&
   [ "$(run --activity | awk -F'\t' '{print NF "|" $12}')" = "13|$root" ] || { echo "all projects failed"; run --activity --all-projects; exit 1; }
+fi
 
+if section yesterday; then
 # --yesterday on Monday 2030-01-07: Friday has no prompt of the user's (a day off), so it starts Thursday, and
 # Saturday's work is in. Wednesday's isn't, nor a coordinator's, nor a keyless session that wrote nothing. The brief
 # is data (--json) that passes its format's check: each item its kind, key, source, time, people and text. An older
 # adapter's `yesterday` rows give ABC-60 its status and title and add ABC-70, as moved items.
 y1=dddddddd-0001-3333-4444-555555555555 y2=dddddddd-0002-3333-4444-555555555555 y3=dddddddd-0003-3333-4444-555555555555
 y4=dddddddd-0004-3333-4444-555555555555 y5=dddddddd-0005-3333-4444-555555555555
-hu() { printf '{"type":"user","origin":{"kind":"human"},"timestamp":"%s","message":{"content":"%s"}}\n' "$1" "$2"; }
 as() { printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$1" "$2"; }
 { hu 2030-01-02T10:00:00Z 'Work on ABC-60'; as 2030-01-02T10:05:00Z 'Wed work.'; hu 2030-01-03T10:00:00Z 'go on'; as 2030-01-03T10:30:00Z 'Pushed the fix.'; } > "$proj/$y1.jsonl"
 { hu 2030-01-05T10:00:00Z 'Work on ABC-61'; as 2030-01-05T10:00:00Z 'Weekend fix.'; } > "$proj/$y2.jsonl"
@@ -1083,6 +1144,7 @@ cat > "$root/.claude/session-status-adapter" <<EOF
 echo "\$*" > $tmp/yargs
 printf 'ABC-60\tIn Review\tFix it\n  %s\tJira: A → B\nABC-70\tDone\tOther\n  %s\tJira: moved\n' \$((\$2 + 3600)) \$((\$2 + 7200))
 EOF
+chmod +x "$root/.claude/session-status-adapter"
 yd() { SESSION_STATUS_TODAY=2030-01-07 TZ=UTC XDG_CACHE_HOME=$tmp/ycache run --yesterday "$@"; }
 fields='.items[] | [.kind, .key, .source, .at, (.people | join(", ") | if . == "" then "-" else . end), .text] | @tsv'
 out=$(yd --json) && jq --arg mode check -f "$here/session-brief.jq" <<<"$out" || { echo "yesterday: not a brief: $out"; exit 1; }
@@ -1182,12 +1244,14 @@ out=$(yd 2030-01-02)
   yd --json 2030-01-02 | jq -r '.items[].text' | grep -qF '(Wed 10:00–Thu 10:30): Pushed the fix.' &&
   [ "$(run --yesterday 2030-13-01; echo "rc $?")" = "$(printf 'usage: session-status --yesterday [YYYY-MM-DD] [--json]\nrc 2')" ] ||
   { echo "yesterday picked day failed: $out"; exit 1; }
+fi
 
+if section on-you; then
 # Waiting on you keeps itself current: of blocked sessions, only one whose last turn asks the user (q1) or that
 # sits on a fresh prompt (p1) is on you. Not on you: a finished turn asking nothing (i1, idle), busy past a session
 # limit (b1), superseded by a brief's "You replace session" (o1 by n2), a reviewer at rest (r2), a worktree whose
 # work landed (l1). A prompt unanswered 7h (s1) is listed apart under Stale prompts with its stop command.
-rm "$root/.claude/session-status-adapter"
+accounts_claude; rm -f "$root/.claude/session-status-adapter"; mkdir -p "$tmp/.cache/session-status/blocked"
 txt() { printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$1"; }
 q1=a1000001-2222-3333-4444-555555555555 i1=a2000002-2222-3333-4444-555555555555 b1=a3000003-2222-3333-4444-555555555555
 s1=a4000004-2222-3333-4444-555555555555 p1=a5000005-2222-3333-4444-555555555555 o1=a6000006-2222-3333-4444-555555555555
@@ -1202,6 +1266,7 @@ n2=a7000007-2222-3333-4444-555555555555 r2=a8000008-2222-3333-4444-555555555555 
 { hu x 'Work on ABC-86'; txt 'To release: run this?'; } > "$proj/$l1.jsonl"
 git -C "$root" worktree add -q -b feature/ABC-86-done "$root/wt3"
 git -C "$root/wt3" -c user.name=t -c user.email=t@t commit -q --allow-empty -m done && git -C "$root" update-ref refs/remotes/origin/main feature/ABC-86-done
+git -C "$root" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
 ago7=$(( $(date +%s) - 7 * 3600 ))
 echo "{\"time\":$ago7,\"tool\":\"Bash\",\"input\":\"curl -sI https://example.com\"}" > "$tmp/.cache/session-status/blocked/$s1.json"
 echo "{\"time\":$(date +%s),\"tool\":\"Bash\",\"input\":\"npm test\"}" > "$tmp/.cache/session-status/blocked/$p1.json"
@@ -1249,19 +1314,12 @@ out=$(run)
   grep -q '^  "old-prompt" (claude attach b6000006) — blocked: a prompt · unanswered [0-9]*d; stop: claude stop b6000006$' <<<"$out" &&
   grep -qxF '  "moot" (claude attach b7000007) — blocked: Bash `npm test` · its work landed; stop: claude stop b7000007' <<<"$out" &&
   grep -q '^ABC-87 .*sess:"stale-conflict" stale$' <<<"$out" && grep -q '^  "code" idle ' <<<"$out" || { echo "review fixes failed: $out"; exit 1; }
+fi
 
+if section init; then
 # --init (session-init): (a) a GitHub repo with ACME keys and a tracked CLAUDE.md, proposed then written; (b) a
 # workspace of 2 repos with no keys; (c) a folder under an adapter; (d) a configured folder. Outside $root's adapter.
-rm -rf "$tmp/.claude-work"   # one account until the accounts case below
-# The terminal it runs in: none, unless T_PROG (TERM_PROGRAM) or T_MUX (TMUX) says.
-init() { (cd "$1" && shift && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH TERM_PROGRAM=${T_PROG:-} TMUX=${T_MUX:-} "$here/session-status" --init "$@"); }
-# pof ROOT: ROOT's state folder (lib.sh proj_dir), where setup puts the replies, memory, handoff and briefs
-pof() { echo "$tmp/state/session-orchestration/projects/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$1")"; }
-gc() { git -C "$1" -c user.name=t -c user.email=t@t commit -q "${@:2}"; }
-printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/gh" && chmod +x "$tmp/bin/gh"   # gh present, offline: the GitHub adapter, no PRs
-a=$(mkdir -p "$tmp/init/acme" && cd "$tmp/init/acme" && pwd -P)
-git -C "$a" init -q -b main && git -C "$a" remote add origin git@github.com:acme/app.git && echo '# app' > "$a/CLAUDE.md"
-git -C "$a" add CLAUDE.md && gc "$a" -m 'ACME-1: init' && gc "$a" --allow-empty -m 'ACME-12: work' && gc "$a" --allow-empty -m typo
+gh_offline; acme_repo
 out=$(init "$a") && grep -q '^1\. Task keys: ACME-123 (in 66% ' <<<"$out" && grep -q "^2\. Code host: git@github.com:acme/app.git (github, one repo), gh installed → GitHub adapter: " <<<"$out" &&
   grep -q '^3\. Files: CLAUDE.local.md, .claude/session-status-adapter, ' <<<"$out" || { echo "init (a) failed: $out"; exit 1; }
 init "$a" --check >/dev/null && { echo "init (a) --check exited 0 before --write"; exit 1; }
@@ -1320,6 +1378,10 @@ echo '{"pending":{"file":"docs/pending.md"}}' > "$pf/.claude/coordination.local.
   { echo "init pending.file: $(grep -h -e 'handoff file' -e 'pending)' "$pf/CLAUDE.md" "$pf/.claude/session-status-adapter")"; exit 1; }
 mkdir -p "$a/sub"; rc=0; out=$(init "$a/sub" --check) || rc=$?
 [ "$rc:$out" = "3:covered by a parent: $a (acme-coordinator) covers this folder" ] || { echo "init (c) failed: $rc:$out"; exit 1; }
+fi
+
+if section config; then
+gh_offline; acme_repo; init "$a" --write >/dev/null; mkdir -p "$a/sub"
 # --config: read from a subfolder (walking up to the config), a bad value falls back with a warning, --delegate turns
 # it on; a delegation line left in CLAUDE.md with no key is named by --check.
 cfg() { (cd "$1" && "$here/session-status" --config "$2"); }
@@ -1527,6 +1589,10 @@ init "$a" --check | grep -xF 'warning: terminals/wezterm.sh: no open_split, usin
 printf '# Terminal: wezterm\n\n> A note.\n' > "$a/.claude/coordination.local/terminals/wezterm.md"
 init "$a" --check | grep -x '  terminal wezterm: read /.*/terminals/wezterm\.md now' >/dev/null ||
   { echo "check doc without a start line: $(init "$a" --check)"; exit 1; }
+fi
+
+if section shared; then
+gh_offline; acme_repo; init "$a" --write >/dev/null
 # Shared mode. (s1) a repo that isn't yours, whose exclude hides .claude/* (SAIL's): setup writes nothing tracked;
 # --shared makes the repo file visible to commit, with a negation.
 s=$(mkdir -p "$tmp/init/sail" && cd "$tmp/init/sail" && pwd -P); git -C "$s" init -q && git -C "$s" remote add origin https://github.com/o/sail.git
@@ -1598,6 +1664,10 @@ rc=0; init "$p/sub1" --write --trust=session-status-adapter@0000 >/dev/null || r
 [ "$rc" = 3 ] && [ ! -e "$p/sub1/.claude" ] &&
   init "$p/sub2" --write --own tracker=github >/dev/null && [ "$(cat "$p/.claude/coordination/coordination.json" 2>/dev/null)" = "$before" ] &&
   [ "$(jq -r .tracker "$p/sub2/.claude/coordination/coordination.json")" = github ] || { echo "init (s6) under a parent: $(ls -a "$p/sub1" "$p/sub2/.claude")"; exit 1; }
+fi
+
+if section move; then
+gh_offline
 # --write --move: an older setup's files into the state folder. old ROOT ORCH REPLIES: ROOT's fresh setup made an
 # older one, its memory and handoff in ORCH and its replies in REPLIES (each as its line says it: relative or absolute).
 old() {
@@ -1692,7 +1762,9 @@ out=$(init "$m" --write --move) && ! grep -q 'move failed' <<<"$out" && [ ! -e "
   [ -f "$pm/replies/K-5.md" ] && [ -f "$pm/replies/memory.md" ] && [ -f "$pm/replies/pending.md" ] &&
   grep -qF "Project memory: \`$pm/replies/memory.md\`. Coordinator handoff file: \`$pm/replies/pending.md\`." "$m/CLAUDE.md" &&
   ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" || { echo "move (m5): $out / $(cd "$pm" && find . | sort)"; exit 1; }
+fi
 
+if section plan; then
 # --plan: three waves, an overlap and an oversize est in wave 1, a self-cycle with an unknown dep, unknown kind and
 # no done-when or effort in c6. c1 and c4 are done (c2's handoff isn't), so c2, c3 and c5 can run: c3 overlaps c2, so c2 and c5.
 pd=$(mkdir -p "$tmp/plan" && cd "$tmp/plan" && pwd -P); plan=$pd/PROJ-123.md
@@ -1867,6 +1939,9 @@ printf '#!/bin/sh\necho junk\n' > "$tmp/bin/claude"
 [ "$(run --plan "$pd/PROJ-10.md" --next 2>&1 >/dev/null)" = "couldn't list an account's sessions: a running chunk may show as not running" ] ||
   { echo "--plan --next, failed listing"; exit 1; }
 mv "$tmp/claude.saved" "$tmp/bin/claude"; rm "$tmp/.config/session-orchestration/config.json"
+fi
+
+if section stale; then
 # Stale (stale.jq): one fixture per signal. 1 ticket done (not while a PR of it is open), 2 a PR it names settled
 # (reword while another is open), 3 a session it names gone, 4 a worktree it names gone, 5 an ask it names not queued,
 # 6 its key's ask queued, 7 age alone as "recheck:", 8 a session asking with no ask queued. The rest flag nothing.
@@ -1906,6 +1981,9 @@ out=$(run --stale | grep -v '^session ')   # earlier fixtures' sessions asking: 
 pending "ABC-12": reword: names ask 99, not queued; = ask 7' ] && grep -qxF '  * ask 7 ABC-12: worktree .claude/worktrees/nope gone' <<<"$(run)" &&
   [ "$(run --changes | grep -c '^now:   \* ask 7 ')" = 1 ] && [ "$(run --changes | grep -c 'ask 7')" = 0 ] || { echo "Stale section failed: $out"; exit 1; }
 rm -r "$af" "$root/pend.md" "$root/.claude/coordination.local.json"; run --changes >/dev/null
+fi
+
+if section land; then
 # --land: from a linked worktree, fast-forwards the branch the main checkout has out, files included; refuses a
 # dirty checkout and a non-fast-forward.
 lr=$tmp/land; git init -q -b main "$lr" && echo a > "$lr/f" && git -C "$lr" add f && git -C "$lr" -c user.name=t -c user.email=t@t commit -qm a
@@ -1920,4 +1998,12 @@ echo c >> "$lr-wt/f" && git -C "$lr-wt" -c user.name=t -c user.email=t@t commit 
 git -C "$lr" checkout -q f && git -C "$lr" -c user.name=t -c user.email=t@t commit -q --allow-empty -m d
 ! (cd "$lr-wt" && "$here/session-status" --land main >/dev/null 2>&1) && [ "$(git -C "$lr" log -1 --format=%s main)" = d ] ||
   { echo "--land forced a non-fast-forward"; exit 1; }
+fi
+
+if section filter; then
+# The section filter: named sections run alone ("ok: NAMES"); an unknown name runs nothing, lists them and exits 2.
+[ "$(TEST_SECTION= bash "$here/${0##*/}" land)" = "ok: land" ] || { echo "a named section: $(TEST_SECTION= bash "$here/${0##*/}" land)"; exit 1; }
+rc=0; out=$(TEST_SECTION= bash "$here/${0##*/}" land nope) || rc=$?
+[ "$rc" = 2 ] && [[ $out == "no section nope; sections: board changes "*" land filter" ]] || { echo "an unknown section: rc=$rc $out"; exit 1; }
+fi
 echo ok
