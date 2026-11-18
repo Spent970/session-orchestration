@@ -5,7 +5,7 @@ FB=$(cd "$(dirname "$0")" && pwd)/feedback
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/home" "$T/bin" "$T/acme-widgets/.claude" "$T/plugin-clone"
 printf '#!/bin/sh\n[ "$1" != agents ] || echo "${AGENTS_JSON:-[]}"\n' > "$T/bin/claude"
-printf '#!/bin/sh\nexit "${GH_RC:-1}"\n' > "$T/bin/gh"; chmod +x "$T/bin/claude" "$T/bin/gh"
+printf '#!/bin/sh\n[ "$1" != issue ] || printf "%%b" "${GH_OUT:-}"\nexit "${GH_RC:-1}"\n' > "$T/bin/gh"; chmod +x "$T/bin/claude" "$T/bin/gh"
 export HOME=$T/home XDG_STATE_HOME=$T/state PATH=$T/bin:$PATH
 export GIT_CONFIG_GLOBAL=$T/home/.gitconfig   # it outranks HOME: never touch the real one
 unset XDG_CONFIG_HOME CLAUDE_CONFIG_DIR
@@ -220,6 +220,20 @@ jq -nc --arg p "$T/inst/pm-1.0" --arg o "$T/inst/other" --arg x "$T/inst/old" \
 [ "$(bash -c '. "$0" && pm_dir' "$T/inst/so/lib.sh")" = "$T/inst/pm-1.0" ] || fail "pm_dir installed: $(bash -c '. "$0" && pm_dir' "$T/inst/so/lib.sh" 2>&1)"
 rm "$HOME/.claude/plugins/installed_plugins.json"
 bash -c '. "$0" && pm_dir' "$T/inst/so/lib.sh" 2>/dev/null && fail "pm_dir with no copy"
+
+# issues: open upstream issues without a case naming them, number and login only; cached; a failed call keeps the list.
+r=$("$FB" repo)
+o=$(GH_RC=0 GH_OUT='7\tsomeone\n8\tev$il;rm\nx\tbad\n' "$FB" issues)
+[ "$o" = "#7 by someone (https://github.com/$r/issues/7)"$'\n'"#8 by evilrm (https://github.com/$r/issues/8)" ] || fail "issues: $o"
+[ "$(GH_RC=0 GH_OUT='9\tz\n' "$FB" issues | wc -l | tr -d ' ')" = 2 ] || fail "issues not cached"
+c=$("$FB" add features 'Upstream thing reported' --where lib.sh --found f --evidence "upstream: https://github.com/$r/issues/7" --new)
+"$FB" mark "$c" dropped
+[ "$("$FB" issues)" = "#8 by evilrm (https://github.com/$r/issues/8)" ] || fail "issue named by a case still listed: $("$FB" issues)"
+touch -t 202601010000 "$D/.issues-${r//\//_}"
+[ "$(GH_RC=1 GH_OUT='9\tz\n' "$FB" issues)" = "#8 by evilrm (https://github.com/$r/issues/8)" ] || fail "failed call dropped the list"
+[ "$(GH_RC=0 GH_OUT='70\tz\n' "$FB" issues)" = "#8 by evilrm (https://github.com/$r/issues/8)" ] || fail "a failed call wasn't cached"
+touch -t 202601010000 "$D/.issues-${r//\//_}"
+[ "$(GH_RC=0 GH_OUT='70\tz\n' "$FB" issues)" = "#70 by z (https://github.com/$r/issues/70)" ] || fail "issue 70 matched by #7's case"
 
 # A messages module named only in the person-wide file still has its block dropped from the repo file.
 mkdir -p "$HOME/.config/session-orchestration" "$T/other-proj/.claude/coordination"
