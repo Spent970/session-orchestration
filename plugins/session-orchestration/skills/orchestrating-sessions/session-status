@@ -1057,15 +1057,16 @@ if [ -n "$WHERE" ]; then
   exit 0
 fi
 
-# --yesterday [DAY]: what the user worked on, for a daily standup: from the start of DAY (YYYY-MM-DD; default the
-# last weekday before today they worked, so a day off is skipped) up to now, so Monday's covers the weekend too.
-# A worked day: a prompt the user typed (origin human) in the project's transcripts, or a commit of theirs.
-# Prints `Since: DAY WEEKDAY (HOW)`, the adapter's `standup-notes` as `Note: TEXT` lines (what the summary should
-# know about the project), then per task, the one with the latest event first: `KEY<TAB>STATUS<TAB>TITLE`
-# and its events `  WEEKDAY HH:MM<TAB>TEXT`, oldest first. Generic events: the sessions that worked on it
-# (session-day.jq; a session naming no key is a task of its own, `"NAME"`; a coordinator's are left out) and
-# commits per branch. The adapter's `yesterday EPOCH KEY…` adds the tracker's and code host's (same format: rows
-# for these keys and any it finds, events `  EPOCH<TAB>TEXT`); exit 1 = failed, its message shown indented.
+# --yesterday [DAY] [--json]: the daily brief, from the start of DAY (YYYY-MM-DD; default the last weekday before
+# today the user worked, so a day off is skipped) up to now, so Monday's covers the weekend too. A worked day: a
+# prompt the user typed (origin human) in the project's transcripts, or a commit of theirs.
+# The brief is data first (--json; its format and text view: session-brief.jq): items of a kind, task key, people,
+# source and time. Generic items: the sessions that worked on a task (session-day.jq; a session naming no key is a
+# task of its own, `"NAME"`; a coordinator's are left out) and commits per branch as `worked`, handoff entries
+# resolved as `moved`, the messages module's current notices as `new`. The adapter's `brief EPOCH KEY…` adds the
+# tracker's, code host's and chats' as JSON lines (an older adapter's `yesterday` rows count as `moved`); a line of
+# its that isn't JSON is a failure message. Without --json: the text view, then the standup, written by
+# standup-summary from the data when the adapter has a `standup-template`.
 if [ -n "$YDAY" ]; then
   # The project's transcript folders and those of folders under it (worktrees, child repos).
   # ponytail: `/` and `-` encode alike, so a sibling `ROOT-x` counts too.
@@ -1082,9 +1083,10 @@ if [ -n "$YDAY" ]; then
         awk -F'\t' -v r="${r##*/}" -v up="$TMP/unpushed" 'BEGIN { while ((getline l < up) > 0) u[l] } { print r "\t" $2 "\t" $3 "\t" ($1 in u) "\t" $4 }'
     done < "$TMP/repos"
   }
-  day=${1:-} how=picked
+  day= how=picked JSON=
+  for a in "$@"; do [ "$a" = --json ] && JSON=1 || day=$a; done
   if [ -n "$day" ]; then
-    [ "$(dayfmt "$day" %F)" = "$day" ] || { echo "usage: session-status --yesterday [YYYY-MM-DD]"; exit 2; }
+    [ "$(dayfmt "$day" %F)" = "$day" ] || { echo "usage: session-status --yesterday [YYYY-MM-DD] [--json]"; exit 2; }
   else
     { for d in $tdirs; do find "$d" -maxdepth 1 -name '*.jsonl' -mtime -15; done | tr '\n' '\0' |
         xargs -0 grep -h '"kind":"human"' 2>/dev/null |
@@ -1104,7 +1106,7 @@ if [ -n "$YDAY" ]; then
     jq -rRn --argjson from "$from" --arg keyre "$KEYRE" --arg status "session-status${names:+|$names}" \
       -f "$(dirname "$SELF")/session-day.jq" "$f" 2>/dev/null | sed "s/^/$(basename "$f" .jsonl)	/"
   done > "$TMP/yd.sessions"
-  # Records: KEY, epoch, text. A session counts for its first prompt's key and its markers' (a review: reviewed);
+  # Records: kind, source, KEY, epoch, text. A session counts for its first prompt's key and its markers' (a review: reviewed);
   # a coordinator (it ran a status watcher) only for its first prompt's key, if any: its markers are its workers'.
   # ponytail: the markers are the whole transcript's, so a long-lived session's day shows under its earlier keys too.
   tr '\t' '\037' < "$TMP/yd.sessions" | while IFS=$'\037' read -r id name fk marks coord a b last; do
@@ -1116,8 +1118,8 @@ if [ -n "$YDAY" ]; then
       span="$(epochfmt "$a" '%a %H:%M')–$(epochfmt "$b" '%a %H:%M')"
     while read -r k; do
       [ -n "$k" ] || continue
-      case $k in *' review') printf '%s\t%s\treviewed in session "%s" (%s)%s\n' "${k% review}" "$b" "${name:-${id:0:8}}" "$span" "${last:+: $last}" ;;
-        *) printf '%s\t%s\tsession "%s" (%s)%s\n' "$k" "$b" "${name:-${id:0:8}}" "$span" "${last:+: $last}" ;; esac
+      case $k in *' review') printf 'worked\tsession\t%s\t%s\treviewed in session "%s" (%s)%s\n' "${k% review}" "$b" "${name:-${id:0:8}}" "$span" "${last:+: $last}" ;;
+        *) printf 'worked\tsession\t%s\t%s\tsession "%s" (%s)%s\n' "$k" "$b" "${name:-${id:0:8}}" "$span" "${last:+: $last}" ;; esac
     done <<<"$keys"
   done > "$TMP/yd.events"
   # Commits per task and branch: the key in the subject, else in the branch.
@@ -1126,26 +1128,40 @@ if [ -n "$YDAY" ]; then
       k = match($5, kre) ? substr($5, RSTART, RLENGTH) : match(ref, kre) ? substr(ref, RSTART, RLENGTH) : "\"" $1 " " ref "\""
       g = k "\t" ref " in " $1; n[g]++; up[g] += $4; if ($2 >= t[g]) { t[g] = $2; s[g] = $5 } }
     END { for (g in n) { split(g, x, "\t"); subj = s[g]; sub("^" x[1] "[: ]*", "", subj)
-      printf "%s\t%s\t%d commit%s %s %s%s — last: %s\n", x[1], t[g], n[g], (n[g] == 1 ? "" : "s"),
+      printf "worked\tcommit\t%s\t%s\t%d commit%s %s %s%s — last: %s\n", x[1], t[g], n[g], (n[g] == 1 ? "" : "s"),
         (up[g] == n[g] ? "on" : "pushed to"), x[2], (up[g] && up[g] < n[g] ? " (" up[g] " not pushed)" : up[g] ? " (not pushed)" : ""), subj } }' >> "$TMP/yd.events"
   # Handoff entries resolved since (pending.file's archive): under their key, else as a task of their own.
-  [ -z "$PENDING" ] || bash "$(dirname "$SELF")/pending" yesterday "$from" "$KEYRE" >> "$TMP/yd.events" 2>/dev/null
-  # The adapter's rows and events, for the keys found here and its own.
-  adapter yesterday "$from" $(cut -f1 "$TMP/yd.events" | grep -xE "$KEYRE" | sort -u) > "$TMP/yd.adapter" 2>/dev/null; arc=$?
-  [ "$arc" = 0 ] || [ "$arc" = 1 ] || : > "$TMP/yd.adapter"
-  if [ "$arc" = 1 ]; then sed 's/^/  /' "$TMP/yd.adapter" > "$TMP/yd.failed"; : > "$TMP/yd.adapter"; fi
-  awk -F'\t' '/^[^ \t]/ { k = $1; print > "/dev/stderr"; next } k != "" && /^  [0-9]+\t/ { sub(/^  /, ""); print k "\t" $0 }' \
-    "$TMP/yd.adapter" 2> "$TMP/yd.heads" >> "$TMP/yd.events"
-  echo "Since: $day $(dayfmt "$day" %a) ($how)"
-  # The project's notes for the standup summary (adapter `standup-notes`, optional): `Note: TEXT` lines.
-  notes=$(adapter standup-notes 2>/dev/null) && grep '[^[:space:]]' <<<"$notes" | sed 's/^/Note: /'
-  [ ! -s "$TMP/yd.failed" ] || { echo "Tracker lookup failed:"; cat "$TMP/yd.failed"; }
-  sort -u "$TMP/yd.events" | while IFS=$'\t' read -r k t x; do printf '%s\t%s\t%s\t%s\n' "$k" "$t" "$(epochfmt "$t" '%a %H:%M')" "$x"; done > "$TMP/yd.timed"
-  # Each task's latest event orders the tasks; rows: latest, key, 0 for its head line or the event's time, line.
-  awk -F'\t' 'NR == FNR { if ($2 > mx[$1]) mx[$1] = $2; next } FILENAME ~ /heads$/ { st[$1] = $2; ti[$1] = $3; next }
-    { if (!($1 in done)) { done[$1]; print mx[$1] "\t" $1 "\t0\t" $1 "\t" st[$1] "\t" ti[$1] }
-      print mx[$1] "\t" $1 "\t" $2 "\t  " $3 "\t" $4 }' "$TMP/yd.timed" "$TMP/yd.heads" "$TMP/yd.timed" |
-    sort -t$'\t' -k1,1rn -k2,2 -k3,3n | cut -f4-
+  [ -z "$PENDING" ] || bash "$(dirname "$SELF")/pending" yesterday "$from" "$KEYRE" 2>/dev/null | sed $'s/^/moved\tpending\t/' >> "$TMP/yd.events"
+  # The adapter's items and task heads, for the keys found here and its own. No `brief` (an exit other than 0 or
+  # 1): an older adapter's `yesterday` rows.
+  keys=$(cut -f3 "$TMP/yd.events" | grep -xE "$KEYRE" | sort -u)
+  : > "$TMP/yd.old"
+  adapter brief "$from" $keys > "$TMP/yd.adapter" 2>/dev/null; arc=$?
+  if [ "$arc" -gt 1 ]; then
+    adapter yesterday "$from" $keys > "$TMP/yd.old" 2>/dev/null; arc=$?
+    : > "$TMP/yd.adapter"; [ "$arc" != 1 ] || mv "$TMP/yd.old" "$TMP/yd.adapter"   # its failure message
+    [ "$arc" = 0 ] || : > "$TMP/yd.old"
+  fi
+  # The project's notes for the standup (adapter `standup-notes`) and its template (`standup-template`), both optional.
+  adapter standup-notes > "$TMP/yd.notes" 2>/dev/null || : > "$TMP/yd.notes"
+  adapter standup-template > "$TMP/yd.template" 2>/dev/null || : > "$TMP/yd.template"
+  # The messages module's lines from the last full sweep; none once the module is off or the sweep is over a day old.
+  : > "$TMP/yd.notices"
+  case $(config messages 2>/dev/null) in ''|none) ;; *)
+    find ~/.cache/session-status/"$ENC".messages/notices.jsonl -mmin -1440 -exec cat {} + > "$TMP/yd.notices" 2>/dev/null ;;
+  esac
+  brief=$(dirname "$SELF")/session-brief.jq
+  jq -n --arg mode build --arg since "$day" --arg from "$from" --arg how "$how" --rawfile events "$TMP/yd.events" \
+    --rawfile adapter "$TMP/yd.adapter" --rawfile old "$TMP/yd.old" --rawfile notices "$TMP/yd.notices" \
+    --rawfile notes "$TMP/yd.notes" --rawfile template "$TMP/yd.template" -f "$brief" > "$TMP/yd.json" ||
+    { echo "session-status --yesterday: the brief couldn't be built"; exit 1; }
+  [ -z "$JSON" ] || { cat "$TMP/yd.json"; exit 0; }
+  jq -r --arg mode text -f "$brief" "$TMP/yd.json"
+  if jq -e '.template != ""' "$TMP/yd.json" >/dev/null; then
+    echo; echo STANDUP
+    out=$(bash "$(dirname "$SELF")/standup-summary" < "$TMP/yd.json") || out="not written: $out"
+    sed 's/^/  /' <<<"$out"
+  fi
   exit 0
 fi
 

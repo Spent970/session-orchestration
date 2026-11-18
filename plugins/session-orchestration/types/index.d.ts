@@ -65,14 +65,14 @@ declare module 'claude-code' {
       peek: Peek | null
       // The pane also lists live sessions of every other project (activity read with --all-projects).
       allProjects: boolean
-      // The Yesterday tab is showing; the start day picked in it (null: the last working day).
+      // The brief tab is showing; the start day picked in it (null: the last working day).
       yesterday: boolean
       ydDay: string | null
-      // session-status --yesterday's text for that day, when it was read (HH:MM); loading while it runs.
+      // session-status --yesterday --json's text (the daily brief) for that day, when it was read (HH:MM); loading while it runs.
       ydText: { day: string | null; text: string; at: string; loading?: true } | null
-      // The standup summary (standup-summary) of the reading `of` (its text); loading, or failed with the reason.
+      // The standup (standup-summary) written from the reading `of` (its text); loading, or failed with the reason.
       ydSum: { of: string; text: string; loading?: true; failed?: string } | null
-      // The Yesterday tab shows the raw list, not the summary.
+      // The brief tab shows every task's list of items, not the brief.
       ydList: boolean
       // The commands sessions handed the user (hand_command), read from their files each minute; the last Run's result.
       handed: Handed[]
