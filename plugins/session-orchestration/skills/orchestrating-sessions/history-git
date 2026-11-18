@@ -33,9 +33,7 @@ repo() {
   local d t gd
   d=$(cd "$1" 2>/dev/null && pwd -P) || return 1
   t=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)
-  # never the project's own repo or one holding it (a monorepo, a home folder's)
-  if [ -n "$t" ] && case $ROOT/ in "$t"/*) false ;; esac && { [ "$t" = "$d" ] || [ "$t" = "$(dirname "$d")" ]; } &&
-     [ -z "$(git -C "$t" remote 2>/dev/null)" ]; then
+  if [ -n "$t" ] && adoptable "$d" "$t"; then
     gd=$(git -C "$t" rev-parse --absolute-git-dir) || return 1
   else
     gd=$H/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$d").git; t=$d
@@ -66,7 +64,8 @@ targets() {
   } | while IFS=$'\t' read -r d glob; do
     d=$(cd "$d" 2>/dev/null && pwd -P) || continue
     [ -n "$glob" ] || case $ROOT/ in "$d"/*) continue ;; esac
-    ! tracked_elsewhere "$d" "$glob" || continue
+    # the handoff target (a glob) is the person's file: a tracked neighbour sharing its prefix mustn't drop it
+    [ -n "$glob" ] || ! tracked_elsewhere "$d" || continue
     printf '%s\t%s\n' "$d" "$glob"
   done | { while IFS=$'\t' read -r d glob; do ds+=("$d"); gs+=("$glob"); done
     for i in "${!ds[@]}"; do keep=1
@@ -79,12 +78,19 @@ targets() {
     done; }
 }
 
-# tracked_elsewhere DIR GLOB: git tracks a file of DIR (matching GLOB) in a repo history-git doesn't adopt (repo: the
-# project's, one holding it, or one with a remote): the team folder, a committed docs folder. Its history is that git.
+# tracked_elsewhere DIR: git tracks a file of DIR in a repo history-git doesn't adopt (repo: the
+# project's, one holding it, or one with a remote): the team folder, a committed docs folder. Its history is that git,
+# so one tracked file (a .gitkeep) is enough: the untracked files beside it get no history.
 tracked_elsewhere() {
-  local t; t=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) && [ -n "$t" ] || return 1
-  case $ROOT/ in "$t"/*) ;; *) { [ "$t" = "$1" ] || [ "$t" = "$(dirname "$1")" ]; } && [ -z "$(git -C "$t" remote 2>/dev/null)" ] && return 1 ;; esac
-  [ -n "$(git -C "$1" ls-files -- "${2:-.}" 2>/dev/null | head -1)" ]
+  local t; t=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) && [ -n "$t" ] && ! adoptable "$1" "$t" || return 1
+  [ -n "$(git -C "$1" ls-files 2>/dev/null | head -1)" ]
+}
+
+# adoptable DIR TOP: history-git adopts the repo at TOP (DIR's) as DIR's history: DIR is its top or a child of it, it has
+# no remote, and it is never the project's own repo or one holding it (a monorepo, a home folder's).
+adoptable() {
+  case $ROOT/ in "$2"/*) return 1 ;; esac
+  { [ "$2" = "$1" ] || [ "$2" = "$(dirname "$1")" ]; } && [ -z "$(git -C "$2" remote 2>/dev/null)" ]
 }
 
 # inner_repo OUTER DIR: a repo's top (its .git) lies between OUTER (left out) and DIR (included): the outer repo can't hold

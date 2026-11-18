@@ -24,6 +24,11 @@ by a parent. Configured adds:
 - `second account found, accounts off: run setup (session-status --init --write)` when another Claude account shares
   this one's transcripts and `features.accounts` is off;
 - `committed code new or changed upstream: REL…: run setup to review it` (shared mode, below);
+- `team[ (DIR)]: memory, review-brief, adapter (trusted|not trusted[, local wins])`: not a warning, the team files git
+  tracks in the team folder, which sessions read before the person's (worker.md, Project memory). DIR, in a
+  workspace, is that folder (relative to the root when inside it); without it, `.claude/coordination/`;
+- `pending.file and history.dirs are ignored in the repo file (…)` when the repo file still sets them: move them to
+  `.claude/coordination.local.json`;
 - a warning per config value that isn't valid (the default is used), per terminal or feature module that doesn't
   load (see status-reference.md, Modules), and, when `CLAUDE.md` still delegates approvals
   in words with no `approvals.delegate` key, `delegation found in CLAUDE.md: run setup to move it`;
@@ -75,7 +80,8 @@ by a parent. Configured adds:
 - **Optional briefs**, on the user's request (`--init` lists the missing ones, also once set up): `--write
   --review-brief` writes `review-brief.md` beside the handoff file (P for a new setup); name it in each PR reviewer's
   first prompt (`Review <repo>#<id> (<KEY>). Brief: <path>`). A repo that commits the team's conventions in
-  `.claude/coordination/review-brief.md` (`--check`'s `team:` line lists `review-brief`) gets both, the team's first:
+  `.claude/coordination/review-brief.md` (`--check`'s `team:` line lists `review-brief`; a workspace's says
+  `team (DIR):`, the team repo's folder (relative to the root when inside it), so the path is `DIR/review-brief.md`) gets both, the team's first:
   `Brief: .claude/coordination/review-brief.md, then <path>`; the personal one wins where they differ. `--write
   --retro-brief` writes `retro-brief.md` beside the memory file (older setups: `.claude/retro-brief.md`; `--rnd-brief`
   still works, and --write renames an old `rnd-brief.md`), which the `retro` skill reads.
@@ -150,7 +156,7 @@ Both are excluded from git, the repo file until shared mode commits it. `session
 | `feedback.repo_dir` | a clone of the plugin repo you can push to (`~` expanded); its coordinator is the plugin coordinator, which owns every plugin feedback case (`features/plugin-coordinator.md`) | unset; person key; setup doesn't write it |
 | `feedback.project_dir` | where this project's own feedback cases go (`feedback add --project`; `~` expanded, relative to the root; keep it out of git). A project key: never in the person-wide config.json | unset: `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/feedback-projects/<root, encoded>`; setup doesn't write it |
 | `pending.file` | the coordinator's handoff file, `*.md`: relative to the root (e.g. `docs/pending.md`), `~/…` or absolute: turns on its per-entry history hook and archive (`--pending-done`, `--pending-history`; status-reference.md). With it or a replies folder, a Stop hook keeps that folder's local git history (`--git-history`; more folders: `history.dirs`). Person only | unset; setup writes it only when `--move` moves the handoff file |
-| `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`). A folder git tracks (team files, a committed docs folder) is skipped: its history is the project's git. Person only | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
+| `history.dirs` | a JSON list of folders (relative to the root, `~` or absolute) whose changes the history-git Stop hook commits when a turn ends, besides the replies folder and handoff files it always keeps. A folder that is (or whose parent is) the top of a repo with no remote is adopted with its history; else its git dir sits outside it. A folder inside another listed one (the replies folder inside `docs/notes`) is committed only to the outer repo, unless a repo of its own lies between them; its earlier history stays in its old repo, which `--git-history` and `--pending-history` no longer read. A folder holding the root is skipped (status-reference.md, `--git-history`). A folder git tracks (team files, a committed docs folder; one tracked file, a `.gitkeep`, is enough) is skipped: its history is the project's git. Person only | unset; setup writes it only on the user's yes to taking over a hand-made history hook |
 | `pane.sections` | a JSON object, a coordinator pane section's slug to `open` \| `line` \| `hidden` (e.g. `{"pending": "hidden", "idle": "line"}`; slugs and states: `../orchestrating-sessions/status-reference.md`, The pane in detail). Read from the project's `.claude/coordination.local.json` only, never the repo file or the person-wide one; a press on a section's title writes it there (`session-status --pane-section SLUG STATE`) | unset: every section open, Resolved one line; a folded Waiting on you, Decisions or Needs action still draws its new items; person-only; setup doesn't write it |
 | `telemetry` | `local` \| `off`: with `local`, each pane press appends a fixed name to `${XDG_STATE_HOME:-~/.local/state}/session-orchestration/usage.jsonl`, read only by `retro.py usage`; nothing leaves the machine | `off`; setup doesn't write it (set it in the person-wide file to measure your own use) |
 | `plan.enabled` | `true` \| `false`: `session-status --plan` splits a design into chunks | `true`; setup doesn't write it |

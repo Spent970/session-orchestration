@@ -8,9 +8,9 @@
 #                                   read it), the indented value lines open_pane reads (`review_inbox url: URL`,
 #                                   `notify after: N min`), and a line per warning (a config value not valid, a module that doesn't load whole,
 #                                   delegation still in CLAUDE.md, a second account with features.accounts off, a
-#                                   terminal detected but not recorded), and `team: memory, review-brief, adapter
-#                                   (trusted)`: the team files git tracks in .claude/coordination/, read before the
-#                                   person's
+#                                   terminal detected but not recorded), and `team[ (DIR)]: memory, review-brief, adapter
+#                                   (trusted[, local wins])`: the team files git tracks in .claude/coordination/ (DIR,
+#                                   relative to the root, in a workspace's team repo), read before the person's
 #   session-status --init           the proposal: what it found and what it would write, numbered for one reply
 #   session-status --init --write [--delegate] [--own] [--shared] [--trust=REL@SHA…] [--review-brief] [--retro-brief]
 #                                 [KEY=VALUE…]
@@ -236,10 +236,17 @@ if [ "$mode" = check ]; then
                   for x in memory.md:memory memory:memory review-brief.md:review-brief session-status-adapter:adapter; do
                     v=${x#*:}; case " ${tf[*]-} " in *" $v "*) continue ;; esac   # memory.md and memory/: one entry
                     [ -n "$(git -C "$sd" ls-files -- "${x%%:*}" 2>/dev/null | head -1)" ] || continue
-                    [ "$v" != adapter ] || { [[ " ${review[*]-} " == *" session-status-adapter@"* ]] && v="adapter (not trusted)" || v="adapter (trusted)"; }
+                    if [ "$v" = adapter ]; then
+                      [[ " ${review[*]-} " == *" session-status-adapter@"* ]] && v="adapter (not trusted" || v="adapter (trusted"
+                      # lib.sh adapter_path: the person's untracked .claude/session-status-adapter runs instead
+                      [ -x "$root/.claude/session-status-adapter" ] && ! tracked "$root/.claude/session-status-adapter" 2>/dev/null && v+=", local wins"
+                      v+=")"
+                    fi
                     tf+=("$v")
                   done
-                  [ "${#tf[@]}" = 0 ] || { x=$(printf '%s, ' "${tf[@]}"); echo "team: ${x%, }"; }
+                  # a workspace's team repo: the folder named relative to the root, where the team files are read
+                  x=${sd#"$root"/}; [ "$x" = .claude/coordination ] && x= || x=" ($x)"
+                  [ "${#tf[@]}" = 0 ] || { y=$(printf '%s, ' "${tf[@]}"); echo "team$x: ${y%, }"; }
                 fi
                 [ -n "$term_set" ] || [ "$term_found" = plain ] || echo "detected $term_found: run setup to record it (session-status --init --write adds terminal=$term_found)"
                 [ "$a" = true ] || [ "$accounts_n" -lt 2 ] || echo "second account found, accounts off: set features.accounts to true in .claude/coordination.local.json (session-status --init --write adds it when unset)"

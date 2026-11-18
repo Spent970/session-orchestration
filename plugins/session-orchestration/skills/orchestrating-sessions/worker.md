@@ -240,8 +240,9 @@ would need, `- <YYYY-MM-DD> <TASK>: <what, and why>`, to the matching topic (els
 other lines. The user's "remember this" about the project goes there the same way. The coordinator prunes it, plus
 whoever the index names for graduation (`/graduate`).
 
-- In a repo with shared coordination (a committed `.claude/coordination/`), read its team memory first, the same
-  way: `.claude/coordination/memory.md` (the index; a flat one whole), then its `memory/<topic>.md` files whose
+- In a repo with shared coordination (a committed `.claude/coordination/`, the team folder; in a workspace, the team
+  repo's `DIR` that `session-status --init --check`'s `team (DIR):` line names), read its team memory first, the same
+  way: the team folder's `memory.md` (the index; a flat one whole), then its `memory/<topic>.md` files whose
   trigger matches, then your own index and topics, which use the same topic names. Where the two differ, yours is
   the newer word. A brief named the same way (the team's review brief, then yours) layers the same. Tag an entry
   true and useful to a collaborator on another machine `[team]` (`- <date> <TASK>: [team] …`); in doubt, leave it
