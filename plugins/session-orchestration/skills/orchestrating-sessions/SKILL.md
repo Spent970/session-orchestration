@@ -258,7 +258,8 @@ The script lists each PR, event and head SHA once.
 merged and released) that is at rest (idle or done, not on a prompt, not waiting on the user) and quiet 10 minutes
 (its after-release steps had time) is stopped by the watcher, with no ask; it shows under `Stopped (…)` in the
 change that wakes you: tell the user in one line. Once no live session holds the task, the watcher also removes its
-worktree and local branch, with no ask, when nothing can be lost: no uncommitted or untracked file, and every commit's
+worktree and local branch, with no ask, when nothing can be lost: no uncommitted or untracked file, no ignored file the
+main checkout lacks, no live session working in it, and every commit's
 change already on the default branch (by patch, since main lands by rebase; no merge commit). That shows under
 `Stopped` too. A leftover session it leaves (interactive, on a prompt, asking the user, or `--stop` refused) and a
 worktree it keeps (its Leftovers line says why) stay the user's call: ask before removing them.
