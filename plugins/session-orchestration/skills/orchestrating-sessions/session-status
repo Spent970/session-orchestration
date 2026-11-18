@@ -1960,9 +1960,13 @@ touch "$TMP/st.entries" "$TMP/asking"
   awk -F'\t' -v id="$id" 'index($1, id) == 1 && $3 != "done" && $3 != "stopped" { f = 1 } END { exit !f }' "$TMP/agents.every" && continue
   list_accounts | cut -f1 | while read -r d; do ls "$d"/projects/*/"$id"*.jsonl; done 2>/dev/null | grep -q . && echo "$id"
 done > "$TMP/st.gone"
-grep -oE '[^[:space:]`"'"'"'()]*worktrees/[A-Za-z0-9._-]+' "$TMP/st.text" | sort -u | while read -r w; do
-  # A relative one under the root or a session-dir (shortcut: not a repo nested deeper; add once one misfires).
-  p=${w/#\~/$HOME}; [ -e "$p" ] || while read -r d; do [ ! -e "$d/$p" ] || echo y; done <<<"$dirs" | grep -q . || echo "$w"
+grep -oE '[^][[:space:]`"'"'"'()*<>]*worktrees/[A-Za-z0-9._-]*[A-Za-z0-9_-]' "$TMP/st.text" | sort -u | while read -r w; do
+  # A relative one under the root or a session-dir (shortcut: not a repo nested deeper; add once one misfires). Gone
+  # only where its worktrees folder exists: prose like "worktrees/branches" names no folder, so it is never gone.
+  p=${w/#\~/$HOME}
+  { echo "$p"; while read -r d; do echo "$d/$p"; done <<<"$dirs"; } | while read -r c; do
+    if [ -e "$c" ]; then echo here; elif [ -d "$(dirname "$c")" ]; then echo parent; fi
+  done | sort -u | tr '\n' ' ' | grep -qx 'parent ' && echo "$w"
 done > "$TMP/st.wtgone"
 # Ask and entry keys no row has: one `done` call says which are finished.
 { jq -r '.[]?.key' "$af" 2>/dev/null; cut -f1,3 "$TMP/st.entries" | grep -oE "$KEYRE"; } | sort -u | grep -vxF -f <(cut -f1 "$TMP/tasks") > "$TMP/st.keys"

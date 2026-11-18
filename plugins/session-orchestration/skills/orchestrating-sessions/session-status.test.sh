@@ -2015,7 +2015,8 @@ af=$tmp/.cache/session-status/asks/$(printf %s "$root" | { sha256sum 2>/dev/null
 echo '{"pending": {"file": "pend.md"}}' > "$root/.claude/coordination.local.json"
 printf '# Pending\n\n- 2026-11-01 ABC-12: waits on ask 99\n' > "$root/pend.md"
 run --changes >/dev/null
-echo '[{"id":"7","key":"ABC-12","question":"Remove .claude/worktrees/nope?","options":["y","n"],"at":'$fresh'}]' > "$af"
+mkdir -p "$root/.claude/worktrees/here"
+echo '[{"id":"7","key":"ABC-12","question":"Remove .claude/worktrees/nope? (sessions/worktrees/branches, **.claude/worktrees/here**.)","options":["y","n"],"at":'$fresh'}]' > "$af"
 out=$(run --stale | grep -v '^session ')   # earlier fixtures' sessions asking: covered by the signals above
 [ "$out" = 'ask 7 ABC-12: worktree .claude/worktrees/nope gone
 pending "ABC-12": reword: names ask 99, not queued; = ask 7' ] && grep -qxF '  * ask 7 ABC-12: worktree .claude/worktrees/nope gone' <<<"$(run)" &&
