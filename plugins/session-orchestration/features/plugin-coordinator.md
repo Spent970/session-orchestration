@@ -42,7 +42,7 @@ first (`<name>`: a task name the project's key pattern matches, of letters, digi
 brief, which starts with the name so the status shows its owner: `Work on <name>: Apply plugin feedback: <case file paths>. Follow feedback.md,
 Applying, for these cases only, and this repo's CLAUDE.md release checks. <PR line> Why: <what the cases say goes
 wrong>. Done when: the change is implemented with the repo's checks passing, a PR is open, and each case is marked
-sent <url>.` The `<PR line>`, by `session-status --config approvals.pr_create`: `true` (the default in this project)
+sent <url>. When finished: reply with done and the check that proves it.` The `<PR line>`, by `session-status --config approvals.pr_create`: `true` (the default in this project)
 gives `Open your PR yourself (approvals.pr_create is on).`, and they open it without asking; `false` gives `Ask before
 gh pr create.`, and it reaches you as an ask like any other.
 Because they work in your project, relayed approvals verify for them ([approvals.md](../skills/orchestrating-sessions/approvals.md)).
