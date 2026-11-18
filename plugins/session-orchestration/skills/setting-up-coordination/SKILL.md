@@ -83,14 +83,14 @@ by a parent. Configured adds:
   `.claude/coordination/review-brief.md` (`--check`'s `team:` line lists `review-brief`; a workspace's says
   `team (DIR):`, the team repo's folder (relative to the root when inside it), so the path is `DIR/review-brief.md`) gets both, the team's first:
   `Brief: .claude/coordination/review-brief.md, then <path>`; the personal one wins where they differ. `--write
-  --retro-brief` writes `retro-brief.md` beside the memory file (older setups: `.claude/retro-brief.md`; `--rnd-brief`
-  still works, and --write renames an old `rnd-brief.md`), which the `retro` skill reads.
+  --retro-brief` writes `retro-brief.md` beside the memory file (older setups: `.claude/retro-brief.md`),
+  which the `retro` skill reads.
 - **Retro schedule**, when the user wants scheduled retro runs or a `--check` shows `features.retro` on with no
   agent (`skills/retro/retro-run --status ROOT` in the plugin says `not installed`): propose, in one plain-text round,
   `features.retro: true` and a `retro` block in the person file (`schedule` `mon 12:00` unless they name another,
   `scope` `project` (`both` in the plugin's own repo), `account` when it's not the current one; Config).
   On their yes write it and run `retro-run --install ROOT`, or hand it as one command when that's refused; it prints a
-  crontab line to remove when an old `rnd-weekly` one still runs: hand that too, never edit the crontab.
+  crontab line to remove when an old `retro-weekly` one still runs: hand that too, never edit the crontab.
 
 ## Shared mode
 
