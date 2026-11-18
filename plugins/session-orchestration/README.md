@@ -88,8 +88,9 @@ ask it to start a task (`work on #12: …`), what's going on, or to pass on an a
 **Solo** (the default): nothing setup writes is visible to anyone else. Each person who uses the plugin on a
 project runs their own coordinator.
 
-**Shared**: a repo's owner can commit `.claude/coordination/` (`session-status --init --write --shared`): the repo's
-tracker settings, team memory, and optionally a shared adapter or terminal modules. Each collaborator's setup reads
+**Shared**: a repo's owner can commit `.claude/coordination/` (`session-status --init --write --shared` commits the
+repo's tracker settings and a `merge=union` line for team memory in a worktree of its own, for one team PR the user
+approves; personal files stay out of git): the repo's tracker settings, team memory, and optionally a shared adapter or terminal modules. Each collaborator's setup reads
 it; committed code runs on a person's machine only after they've reviewed it and recorded its hash, and again after
 every change. Delegation, accounts, terminal and personal memory always stay per person.
 

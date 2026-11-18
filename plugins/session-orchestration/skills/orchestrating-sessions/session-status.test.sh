@@ -1670,20 +1670,48 @@ fi
 
 if section shared; then
 gh_offline; acme_repo; init "$a" --write >/dev/null
-# Shared mode. (s1) a repo that isn't yours, whose exclude hides .claude/* (SAIL's): setup writes nothing tracked;
-# --shared makes the repo file visible to commit, with a negation.
-s=$(mkdir -p "$tmp/init/sail" && cd "$tmp/init/sail" && pwd -P); git -C "$s" init -q && git -C "$s" remote add origin https://github.com/o/sail.git
+# Shared mode. (s1) a repo others commit to, whose exclude hides .claude/* (SAIL's): setup writes nothing tracked and
+# names --shared once. --shared commits the team files on coordination/setup-<date> in a worktree from origin/main
+# (the main checkout stays clean); a home path or a person key in the repo file is refused before anything is written.
+# Its origin is a local bare repo behind the GitHub URL (insteadOf), so the PR command is GitHub's.
+s=$(mkdir -p "$tmp/init/sail" && cd "$tmp/init/sail" && pwd -P); git -C "$s" init -q && git -C "$s" symbolic-ref HEAD refs/heads/main
+so=$(mkdir -p "$tmp/init/sail.git" && cd "$tmp/init/sail.git" && pwd -P); git -C "$so" init -q --bare
+git -C "$s" remote add origin https://github.com/o/sail.git && git -C "$s" config url."$so".insteadOf https://github.com/o/sail.git
+git -C "$s" config user.name t && git -C "$s" config user.email t@t   # the person's identity, for the team commit
 printf '# a\n' > "$s/AGENTS.md" && printf '# c\n' > "$s/CLAUDE.md" && git -C "$s" add . && gc "$s" -m 'add docs'
+git -C "$s" -c user.name=u -c user.email=u@u commit -q --allow-empty -m 'a colleague' && git -C "$s" push -q origin main
 echo '.claude/*' >> "$s/.git/info/exclude"
-grep -F 'Config: tracker=none host=github ' <<<"$(init "$s")" >/dev/null && init "$s" --write >/dev/null && [ -z "$(git -C "$s" status --short)" ] &&
-  [ "$(git -C "$s" diff --stat)" = "" ] || { echo "init (s1) wrote something tracked: $(git -C "$s" status --short)"; exit 1; }
-out=$(init "$s" --write --shared) && grep -F '.git/info/exclude (!/.claude/coordination/: .claude/coordination/coordination.json was ignored)' <<<"$out" >/dev/null &&
-  [ "$(git -C "$s" status --short --untracked-files=all)" = "?? .claude/coordination/coordination.json" ] || { echo "init (s1) --shared: $out / $(git -C "$s" status --short)"; exit 1; }
-init "$s" --write >/dev/null; [ "$(git -C "$s" status --short --untracked-files=all)" = "?? .claude/coordination/coordination.json" ] ||
-  { echo "init (s1) a later --write hid the shared file: $(tail -3 "$s/.git/info/exclude")"; exit 1; }
+out=$(init "$s") && grep -F 'Config: tracker=none host=github ' <<<"$out" >/dev/null &&
+  grep -F 'Others commit here too (2 authors): all of this stays personal. Say "shared"' <<<"$out" >/dev/null &&
+  init "$s" --write >/dev/null && [ -z "$(git -C "$s" status --short)" ] &&
+  [ "$(git -C "$s" diff --stat)" = "" ] || { echo "init (s1) wrote something tracked: $out / $(git -C "$s" status --short)"; exit 1; }
+sj=$s/.claude/coordination/coordination.json; cp "$sj" "$tmp/sj"
+jq '.plan.note = "/home/u/notes.md"' "$tmp/sj" > "$sj"
+out=$(init "$s" --write --shared) && { echo "init (s1) --shared took a home path: $out"; exit 1; }
+grep -qF 'refused: --shared: these lines would put personal details in a team file' <<<"$out" &&
+  grep -qE '^  \.claude/coordination/coordination\.json:[0-9]+: a home path: .*/home/u/notes\.md' <<<"$out" &&
+  ! git -C "$s" rev-parse -q --verify "refs/heads/coordination/setup-$(date +%F)" >/dev/null || { echo "init (s1) home path: $out"; exit 1; }
+jq '.pending.file = "p.md"' "$tmp/sj" > "$sj"
+out=$(init "$s" --write --shared); grep -qF 'has person keys, which never go in a team file: pending.file (move them' <<<"$out" ||
+  { echo "init (s1) person key: $out"; exit 1; }
+cp "$tmp/sj" "$sj"
+sb=coordination/setup-$(date +%F); swt=$s/.worktrees/$sb
+out=$(init "$s" --write --shared) && [ -z "$(git -C "$s" status --short --untracked-files=all)" ] &&
+  [ "$(git -C "$s" diff --name-only origin/main "$sb" | paste -sd' ' -)" = ".claude/coordination/coordination.json .gitattributes" ] &&
+  [ "$(git -C "$s" show "$sb:.gitattributes")" = '/.claude/coordination/memory/*.md merge=union' ] &&
+  [ "$(git -C "$s" show "$sb:.claude/coordination/coordination.json" | jq -c .)" = '{"tracker":"none","host":"github","features":{"review_inbox":false}}' ] &&
+  [ "$(git -C "$s" log -1 --format=%an "$sb")" = t ] &&
+  grep -qxF "Team PR: show its diff in one pane ask (git -C $swt show), then on yes: git -C $swt push -u origin $sb && gh pr create -R o/sail --base main --head $sb --title 'coordination: shared setup (repo keys, merge=union for team memory)' --body 'Shared coordination files: every collaborator reads them once this merges; personal files stay out of git.'" <<<"$out" &&
+  grep -qF 'Personal: everything above, out of git' <<<"$out" || { echo "init (s1) --shared: $out / $(git -C "$s" status --short --untracked-files=all)"; exit 1; }
+out=$(init "$s" --write --shared); grep -qF "refused: --shared: $sb exists already" <<<"$out" || { echo "init (s1) second --shared: $out"; exit 1; }
+# merged: the pull replaces this checkout's ignored repo file, and the next --shared has nothing to open
+git -C "$swt" push -q origin "$sb:main" && git -C "$s" pull -q --ff-only origin main && [ -z "$(git -C "$s" status --short)" ] &&
+  git -C "$s" ls-files --error-unmatch .claude/coordination/coordination.json >/dev/null &&
+  git -C "$s" worktree remove "$swt" && git -C "$s" branch -q -D "$sb" &&
+  grep -qxF 'Shared: origin/main has the team files already: no team PR.' <<<"$(init "$s" --write --shared)" ||
+  { echo "init (s1) after the merge: $(git -C "$s" status --short) / $(init "$s" --write --shared)"; exit 1; }
 # (s2) a committed adapter: proposed for review with its sha256, not run until trusted, then used instead of a
 # local one; a change upstream (or since it was shown) needs a new review.
-git -C "$s" add .claude/coordination && gc "$s" -m 'coordination'
 c=$(mkdir -p "$tmp/init/team" && cd "$tmp/init/team" && pwd -P); git clone -q "$s" "$c"
 printf '#!/bin/sh\n[ "$1" = urls ] && echo "team-urls"\n' > "$c/.claude/coordination/session-status-adapter"; chmod +x "$c/.claude/coordination/session-status-adapter"
 git -C "$c" add -f .claude/coordination/session-status-adapter && gc "$c" -m 'team adapter'

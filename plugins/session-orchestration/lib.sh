@@ -65,6 +65,12 @@ person_file() { local f; f=$(coord_file coordination.local.json) && ! tracked "$
 # a personal path (pending.file, history.dirs).
 user_config() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/session-orchestration/config.json"; }
 
+# person_keys_drop [MODULE]: the jq filter that drops the person keys (and MODULE's messages block) from a repo file;
+# coord_json reads the repo file through it, and --shared refuses a team file it would change.
+person_keys_drop() {
+  echo "del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .pending, .history, .fable, .start, .retro, .pane$( [[ ${1:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$1\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
+}
+
 coord_memo=   # never inherited: valid only for the cwd its caller built it in
 coord_json() {
   # a caller that reads several keys sets coord_memo=$(coord_json) once: each build spawns ~15 processes
@@ -76,7 +82,7 @@ coord_json() {
   for f in "$(user_config)" "${p:-}"; do
     [ -n "$f" ] && [ -f "$f" ] && j=$(jq -r '.messages // empty | strings' "$f" 2>/dev/null) && [ -n "$j" ] && m=$j
   done
-  drop="del(.approvals, .terminal, .messages, .msgraph, .trusted, .team, .feedback, .telemetry, .handoff, .compact, .pending, .history, .fable, .start, .retro, .pane$( [[ ${m:-} =~ ^[A-Za-z0-9_-]+$ ]] && echo ", .[\"$m\"]")) | if .features | type == \"object\" then del(.features.accounts, .features.accounts_weekly_switch, .features.notify, .features.retro) else . end"
+  drop=$(person_keys_drop "${m:-}")
   s=$(shared_dir 2>/dev/null) && s=$s/coordination.json
   # Lowest first: the person's file for every project (person-wide keys such as feedback.*), the repo file, the
   # project's person file.
