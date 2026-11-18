@@ -446,10 +446,37 @@ run --changes >/dev/null; : > "$tmp/stops"
 out=$(SESSION_STATUS_PEEK=1 SESSION_STATUS_FORWARD=1 run --changes) && [ ! -s "$tmp/stops" ] &&
   [ "$(grep -c 'would stop' <<<"$out")" = 1 ] && grep -qxF '  * would stop: ABC-34 Done — "ABC-34 old" (aaaaaaaa)' <<<"$out" &&
   out=$(SESSION_STATUS_FORWARD=1 run --changes) && [ "$(cat "$tmp/stops")" = aaaaaaaa ] &&
-  [ "$(sed -n '/^Stopped/,$p' <<<"$out")" = "$(printf '%s\n%s' "Stopped (finished tasks' sessions, by the watcher; tell the user in one line):" '  * ABC-34 Done — "ABC-34 old" (aaaaaaaa)')" ] &&
+  [ "$(sed -n '/^Stopped/,$p' <<<"$out")" = "$(printf '%s\n%s' "Stopped (finished tasks' sessions and worktrees, by the watcher; tell the user in one line):" '  * ABC-34 Done — "ABC-34 old" (aaaaaaaa)')" ] &&
   ! grep -q 'aaaaaaaa$' <<<"$out" && run | grep -q '"ABC-34 asks": claude stop bbbbbbbb$' && run | grep -q '"ABC-34 tab": claude stop cccccccc$' &&
-  [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] && [ "$(cat "$tmp/stops")" = aaaaaaaa ] ||
-  { echo "watcher's stop failed: $out / $(cat "$tmp/stops")"; exit 1; }
+  [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] && [ "$(cat "$tmp/stops")" = aaaaaaaa ] &&
+  [ -d "$root/wt2" ] || { echo "watcher's stop failed (or removed a worktree a live session holds): $out / $(cat "$tmp/stops")"; exit 1; }
+# With no live session left on the key, the watcher also removes a finished task's worktree and local branch that lose
+# nothing: wt2's commit landed rebased (a copy on origin/main, another SHA: `branch -d` would refuse). It keeps one with
+# an untracked file (wt4), a commit not on main (wt5), a merge commit (wt6), an ignored file the main checkout lacks
+# (wt7: `worktree remove` would delete it) or a live session working in it with no key in its name (wt8), each still a
+# Leftovers line. An ignored folder the main checkout has too (cache/: build output) doesn't keep wt2.
+jq '[.[] | if (.name | startswith("ABC-34")) then .pid = null else . end]' "$tmp/agents.json" > "$tmp/agents.t" && mv "$tmp/agents.t" "$tmp/agents.json"
+gc() { git -C "$1" -c user.name=t -c user.email=t@t commit -qm "$2"; }
+echo x > "$root/wt2/x" && git -C "$root/wt2" add x && gc "$root/wt2" x
+git -C "$root" update-ref refs/remotes/origin/main "$(git -C "$root" -c user.name=u -c user.email=u@u commit-tree -p origin/main -m 'x (rebased)' 'feature/ABC-34-old^{tree}')"
+git -C "$root" worktree add -q -b feature/ABC-34-dirty "$root/wt4" origin/main && touch "$root/wt4/notes"
+git -C "$root" worktree add -q -b feature/ABC-34-extra "$root/wt5" origin/main && echo y > "$root/wt5/y" && git -C "$root/wt5" add y && gc "$root/wt5" y
+git -C "$root" worktree add -q -b feature/ABC-34-merge "$root/wt6" origin/main~1 && git -C "$root/wt6" -c user.name=t -c user.email=t@t merge -q --no-ff -m m origin/main
+printf 'cache/\n*.env\n' >> "$root/.git/info/exclude" && mkdir -p "$root/cache" "$root/wt2/cache" && touch "$root/wt2/cache/a"
+git -C "$root" worktree add -q -b feature/ABC-34-env "$root/wt7" origin/main && echo k=v > "$root/wt7/local.env"
+git -C "$root" worktree add -q -b feature/ABC-34-used "$root/wt8" origin/main
+jq --arg c "$root/wt8/sub" '. + [{sessionId: "dddddddd-0000-0000-0000-000000000004", name: "side work", cwd: $c, kind: "background", state: "idle", status: "idle", pid: 1}]' "$tmp/agents.json" > "$tmp/agents.t" && mv "$tmp/agents.t" "$tmp/agents.json"
+run --changes >/dev/null
+out=$(SESSION_STATUS_PEEK=1 SESSION_STATUS_FORWARD=1 run --changes) && [ -d "$root/wt2" ] &&
+  [ "$(grep -c 'would remove' <<<"$out")" = 1 ] && grep -qxF '  * would remove: ABC-34 Done — worktree wt2, branch feature/ABC-34-old' <<<"$out" &&
+  out=$(SESSION_STATUS_FORWARD=1 run --changes) && [ ! -e "$root/wt2" ] && ! git -C "$root" rev-parse -q --verify feature/ABC-34-old >/dev/null &&
+  [ "$(sed -n '/^Stopped/,$p' <<<"$out")" = "$(printf '%s\n%s' "Stopped (finished tasks' sessions and worktrees, by the watcher; tell the user in one line):" '  * ABC-34 Done — removed worktree wt2 and branch feature/ABC-34-old')" ] &&
+  [ "$(grep -c wt2 <<<"$out")" = 1 ] && b=$(run | sed -n '/^Leftovers/,/^$/p') &&
+  grep -qF 'worktree wt4 has 1 uncommitted file(s)' <<<"$b" && grep -qF 'worktree wt5 has 1 commit(s) not pushed' <<<"$b" &&
+  grep -qF 'worktree wt6 has 1 commit(s) not pushed' <<<"$b" && grep -qF 'worktree remove wt7 &&' <<<"$b" && grep -qF 'worktree remove wt8 &&' <<<"$b" &&
+  [ -d "$root/wt4" ] && [ -d "$root/wt5" ] && [ -d "$root/wt6" ] && [ -f "$root/wt7/local.env" ] && [ -d "$root/wt8" ] &&
+  [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] || { echo "watcher's worktree removal failed: $out / ${b:-}"; exit 1; }
+for w in wt4 wt5 wt6 wt7 wt8; do git -C "$root" worktree remove --force "$root/$w"; done; rm -rf "$root/cache"
 mv "$tmp/claude.keep" "$tmp/bin/claude"; unset SESSION_STATUS_STOP_AFTER_S
 fi
 
