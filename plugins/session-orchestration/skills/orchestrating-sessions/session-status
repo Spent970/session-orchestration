@@ -136,6 +136,8 @@
 #                       handover.md)
 #        session-status --inbox [--read N…|all] | --inbox-add [--from WHO] [SENDER_ID] < TEXT   the coordinator
 #                       inbox: messages no live coordinator took (the reply tool's backstop), unread ones printed
+#        session-status --inbox-add --root DIR < TEXT   a coordinator queues TEXT in DIR's project coordinator inbox,
+#                       under any account (features/accounts.md, Messaging another project's coordinator)
 #        session-status --report-file SESSION_ID [KEY] < REPORT   the reply tool's report: the top of
 #                       <replies>/<KEY>.md (no KEY: that session's name), its `## Handoff` kept
 #        session-status --init [--check | --write …]   set this folder up for coordination: the setting-up-coordination
@@ -322,9 +324,39 @@ inbox_lock() {
     echo "session-status: couldn't lock $1; going on unlocked" >&2
 }
 if [ "${1:-}" = --inbox-add ]; then
-  shift; from=; [ "${1:-}" = --from ] && { from=${2:-}; shift 2; }
-  f=$(inbox_file) || { echo "$ROOT/CLAUDE.md names no replies folder: no inbox" >&2; exit 2; }
-  body=$(cat); [ -n "${body//[[:space:]]/}" ] || { echo "usage: session-status --inbox-add [--from WHO] [SENDER_ID] < TEXT" >&2; exit 2; }
+  shift; from= to=
+  usage="usage: session-status --inbox-add [--from WHO] [SENDER_ID] < TEXT | --inbox-add --root DIR < TEXT"
+  case ${1:-} in
+    --from) from=${2:-}; shift 2 ;;
+    --root) to=${2:-}; [ -n "$to" ] && [ $# = 2 ] || { echo "$usage" >&2; exit 2; }; shift 2 ;;
+  esac
+  body=$(cat); [ -n "${body//[[:space:]]/}" ] && [ "${1:-}" != --root ] || { echo "$usage" >&2; exit 2; }
+  if [ -n "$to" ]; then
+    # --root DIR: another project's coordinator inbox, under any account (features/accounts.md, Messaging another
+    # project's coordinator). Coordinator to coordinator only, never an approval, never into a folder git would commit.
+    # The cheap refusals first: the listing below asks every account.
+    [ "$(config features.accounts)" = true ] || { echo "--inbox-add --root: features.accounts is off in this project" >&2; exit 2; }
+    d=$(cd "${to/#\~/$HOME}" 2>/dev/null && pwd -P) && is_root "$d" ||
+      { echo "$to is not a coordinated project root (no .claude/session-status-adapter or .claude/coordination.local.json)" >&2; exit 2; }
+    [ "$d" != "$ROOT" ] || { echo "$to is this project: use --inbox-add without --root" >&2; exit 2; }
+    ! grep -q 'APPROVAL relayed from the user' <<<"$body" ||
+      { echo "an approval is never relayed through an inbox: the other coordinator asks its user on its own pane" >&2; exit 2; }
+    rd=$(replies_path "$d"); [ -n "$rd" ] || { echo "$(tilde "$d")/CLAUDE.md names no replies folder: no inbox there" >&2; exit 2; }
+    f=$rd/coordinator-inbox.md g=$rd; while [ ! -d "$g" ]; do g=${g%/*}; g=${g:-/}; done
+    if git -C "$g" rev-parse --is-inside-work-tree >/dev/null 2>&1 && ! git -C "$g" check-ignore -q "$f"; then
+      echo "$(tilde "$rd") is in a git work tree that doesn't ignore it: an inbox entry would be committed" >&2; exit 2
+    fi
+    TMP=$(mktemp -d) || exit 1; c=$(coord_name "$ROOT")
+    me=$(list_sessions | awk -F'\t' -v s="${CLAUDE_CODE_SESSION_ID:-}" -v r="$ROOT" 's != "" && $1 == s && ($6 == r || index($6, r "/") == 1) { print $2; exit }')
+    [ -n "$me" ] || [ ! -e "$TMP/ask.failed" ] || { rm -rf "$TMP"; echo "an account's session listing failed, so whether this session is the coordinator is unknown: try again" >&2; exit 3; }
+    rm -rf "$TMP"; unset TMP
+    case $me in "$c"|"$c-next") ;;
+      *) echo "only this project's coordinator writes to another project's inbox (this session: \"${me:-not listed in $(tilde "$ROOT")}\"); a task session messages its own coordinator" >&2; exit 2 ;;
+    esac
+    from="\"$me\" (${CLAUDE_CODE_SESSION_ID:0:8}) · $(tilde "$ROOT") · $(tilde "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")"
+  else
+    f=$(inbox_file) || { echo "$ROOT/CLAUDE.md names no replies folder: no inbox" >&2; exit 2; }
+  fi
   if [ -z "$from" ] && [ -n "${1:-}" ]; then
     n=$(list_sessions | awk -F'\t' -v s="$1" '$1 == s { print $2; exit }'); from="${n:+\"$n\" }(${1:0:8})"
   fi
