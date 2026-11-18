@@ -21,6 +21,8 @@ git worktree add -q "$T/wt" 2>/dev/null || fail "worktree setup"
 out=$("$C" add bugfixes Other --where login.sh:3 --found f --evidence e); [ $? = 3 ] && grep -qF "$a" <<<"$out" || fail "dedup by place"
 "$C" add features 'Hourly sign-in expiry' --where x --found f --evidence e >/dev/null; [ $? = 3 ] || fail "dedup by words"
 b=$("$C" add features 'Hourly sign-in expiry' --where x --found f --evidence e --new) && [ -f "$b" ] || fail "--new"
+c=$("$C" add --new features 'Hourly sign-in expiry' --where x --found f --evidence e) && [ -f "$c" ] || fail "--new before the category"; rm -f "$c"
+d=$("$C" add features --new 'Hourly sign-in expiry' --where x --found f --evidence e) && [ -f "$d" ] || fail "--new before the title"; rm -f "$d"
 # Bad input.
 "$C" add misc t --where x --found f --evidence e 2>/dev/null; [ $? = 2 ] || fail "bad category"
 "$C" add bugfixes t --where x --found f --evidence $'1\n2\n3\n4' 2>/dev/null; [ $? = 2 ] || fail "4-line evidence"

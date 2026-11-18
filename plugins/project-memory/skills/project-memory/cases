@@ -70,9 +70,14 @@ words() { tr 'A-Z' 'a-z' <<<"$1" | tr -cs 'a-z0-9' '\n' | awk 'length >= 4' |
 
 case ${1:-} in
 add)
-  cat=${2:-} title=${3:-}; shift 3 2>/dev/null || die "usage: cases add CATEGORY TITLE --where … --found … --evidence …"
+  shift; new= cat= title=
+  # --new may come before the category or the title too.
+  while [ $# -gt 0 ] && [ -z "$title" ]; do
+    if [ "$1" = --new ]; then new=1; elif [ -z "$cat" ]; then cat=$1; else title=$1; fi; shift
+  done
+  [ -n "$title" ] || die "usage: cases add CATEGORY TITLE --where … --found … --evidence …"
   case $cat in bugfixes|features|refactorings) ;; *) die "category: bugfixes | features | refactorings" ;; esac
-  where= found= evidence= suggested= new=
+  where= found= evidence= suggested=
   while [ $# -gt 0 ]; do
     case $1 in
       --where) where=${2:-} ;; --found) found=${2:-} ;; --evidence) evidence=${2:-} ;; --suggested) suggested=${2:-} ;;
