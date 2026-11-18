@@ -11,7 +11,11 @@
    version that doesn't exist yet. A branch that bumped `version` in its last commit keeps that number.
 2. Before committing: `claude plugin test plugins/<plugin>`, `tsc -p plugins/<plugin>` (needs the
    engine's generated `.claude-plugin/types/`, untracked), `claude plugin validate plugins/<plugin>` and
-   `./scrub-check.sh` (no personal or company names: examples use `PROJ-123`, paths `/home/u/…`).
+   `./scrub-check.sh` (no personal or company names: examples use `PROJ-123`, paths `/home/u/…`), and only the shell
+   suites (`*.test.sh`) beside the files you changed. In `session-status.test.sh` run only the sections your change
+   touches: `bash session-status.test.sh NAME…`, picking each `if section NAME; then` block that runs the option or
+   behaviour you changed (`grep -n -e '--yourflag' -e '^if section'` shows which; a fixture or helper change at the
+   top touches all of them). The full suite is CI's (`test.yml`, macOS and Ubuntu), not a local step.
 3. Land it through a PR: push the branch, open the PR and, once the task is approved, `gh pr merge <N> -R OWNER/REPO --auto --rebase`.
    `main` takes only rebase merges of a branch that is up to date with it and green in CI; nothing pushes `main` by
    hand. Each landing adds a release commit, which puts every other open PR behind `main`. Until yours shows merged,
