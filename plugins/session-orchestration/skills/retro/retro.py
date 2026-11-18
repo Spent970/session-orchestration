@@ -11,18 +11,21 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project
                                   message, 160 chars), bang (a session suggests `! cmd`), ran (the user ran a
                                   `!` command), ask, err, bash (+ permission reasonType), self (admitted mistake),
                                   human, xmsg; snippets capped at 220 chars. Last column `test`: -p or dontAsk for
-                                  a headless test session (leave those out of refusal counts), else empty
+                                  a headless test session (leave those out of refusal counts), else empty. stderr:
+                                  `noverdict` (denials whose classifier gave no verdict, by cause: a hook changed the
+                                  call's input, another call in the response was changed, the response ended first)
   context [days=7] [split_iso] [project_rx]  context per request (avg, median, >200K and excess, base median) for
                                   all, since split, and matching projects; `over` rows per session; `fork` rows
   units [days=7] [--merge|--done|--post RX] [--merged FILE] [--keys FILE]  merged PRs, finished
-                                  tickets, review posts whose command ran, one row each; USD per unit on stderr.
+                                  tickets, review posts (not --parent-id replies) whose command ran, one row each; USD per unit on stderr.
                                   --merged: the adapter's `yesterday EPOCH KEY…` output, whose merges of the sessions'
                                   keys count too (a reviewer pressed merge); merge_ran on stderr is the ones a session
                                   ran. --keys: also write the sessions' task keys to FILE, one line, for `yesterday`
   waits [days=7] [min=5]          tool calls whose result came back >= min minutes later (prompts, hangs)
   bgtasks REGEX [days=7]              background Bash launches vs. their completion notices (SILENT = died with
                                   its session); totals on stderr
-  replies [days=7]                task sessions idle > 6 h that never wrote replies/<KEY>* (lost reports); totals on stderr
+  replies [days=7]                task sessions idle > 6 h that never wrote replies/<KEY>* (by hand, or the reply
+                                  tool's report with that key: lost reports); totals on stderr
   triggers SESSION_PREFIX [days=7]     a session's wakes, requests and USD by trigger: human/xmsg/bgtask/cron/other
   usage [days=30]                 one row per plugin feature (pane button, tool, skill, doc, session-status flag,
                                   config key): uses in the window, first seen, `unused` when 0 uses all window;
@@ -39,7 +42,8 @@ usage: python3 -I retro.py [--until YYYY-MM-DDTHH:MM[:SS]] CMD [args] [--project
   trial [days=28]                 the planner trial's arms side by side (tasks with a chunk session vs the rest):
                                   units, median USD and tokens per unit, peak, compactions, handoffs, /code-review
                                   findings and runs per unit, step-ins per unit
-  handoff [days=28]               one row per coordinator handoff entry (config pending.file, open and archived):
+  handoff [days=28]               one row per coordinator handoff entry (config pending.file, else the state folder's
+                                  pending.md; open and archived; an entry with no history: from its line, rewordings -):
                                   wait, blocker bucket, rewordings, rounds, reason, detail/history bytes, reads of
                                   its files in the window (tokens, sessions); stderr: totals, wait per bucket, and
                                   entries whose history a session read against the rest
@@ -220,8 +224,14 @@ def sessions(days=7):
 SELF = re.compile(r"\b(I was wrong|my mistake|I retract|retracting|I misread|that was wrong|I got that wrong|correction:|I stand corrected|wrongly (said|claimed)|I (incorrectly|wrongly))\b", re.I)
 
 
+# A no-verdict denial's cause, from the classifier's text: the first that matches; else `other`.
+NOVERDICT = [("hook_changed", "a hook changed this call's input"), ("sibling_changed", "another call in this response was changed"),
+             ("ended", "response ended before its verdict")]
+
+
 def events(days=7):
     window(days)
+    nv = dict.fromkeys([k for k, _ in NOVERDICT] + ["other"], 0)
     print("session\tts\tkind\tdetail\tdetail2\ttest")
     for f in transcripts():
         sid = os.path.basename(f)[:8]
@@ -262,6 +272,9 @@ def events(days=7):
                         # The hook's or classifier's own words, so a split hint can be told from a refusal.
                         msg = " ".join(rc.split())[:160]
                         row("deny", f"{name}: {arg}", f"{pd.get('source')}/{pd.get('reasonType')}: {msg}")
+                        if "gave no verdict" in rc and not test:
+                            full = " ".join(rc.split())
+                            nv[next((k for k, t in NOVERDICT if t in full), "other")] += 1
                     elif b.get("is_error"):
                         row("err", f"{name}: {arg}", rc.strip().split("\n")[0])
                     if name == "Bash":
@@ -276,6 +289,7 @@ def events(days=7):
                         row("ran", cmd.strip())
                 elif k == "human":
                     row("human", txt)
+    print("noverdict " + " ".join(f"{k}={v}" for k, v in nv.items()), file=sys.stderr)
 
 
 RAN = re.compile(r"<bash-input>([\s\S]*?)</bash-input>")
@@ -365,7 +379,7 @@ UNITS = {"merge": CLI + r"(?:pr|mr) merge\s+" + REPO + r"(\d+)",
 
 def units(days=7, *opts):
     """Units of work whose command ran (its result is neither an error nor a denial): `merge`, `done` (a ticket
-    finished) and `post` (a review comment posted from a review session: name or first prompt says review), one
+    finished) and `post` (a review comment posted from a review session: name or first prompt says review; a --parent-id reply left out), one
     row per unit id, first time. --merge/--done/--post RX override the regexes (one capture group: the id);
     --project (a global option) keeps one project's transcripts. The totals line on stderr gives USD per merge and per
     finished ticket over those sessions, and per post over the review sessions among them."""
@@ -453,7 +467,11 @@ def unit_hits(f, rx):
             for k, r in rx.items():
                 if k == "post" and not re.search("review", name + first, re.I):
                     continue
-                for uid in r.findall(cmd):
+                for mt in r.finditer(cmd):
+                    # a --parent-id reply answers a thread (often a reviewer on one's own PR): not a review posted
+                    if k == "post" and re.match(r"[^;&|\n]*\s--parent-id\b", cmd[mt.end():]):
+                        continue
+                    uid = mt.group(1)
                     uid = f"{repo.group(1)}#{uid}" if repo and k != "done" else uid  # PR numbers repeat across repos
                     hits.append(((k, uid, sid) if k == "post" else (k, uid), ts, cmd))  # a later review round is another post
     return hits, bool(re.search("review", name + first, re.I)), first
@@ -879,12 +897,13 @@ TASK = re.compile(r"(?:Session task:|Work on)\s+(?:https?://\S+/browse/)?([A-Z]+
 
 def replies(days=7):
     """Lost replies: task sessions (first prompt "Work on KEY", or "Session task: KEY") idle > 6 h that never wrote
-    replies/<KEY>* (Write/Edit on it, or a Bash command that names it after `>`, mv, cp, tee, sed -i or python)."""
+    replies/<KEY>* (Write/Edit on it, a Bash command that names it after `>`, mv, cp, tee, sed -i or python, or the
+    reply tool's report with key KEY)."""
     window(days)
     tot = {"task": 0, "wrote": 0, "lost": 0, "open": 0}
     for f in transcripts():
         key = last = name = None
-        wrote = False
+        wrote, rep = False, set()
         for line, o in lines(f):
             ts = o.get("timestamp") or ""
             if ts and ts[:19] > END_ISO:
@@ -901,11 +920,18 @@ def replies(days=7):
                     key = k.group(1)
                 elif txt.strip():
                     key = ""  # the first prompt names no task: not a task session
-            if key and o.get("type") == "assistant" and f"replies/{key}" in line:
+            if rep and o.get("type") == "user" and (o.get("permissionDecision") or {}).get("decision") != "reject":
+                for b in m.get("content") if isinstance(m.get("content"), list) else []:
+                    if isinstance(b, dict) and b.get("tool_use_id") in rep and not b.get("is_error"):
+                        wrote = True
+            if key and o.get("type") == "assistant" and (f"replies/{key}" in line or '"report"' in line):
                 path = rf"replies/{re.escape(key)}(?!\d)"  # ABC-12 isn't ABC-123
-                for b in m.get("content") or []:
+                for b in m.get("content") if isinstance(m.get("content"), list) else []:
                     i = (b.get("input") or {}) if isinstance(b, dict) and b.get("type") == "tool_use" else {}
                     cmd = i.get("command", "")
+                    # the reply tool's report writes replies/<key>.md (no key: the session's task key) once it is sent
+                    if i and str(b.get("name")).endswith("__reply") and i.get("report") and i.get("key", key) == key:
+                        rep.add(b.get("id"))
                     # shortcut: `cp replies/KEY… elsewhere`, or a script that reads the reply and writes another file,
                     # still counts as a write; parse the command if that shows up
                     if re.search(path, i.get("file_path", "")) or \
@@ -932,11 +958,12 @@ BUCKETS = [("user decision", r"\b(your call|decid|decision|approv|on you|asks? (
            ("human review", r"\breview"), ("release", r"\b(release|deploy|plugin-release|publish)"),
            ("cleanup ask", r"\b(clean ?up|delete|prune|remove|archive)"), ("fault", r"\b(fail|broken|bug|error|crash|stuck)"),
            ("outside person", r"\b(waits? (on|for)|waiting (on|for)|asked|reply from|answer from|ping)")]
+slug_of = lambda x: re.sub(r"^-+|-+$", "", re.sub(r"[^A-Za-z0-9._-]+", "-", x))[:60]  # pending's SLUG
 HLINE = re.compile(r"^- (\d{4}-\d\d-\d\d \d\d:\d\d) \(([^)]*)\) (.*)$")
 
 
 def handoff(days=28):
-    """Each handoff entry (pending.file of every coordinated root a transcript ran in) open at the window's end or
+    """Each handoff entry (pending.file, else the state folder's pending.md, of every coordinated root a transcript ran in) open at the window's end or
     resolved in it, its rounds merged (open and archived files): its wait
     (first wording to resolved, or to the window's end), blocker bucket, rewordings, rounds (resolved more than once:
     recurring), reason unknown, detail and history sizes, and the transcript reads of its files (tokens ~ chars/4,
@@ -958,8 +985,10 @@ def handoff(days=28):
                     rel = (json.load(open(cfg)).get("pending") or {}).get("file")
                 except Exception:
                     rel = None
-                if rel:
-                    rootset[d] = os.path.expanduser(rel)  # relative: to the root; absolute or ~ kept
+                # unset: the state folder's pending.md, where setup puts it (lib.sh proj_dir; the adapter cats it)
+                dflt = os.path.join(STATE, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(d)), "pending.md")
+                if rel or os.path.isfile(dflt):
+                    rootset[d] = os.path.expanduser(rel) if rel else dflt  # relative: to the root; absolute or ~ kept
                 break
             d = os.path.dirname(d)
     # reads of the entries' files: a Read of one, or a Bash command naming one (cat, sed, grep) or running
@@ -978,7 +1007,7 @@ def handoff(days=28):
                     i = b.get("input") or {}
                     p = str(i.get("file_path") or i.get("command") or "")
                     if m := HIST.search(p):
-                        p = "history:" + re.sub(r"^-+|-+$", "", re.sub(r"[^A-Za-z0-9._-]+", "-", m.group(2)))[:60]
+                        p = "history:" + slug_of(m.group(2))
                     if p.startswith("history:") or any(d in p for d in dirs):
                         pend[b.get("id")] = p
                 elif b.get("type") == "tool_result" and b.get("tool_use_id") in pend:
@@ -991,8 +1020,36 @@ def handoff(days=28):
     for root, rel in sorted(rootset.items()):
         D = os.path.join(root, rel[:-3])
         A, DN = D + "-archive", os.path.basename(D)
+        slugs = {os.path.basename(h)[:-len(".history.md")] for h in glob.glob(f"{D}/*.history.md") + glob.glob(f"{A}/*.history.md")}
+        # An open entry with no history (pending.file unset: no hook keeps one): a row from its line alone, added on
+        # its date, one round, rewordings unknown (-). Entries and LABEL as `pending`'s awk.
+        try:
+            body = open(D + ".md", errors="replace").read().split("\n")[1:]
+        except OSError:
+            body = []
+        ents, on = [], False
+        for x in body:
+            if x.startswith("- "):
+                on = True
+                ents.append(x[2:])
+            elif on and (x.startswith("#") or (x.strip() and not x[:1].isspace())):
+                break
+        for e in ents:
+            m = re.match(r"(\d{4}-\d\d-\d\d) (.*)", e)
+            label = re.match(r"(.*?)(?: \(|:|$)", m.group(2) if m else e).group(1)
+            slug = slug_of(label)
+            if not m or slug in slugs or (t0 := datetime.strptime(m.group(1), "%Y-%m-%d").timestamp()) > END:
+                continue
+            wait = (END - t0) / 86400
+            bucket = next((n for n, rx in BUCKETS if re.search(rx, e, re.I)), "other")
+            det = f"{D}/{slug}.md"
+            mine = [(sd, t) for sd, pth, t in reads if f"{DN}/{slug}." in pth]
+            rows.append(("open", bucket, wait, None, 1, "", None))  # no history to read: out of the read/unread split
+            print("\t".join(map(str, [os.path.basename(root), "open", label, m.group(1), "", f"{wait:.1f}", bucket, "-", 1,
+                                      "", os.path.getsize(det) if os.path.exists(det) else 0, 0, len(mine),
+                                      sum(x[1] for x in mine), ",".join(sorted({x[0] for x in mine}))])))
         # one entry per slug: its archived rounds and its open one, lines after the window's end left out
-        for slug in sorted({os.path.basename(h)[:-len(".history.md")] for h in glob.glob(f"{D}/*.history.md") + glob.glob(f"{A}/*.history.md")}):
+        for slug in sorted(slugs):
             hs = [h for h in (f"{A}/{slug}.history.md", f"{D}/{slug}.history.md") if os.path.exists(h)]
             hl = sorted(m.groups() for h in hs for m in map(HLINE.match, open(h, errors="replace")) if m)
             ep = lambda t: datetime.strptime(t, "%Y-%m-%d %H:%M").timestamp()  # history times are local
@@ -1033,7 +1090,7 @@ def handoff(days=28):
     for read in (True, False):
         g = [r for r in rows if r[6] == read]
         print(f"history {'read' if read else 'unread'}\t{len(g)} entries\tmedian wait {med([r[2] for r in g])} d\t"
-              f"median rewordings {med([r[3] for r in g])}\trecurring {sum(r[4] > 1 for r in g)}", file=sys.stderr)
+              f"median rewordings {med([r[3] for r in g if r[3] is not None])}\trecurring {sum(r[4] > 1 for r in g)}", file=sys.stderr)
 
 
 def triggers(sid, days=7):
