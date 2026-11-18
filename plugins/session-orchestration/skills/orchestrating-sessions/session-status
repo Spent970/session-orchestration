@@ -1084,11 +1084,15 @@ else
   # Notices run alongside everything else: the sweep only, like the other footers. Each source (the messages module,
   # the adapter) writes $TMP/notices.SOURCE and its exit code.
   MSG=$(config messages 2>/dev/null); NSRC=
-  [ -n "$BY_KEY" ] || { [ "$MSG" = none ] || NSRC=messages; [ -z "$ADAPTER" ] || NSRC="$NSRC adapter"; [ -z "$PENDING" ] || NSRC="$NSRC pending"; }
+  # docs_watch (features/docs-watch.md): one line per watched docs page a listed doc wasn't reviewed against
+  DOCS=; [ -n "$BY_KEY" ] || { coord_memo=$(coord_json); [ "$(config features.docs_watch 2>/dev/null)" != true ] ||
+    { DOCS=$(config docs_watch.files 2>/dev/null); DOCS_RE=$(config docs_watch.pattern 2>/dev/null); }; coord_memo=; }
+  [ -n "$BY_KEY" ] || { [ "$MSG" = none ] || NSRC=messages; [ -z "$ADAPTER" ] || NSRC="$NSRC adapter"; [ -z "$PENDING" ] || NSRC="$NSRC pending"; [ -z "$DOCS" ] || NSRC="$NSRC docs"; }
   if [ -n "$NSRC" ]; then
     { [ "$MSG" = none ] || { messages_job > "$TMP/notices.messages" 2>/dev/null; echo $? > "$TMP/notices.messages.rc"; } &
       [ -z "$ADAPTER" ] || { adapter notices > "$TMP/notices.adapter" 2>/dev/null; echo $? > "$TMP/notices.adapter.rc"; } &
       [ -z "$PENDING" ] || { bash "$(dirname "$SELF")/pending" notices > "$TMP/notices.pending" 2>/dev/null; echo $? > "$TMP/notices.pending.rc"; } &
+      [ -z "$DOCS" ] || { (tr '\n' '\0' <<<"$DOCS" | xargs -0 bash "$LIB_DIR/features/docs-watch.sh" "$DOCS_RE") > "$TMP/notices.docs" 2>/dev/null; echo $? > "$TMP/notices.docs.rc"; } &
       wait; } & NPID=$!
   fi
   if [ -n "$ADAPTER" ]; then
