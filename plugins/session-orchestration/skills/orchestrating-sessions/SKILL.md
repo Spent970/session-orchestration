@@ -150,7 +150,9 @@ too big for one session: [plans.md](plans.md).
 
 A new task: `claude --bg --model <M> --effort <E> -n <KEY>-<short-desc> 'Work on <KEY>: <what>. Why: <who needs it,
 what it unblocks>. Done when: <the end state of the whole job and the check that proves it>. Keep working until done
-or blocked.'`
+or blocked. When finished: reply with done and the check that proves it.'`
+- Its closing line stays, for every kind: Sonnet and Haiku sessions (mechanical, scan) skip a done report the brief
+  doesn't ask for, and you end up polling and nudging them.
 - `--model`/`--effort`: size the task into a `plan.models` kind with the `choosing-model-effort` skill, run
   `session-status --kind <kind> <session-name>` first (the `-n` value), as its own call, and paste the `--model M --effort E` it prints
   (exit 2: a wrong kind or name; fix it, don't start without them). It logs the start for retro. `fable` only as `--kind` prints it
