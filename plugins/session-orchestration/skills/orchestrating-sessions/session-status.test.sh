@@ -504,6 +504,7 @@ git -C "$root" worktree add -q -b feature/ABC-34-merge "$root/wt6" origin/main~1
 printf 'cache/\n*.env\n' >> "$root/.git/info/exclude" && mkdir -p "$root/cache" "$root/wt2/cache" && touch "$root/cache/a" "$root/cache/b" "$root/wt2/cache/a"
 git -C "$root" worktree add -q -b feature/ABC-34-env "$root/wt7" origin/main && echo k=v > "$root/wt7/local.env"
 git -C "$root" worktree add -q -b feature/ABC-34-used "$root/wt8" origin/main
+printf '.tool\n' >> "$root/.git/info/exclude" && mkdir -p "$root/.tool" && ln -s "$root/.tool" "$root/wt8/.tool"   # a folder linked into the main checkout keeps wt8 removable
 jq --arg c "$root/wt8/sub" '. + [{sessionId: "dddddddd-0000-0000-0000-000000000004", name: "side work", cwd: $c, kind: "background", state: "idle", status: "idle", pid: 1}]' "$tmp/agents.json" > "$tmp/agents.t" && mv "$tmp/agents.t" "$tmp/agents.json"
 git -C "$root" worktree add -q -b feature/ABC-34-cache "$root/wt9" origin/main && mkdir "$root/wt9/cache" && touch "$root/wt9/cache/a" && echo n > "$root/wt9/cache/notes"
 git -C "$root" config extensions.worktreeConfig true && git -C "$root" worktree add -q -b feature/ABC-34-hidden "$root/wt10" origin/main &&
@@ -525,7 +526,7 @@ out=$(SESSION_STATUS_PEEK=1 SESSION_STATUS_FORWARD=1 run --changes) && [ -d "$ro
   [ -d "$root/wt4" ] && [ -d "$root/wt5" ] && [ -d "$root/wt6" ] && [ -f "$root/wt7/local.env" ] && [ -d "$root/wt8" ] &&
   [ -f "$root/wt9/cache/notes" ] && [ -f "$root/wt10/notes" ] &&
   [ "$(SESSION_STATUS_FORWARD=1 run --changes)" = "no changes" ] || { echo "watcher's worktree removal failed: $out / ${b:-}"; exit 1; }
-for w in wt4 wt5 wt6 wt7 wt8 wt9 wt10 wt11; do git -C "$root" worktree remove --force "$root/$w"; done; rm -rf "$root/cache"
+for w in wt4 wt5 wt6 wt7 wt8 wt9 wt10 wt11; do git -C "$root" worktree remove --force "$root/$w"; done; rm -rf "$root/cache" "$root/.tool"
 git -C "$root" config --unset extensions.worktreeConfig
 mv "$tmp/claude.keep" "$tmp/bin/claude"; unset SESSION_STATUS_STOP_AFTER_S
 fi
