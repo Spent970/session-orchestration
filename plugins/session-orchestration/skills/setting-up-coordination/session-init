@@ -137,7 +137,11 @@ retro_brief() {
 }
 # The handoff file: config pending.file, else the section's handoff line (absolute; empty when neither names one).
 hand=$(cd "$root" && pending_path "$root") hand_cfg=$hand   # a configured one is the person's choice: --move leaves it
-[ -n "$hand" ] || { hand=$(cd "$root" && sed -nE 's/.*[Hh]andoff file: `([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1); [ -z "$hand" ] || hand=$(at "$hand"); }
+# The section's handoff line (absolute; empty: none): a backticked path, else a bullet's bare path ending .md.
+hline=$(cd "$root" && sed -nE 's/.*[Hh]andoff file: `([^`]+)`.*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1)
+[ -n "$hline" ] || hline=$(cd "$root" && sed -nE 's/^- .*[Hh]andoff file: ([^][()` ]+\.md).*/\1/p' CLAUDE.md CLAUDE.local.md 2>/dev/null | head -1)
+[ -z "$hline" ] || hline=$(at "$hline")
+[ -n "$hand" ] || hand=$hline
 # A PR reviewer brief the section names (a backticked *brief*.md on a line about a review brief) that exists.
 named_brief=$(cd "$root" && grep -hiE 'review.*brief' CLAUDE.md CLAUDE.local.md 2>/dev/null | grep -oE '`[^`]*brief[^`]*\.md`' | tr -d '`' |
   while read -r b; do b=$(at "$b"); [ -f "$b" ] && { echo "$b"; break; }; done)
@@ -169,6 +173,8 @@ rew() { # FILE [check|words]: FILE with each backticked path (RQ: that quote ins
       if (ck != "") { if (hit && ck == "check") print; next }
       print out s }' "$1"
 }
+# bq FILE: FILE with a bullet's bare handoff path backticked, so rew sees it
+bq() { sed -E 's/^(- .*[Hh]andoff file: )([^][()` ]+\.md)/\1`\2`/' "$1"; }
 # stale_ad: the map (SRC<tab>DST) for an untracked adapter's paths left behind by an earlier move: a missing path
 # outside P whose name (replies, pending.md, …) is in P. Empty when the adapter is committed or names none.
 stale_ad() {
@@ -482,12 +488,16 @@ if [ -n "$move$link" ]; then
     why=$(stays "$s"); [ -z "$why" ] || { left+=("$s ($why)"); continue; }
     pair "$s" "$d"; rl
   done
+  # the handoff line names the configured pending.file (a moved one too), not the path it had
+  # (first, so it wins over a moving folder the old file was in; not in lrel: a tracked CLAUDE.md isn't refused for it)
+  [ -z "$hand_cfg" ] || [ -z "$hline" ] || [ "$hline" = "$hand_cfg" ] || relines=("$hline	$hand_cfg" ${relines[@]+"${relines[@]}"})
   # The section files: CLAUDE.local.md, and CLAUDE.md unless git tracks it (a tracked one is never written).
   map=$(printf '%s\n' ${relines[@]+"${relines[@]}"})
   secs=(); [ ! -f "$root/CLAUDE.local.md" ] || secs+=("$root/CLAUDE.local.md")
   if [ -f "$root/CLAUDE.md" ]; then
     if git -C "$root" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
-      tl=$(map=$(printf '%s\n' ${lrel[@]+"${lrel[@]}"}); rew "$root/CLAUDE.md" check)   # the section's lines only, not prose
+      bq "$root/CLAUDE.md" > "$root/CLAUDE.md.n" || exit 1
+      tl=$(map=$(printf '%s\n' ${lrel[@]+"${lrel[@]}"}); rew "$root/CLAUDE.md.n" check); rm -f "$root/CLAUDE.md.n"   # the section's lines only, not prose
       [ -z "$move" ] || [ -z "$tl" ] || { echo "refused: the committed CLAUDE.md holds coordinator path lines; move them to CLAUDE.local.md first, then run this again:"; sed 's/^/  /' <<<"$tl"; exit 1; }
     else secs+=("$root/CLAUDE.md"); fi
   fi
@@ -525,8 +535,9 @@ if [ -n "$move$link" ]; then
         map=$(printf '%s\n' ${keep[@]+"${keep[@]}"})
       fi
       for f in ${secs[@]+"${secs[@]}"}; do
-        [ -n "$(rew "$f" check)" ] || continue
-        rew "$f" > "$f.tmp" && mv "$f.tmp" "$f" || exit 1; echo "  lines in ${f#"$root"/} rewritten"
+        bq "$f" > "$f.n" || { rm -f "$f.n"; exit 1; }
+        [ -n "$(rew "$f.n" check)" ] || { rm -f "$f.n"; continue; }
+        rew "$f.n" > "$f.tmp" && rm -f "$f.n" && mv "$f.tmp" "$f" || { rm -f "$f.n" "$f.tmp"; exit 1; }; echo "  lines in ${f#"$root"/} rewritten"
       done
       if [ -n "$ads" ] && [ -n "$(RQ=word rew "$ad" check)" ]; then
         RQ=word rew "$ad" > "$ad.tmp" && chmod +x "$ad.tmp" && mv "$ad.tmp" "$ad" || exit 1; echo "  paths in .claude/session-status-adapter rewritten"
