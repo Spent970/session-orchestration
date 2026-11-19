@@ -109,7 +109,7 @@ footer's `— apply?` is then answered already.
 | Mode | When it's the default | What the session does |
 |---|---|---|
 | `pr` | `feedback.repo_dir` is set (you can push to the plugin repo) | A worktree in `feedback.repo_dir`, one branch and PR per case (related ones together), the repo's own release checks (its `CLAUDE.md`), the PR body linking the case's title |
-| `fork-pr` | `gh auth status` succeeds | The same in a fork: `gh repo fork REPO --clone`, then a PR from the fork |
+| `fork-pr` | `gh auth status` succeeds | The same in a fork: `gh repo fork REPO --clone` (in an existing clone: `gh repo fork --remote --remote-name fork`, with no REPO, since gh refuses `--remote` with one; a fork that exists already: `git remote add fork <its url>`), then a PR from the fork |
 | `issue` | neither | One issue per case: `gh issue create -R REPO --label LABEL --title '<case title>' --body-file <case file>`; without `gh`, print the scrubbed case for the user to file |
 | `local` | set `feedback.mode` to `local` | Nothing is sent; the cases stay files |
 
