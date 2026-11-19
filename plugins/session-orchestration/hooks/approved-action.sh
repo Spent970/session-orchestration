@@ -113,9 +113,9 @@ if [ -z "$landing" ]; then   # (not indented: the rest of the command parsing, u
 # anything else (a shell, awk, a variable, a path or `.` as the command, read, set, sudo, sort, uniq, tee) fails
 # closed. git counts only as git [-C DIR] [--no-pager] add|commit|status|log|diff|show|branch|push|fetch, not with
 # --output, and push/fetch not with --r…, --e…, --u… (-c, aliases, other subcommands can run text); npx only for the
-# four CLIs (bitbucketdc, forgejo, jiradc, msgraph; any npm scope); rg not with --pre; no option word with an escape in it. Shared by both passes.
+# four CLIs (bitbucketdc, forgejo, jiradc, msgraph; any npm scope); rg not with --pre; no option word with an escape or a $ in it. Shared by both passes.
 SAFE=' cat echo printf grep egrep fgrep rg git claude head tail wc ls cd mkdir touch test [ true false cut tr diff jq gh bitbucketdc-cli forgejo-cli jiradc-cli msgraph '
-# lex(S): S with quoting resolved: quote marks dropped, and each separator, < and ( inside quotes made `_`, so what
+# lex(S): S with quoting resolved: quote marks dropped, and each separator, < and ( inside quotes made `_` (an escape: char 1; a $ in "…" kept), so what
 # is left splits into commands as the shell would (unclosed quote: the rest counts as quoted). A # at a word start
 # becomes its own command `#`, which safe() refuses: where a comment starts (x\ #y, ${x/ #/}) is the shell's call,
 # so a command with one is read whole. safe(U[, CAT]): every command in lexed text U starts with a SAFE word (after
@@ -123,21 +123,27 @@ SAFE=' cat echo printf grep egrep fgrep rg git claude head tail wc ls cd mkdir t
 awklib='
 function lex(s,   o, c, j, n, iq) { o = ""; iq = ""; n = length(s)
   for (j = 1; j <= n; j++) { c = substr(s, j, 1)
-    if (iq == "" && c == "\\" || iq == "\"" && c == "\\") { o = o "_"; j++; continue }
+    if (iq == "" && c == "\\" || iq == "\"" && c == "\\") { o = o sprintf("%c", 1); j++; continue }
     if (iq == "" && c == "#" && (j == 1 || substr(s, j - 1, 1) ~ /[ \t\n;|&()]/)) { o = o ";#"; continue }
     if (iq == "") { if (c == "\"" || c == Q) iq = c; else o = o c; continue }
     if (c == iq) { iq = ""; continue }
-    # "…$(cmd)" and "…`cmd`" run cmd: kept, so safe() sees it
-    if (iq == "\"" && (c == "`" || c == "$" && substr(s, j + 1, 1) == "(")) { o = o c; continue }
+    # "…$x" expands and "…`cmd`" runs cmd: kept, so safe() sees them (its ( still becomes _: the scan below keeps a "…$(")
+    if (iq == "\"" && (c == "`" || c == "$")) { o = o c; continue }
     o = o (c ~ /[;|&()<>`$\n]/ ? "_" : c) }
   LQ = iq; return o }
+# qat(S, P): the quote open at char P of S ("" none, a backslash when an escape takes char P)
+function qat(s, p,   j, c, iq) { iq = ""
+  for (j = 1; j < p; j++) { c = substr(s, j, 1)
+    if (iq != Q && c == "\\") { if (++j >= p) return c; continue }
+    if (iq == "") { if (c == "\"" || c == Q) iq = c } else if (c == iq) iq = "" }
+  return iq }
 function safe(u, cat,   n, seg, x, m, w, y, t) {
   # a space before each separator, so a redirect target is a whole word: >&2hook writes the file 2hook
   if (!cat) { gsub(/[;|&)]/, " &", u); gsub(/&?[0-9]*>>?[ \t]*(&[0-9]+|&-|\/dev\/null)([ \t]|$)/, " ", u); if (u ~ />/) return 0 }
   n = split(u, seg, /[;|&()`\n]|\$\(/)
   for (x = 1; x <= n; x++) { m = split(seg[x], w, /[ \t]+/); t = ""
-    # an escape in an option (--outpu\t, --pr\e) hides it from the checks below
-    if (seg[x] ~ /(^|[ \t])-[^ \t]*_/) return 0
+    # an escape or expansion in an option (--outpu\t, --pr\e, --${x:-receive-pack=…}) hides it from the checks below
+    if (seg[x] ~ ("(^|[ \t])-[^ \t]*[" sprintf("%c", 1) "$]")) return 0
     for (y = 1; y <= m; y++) { if (w[y] == "" || index(PRE, " " w[y] " ")) continue
       if (w[y] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) return 0
       t = w[y]; break }
@@ -157,26 +163,33 @@ function safe(u, cat,   n, seg, x, m, w, y, t) {
     if (!index(SAFE, " " t " ")) return 0 }
   return 1 }'
 # PROOT: this plugin's own folder, so only its feedback script counts, not one a session wrote under that name.
-awkv=(-v "PROOT=${here%/hooks}" -v "SAFE=$SAFE" -v "PRE= env command time nohup rtk proxy then do else ! { } if elif while until done fi esac " -v "Q='")
+awkv=(-v "PROOT=${here%/hooks}" -v "SAFE=$SAFE" -v "PRE= env command time nohup rtk proxy then do else ! { } if elif while until done fi esac " -v "Q='" -v "ID=[A-Za-z_][A-Za-z0-9_]*")
 # Heredoc bodies (cat > f <<EOF … EOF) are text, not commands: dropped when nothing but cat (or session-status --inbox-add) runs in the command
 # without them; else the command is printed whole, its bodies unlexed, and the first line says 1 (opaque: the scan below
 # reads it all). A << inside quotes, in (( )) arithmetic, in a <<< here-string or on a line going on with \, or with
-# no terminator, or with an unquoted delimiter and a $( or ` in its body, isn't taken as a heredoc.
+# no terminator isn't taken as a heredoc. One whose delimiter isn't a plain word, beside a second << on its line, or
+# with an unquoted delimiter and a $( or ` in its body, isn't either, and makes the command opaque.
 cmd=$(printf '%s\n' "$cmd" | awk "${awkv[@]}" "$awklib"'
   { L[NR] = $0 } END { i = 1; LQ = ""; q = ""; n = 0; cut = 0
     while (i <= NR) { line = L[i++]
-      u = lex(q line); q = LQ   # a quote still open goes on to the next line
-      O[++n] = line
-      if (q != "" || u ~ /\(\(|<<</ || line ~ /\\$/ || !match(u, /<<-?[ \t]*[A-Za-z_][A-Za-z0-9_]*/) || gsub(/<</, "&", u) > 1) continue
-      h = substr(u, RSTART + 2, RLENGTH - 2); dash = h ~ /^-/; gsub(/[- \t]/, "", h)
+      s = q line; u = lex(s); q = LQ   # a quote still open goes on to the next line
+      O[++n] = line; lc = s
+      if (q != "" || u ~ /\(\(|<<</ || line ~ /\\$/ || gsub(/<</, "&", u) != 1) continue
+      # The delimiter, read from the raw line as bash does, at its one << outside quotes and escapes (not a quoted
+      # "<<E" beside a split <''<): a plain word, bare or in one pair of quotes, then a blank, a separator or the
+      # end. Anything else (E;F, E F, E$(x), \E, E"x") is a heredoc this cannot read: the command is opaque, since its
+      # body read as commands could open a quote (it'\''s) that hides the lines after it.
+      if (gsub(/<</, "&", lc) != 1 || !match(s, "<<-?[ \t]*(" ID "|" Q ID Q "|\"" ID "\")([ \t;|&<>)]|$)") || qat(s, RSTART) != "") { bad = 1; continue }
+      h = substr(s, RSTART + 2, RLENGTH - 2); dash = h ~ /^-/; quoted = index(h, Q) || index(h, "\"")
+      sub(/^-?[ \t]*/, "", h); gsub(/[^A-Za-z0-9_]/, "", h)
       for (k = i; k <= NR; k++) { t = L[k]; if (dash) sub(/^\t+/, "", t); if (t == h) break }
       if (k > NR) continue
-      # the body of an unquoted delimiter runs its $(…) and backticks (char 96): read as commands
-      if (!match(line, "<<-?[ \t]*[\"\\\\" Q "]")) { for (x = i; x < k && L[x] !~ /\$\(/ && !index(L[x], sprintf("%c", 96)); x++); if (x < k) continue }
+      # the body of an unquoted delimiter runs its $(…) and backticks (char 96): read as commands, and opaque as above
+      if (!quoted) { for (x = i; x < k && L[x] !~ /\$\(/ && !index(L[x], sprintf("%c", 96)); x++); if (x < k) { bad = 1; continue } }
       for (; i <= k; i++) { O[++n] = L[i]; B[n] = 1 }
       cut = 1 }
     d = ""; if (cut) for (x = 1; x <= n; x++) if (!B[x]) d = d O[x] "\n"
-    op = cut && !safe(lex(d), 1); print op
+    op = bad || cut && !safe(lex(d), 1); print op
     for (x = 1; x <= n; x++) if (op || !B[x]) print O[x] }') || exit 1
 opaque=${cmd:0:1} cmd=${cmd:2}
 # The msgraph CLI by name: msgraph, a path to it, or its npx package; not a file named after it (msgraph-body.md).

@@ -343,6 +343,58 @@ check "grep -l 'gh pr create' f" pass "grep pattern naming gh"
 check "grep -rn 'gh pr merge 5 -R acme/app' docs" pass "grep pattern naming a gated gh call"
 check "grep -c 'forgejo-cli pr merge 5' f && $fj pr list --repo org/app" pass "grep pattern naming a gated forgejo call"
 check "claude --bg \"merge it: gh pr merge 5 -R acme/app once approved\"" pass "a prompt naming a merge"
+check "claude --bg -n x 'Read it with gh issue view 5 --comments; never gh pr merge 5 -R acme/app early.'" pass "a brief with a ; after an option word"
+check "claude --bg -n x 'Read it (gh issue view 5 --comments) and wait > 1 day before gh pr merge.'" pass "a brief with ( ) and > around an option word"
+check "claude --bg -n x 'Read gh issue view 5 --comments; wait.'; gh pr merge 99 -R acme/app" deny "a gated call after a brief"
+check "claude --bg -n x 'Read gh issue view 5 --comments; wait.' && gh pr merge 99 -R acme/app" deny "a gated call &&-chained after a brief"
+check "claude --bg -n x \"Read --comments; then \$(gh pr merge 99 -R acme/app)\"" deny "a gated call in \$(…) inside a brief"
+check "claude --bg -n x 'Read --comments; then' \$(gh pr merge 99 -R acme/app)" deny "a gated call in \$(…) after a brief"
+check "claude --bg -n x \"Read --comments; then \`gh pr merge 99 -R acme/app\`\"" deny "a gated call in backticks inside a brief"
+check "claude --bg -n x 'Pass --dry_run; never gh pr merge 5 -R acme/app.'" pass "a brief naming an option with a literal _"
+check "git push \"--\${x:-receive-pack=gh pr merge 99 -R acme/app #}\" ." deny "an expansion hiding --receive-pack, in \"…\""
+check "git push --\${x:-receive-pack=sh} \"gh pr merge 99 -R acme/app\"" deny "an expansion hiding --receive-pack, unquoted"
+check "git log \"--outp\${x:-ut=/tmp/hook}\" 'gh pr merge 99 -R acme/app'" deny "an expansion hiding --output"
+check "claude --bg -n x \"Replies go to \$HOME/.local/x-y; land with gh pr merge 5 -R acme/app later.\"" pass "a brief with a \$VAR path holding a -"
+check "cat \"<<E ;\" <''<F
+gh pr merge 99 -R acme/app
+E" deny "a quoted <<E beside a split <''<, which bash reads as no heredoc"
+check "cat \"<<'\" <<E
+\$(gh pr merge 99 -R acme/app)
+E" deny "an unquoted heredoc behind a quoted <<'"
+# A delimiter bash reads otherwise than a plain word: the merge after its real end is a call, whatever line follows.
+dls=("'E;F'" "'E(F'" "'E|F'" "'E F'" "'E'\"F G\"" "'E'\$(cat)" "'E'\`cat x\`" '\E')
+ends=('E;F' 'E(F' 'E|F' 'E F' 'EF G' 'E$(cat)' 'E`cat x`' 'E')   # where bash ends each
+for j in "${!dls[@]}"; do
+  for end in E E_F EF_G E\$ E\`cat; do
+    check "cat <<${dls[$j]}
+x
+${ends[$j]}
+gh pr merge 99 -R acme/app
+$end" deny "a gated call after a heredoc delimited by ${dls[$j]}, then $end"
+  done
+done
+check "cat <<'E.F'
+x
+E.F
+gh pr merge 99 -R acme/app
+E" deny "a gated call after a heredoc delimited by 'E.F'"
+# Its body read as commands: an apostrophe there must not quote away the lines after its end.
+for dl in "'E;F'" "'E.F'" '\E'; do
+  end=${dl//\'/}; end=${end#\\}
+  check "cat <<$dl
+cat it's
+$end
+gh pr merge 99 -R acme/app
+echo \"'\"" deny "a gated call after a heredoc delimited by $dl whose body has an apostrophe"
+done
+check "cat <<E
+\$(date) it's
+E
+gh pr merge 99 -R acme/app
+echo \"'\"" deny "a gated call after an unquoted heredoc whose body has \$( and an apostrophe"
+check "cat > $tmp/t.md <<\"EOF\"
+gh pr merge 5 -R acme/app
+EOF" pass "a heredoc with a double-quoted delimiter written to a file"
 check "rtk proxy gh issue view 1 -R o/r --json state" pass "rtk proxy gh, read-only"
 check "rtk proxy gh pr merge 99 -R acme/app" deny "rtk proxy gh merge, no relay"
 check "gh api graphql -f query='{ viewer { login } }'" pass "gh api graphql read"
