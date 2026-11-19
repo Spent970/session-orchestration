@@ -187,6 +187,13 @@ run --changes >/dev/null; echo "DM from Ann: hi" > "$tmp/notices"
   echo "teams: msgraph unknown_error error" > "$tmp/notices" && [ "$(run --changes)" = "no changes" ] &&
   echo "teams: msgraph auth_error error" > "$tmp/notices" && [ "$(run --changes)" = "now:   * (failed) teams: sign-in" ] &&
   : > "$tmp/notices" && echo 0 > "$tmp/rc" && [ "$(run --changes)" = "no changes" ] &&
+  echo "mail Lee: Q [PROJ-7] — asks about it" > "$tmp/notices" && run --changes >/dev/null &&
+  echo "mail Lee: Q [PROJ-7] — wants an answer" > "$tmp/notices" && [ "$(run --changes)" = "no changes" ] &&
+  echo "mail Lee: Q2 [PROJ-7] — wants an answer" > "$tmp/notices" && [ "$(run --changes)" = "now:   * mail Lee: Q2 [PROJ-7] — wants an answer" ] &&
+  echo "mail Lee: A — B — why" > "$tmp/notices" && run --changes >/dev/null &&
+  echo "mail Lee: A — C — why2" > "$tmp/notices" && [ "$(run --changes)" = "now:   * mail Lee: A — C — why2" ] &&
+  echo "deploy prod — failed" > "$tmp/notices" && run --changes >/dev/null &&
+  echo "deploy prod — fixed" > "$tmp/notices" && [ "$(run --changes)" = "now:   * deploy prod — fixed" ] &&
   echo junk > "$tmp/notices" && echo 2 > "$tmp/rc" && [ "$(run | grep -c Notices)" = 0 ] || { echo "notices failed"; exit 1; }
 # A reader that stops early (`| head -1`) ends the run: the EXIT trap's killtree (a notices source ran) once read the
 # unsent output as child pids and recursed for days. Only bash 3.2 (macOS's /bin/bash) shows it, so the run uses

@@ -1045,9 +1045,15 @@ if [ "${1:-}" = --changes ]; then
     # current counts. "Waiting on you" comes and goes as sessions turn busy and idle: a plain entry appearing
     # doesn't count, one saying what it's `blocked:` on does (a prompt, hooks/blocked.sh), and one going away
     # counts only when its session ended (gone or done; states from the run just made, in $ENC.agents).
-    # Emptied headers and blank lines are dropped too: alone they mean no change.
+    # Emptied headers and blank lines are dropped too: alone they mean no change. Nor is a messages notice (teams,
+    # mail) whose text before its last ` — ` is unchanged: only the triage's generated why reworded (msgraph.sh
+    # keeps ` — ` out of the why). Its `read, unanswered:` marker stays in the key.
     { { diff "$last" <(echo "$new") || true; } | sed -nE 's/^< /was: /p; s/^> /now: /p' |
-      grep -vE '^was:   \* ' | awk -v agents="$HOME/.cache/session-status/$ENC.agents" -v resolved="$last.resolved" '
+      awk 'function key(s,   i, p) { if (s !~ /^(was|now):   \* (teams|mail) /) return s; s = substr(s, 6)
+          for (p = 0; (i = index(substr(s, p + 1), " — ")) > 0; ) p += i
+          return p ? substr(s, 1, p - 1) (index(substr(s, p), " — read, unanswered: ") == 1 ? " read" : "") : s }
+        { l[NR] = $0; k = key($0); if ($0 ~ /^was:   \* /) w[k]; else if ($0 ~ /^now:   \* /) n[NR] = k }
+        END { for (i = 1; i <= NR; i++) if (l[i] !~ /^was:   \* / && !((i in n) && (n[i] in w))) print l[i] }' | awk -v agents="$HOME/.cache/session-status/$ENC.agents" -v resolved="$last.resolved" '
         BEGIN { while ((getline a < agents) > 0) { split(a, f, "\t"); live[substr(f[1], 1, 8)] = f[3] }
                 while ((getline a < resolved) > 0) res[a] }
         function key(l) { l = substr(l, 6); sub(/sess:"[^"]*"( [a-z]+)?/, "&\001", l); sub(/" [a-z]+\001/, "\"\001", l); sub(/\001/, "", l)

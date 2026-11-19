@@ -346,7 +346,7 @@ P
     kill $pids 2>/dev/null; wait $pids 2>/dev/null
     for c in "$T"/chunk.??; do
       grep -v '^```' "$c.out" 2>/dev/null | jq -c '.[] | select((.n | type) == "number" and (.action | type) == "boolean")
-        | .why = ((.why // "") | tostring | gsub("\\s+"; " ") | .[0:120])' 2>/dev/null |
+        | .why = ((.why // "") | tostring | gsub("\\s+"; " ") | gsub(" — "; " - ") | .[0:120])' 2>/dev/null |
       while IFS= read -r v; do
         item=$(sed -n "$(jq .n <<<"$v")p" "$c"); [ -n "$item" ] || continue
         id=$(jq -r .id <<<"$item")   # written whole (mv): another sweep may be reading

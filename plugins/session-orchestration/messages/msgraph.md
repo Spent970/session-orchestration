@@ -20,7 +20,7 @@ mail      <sender>: <subject>                    unread inbox mail from the last
 
 `auth_error` means the CLI's login lapsed: the user signs in again. A line can end in `[PROJ-12,PROJ-40]`: the
 tasks the whole message refers to (keys, and PR links mapped to their tasks), and in ` — <why>`: the triage's
-reason. A DM line means the chat's last message isn't the user's: it goes once they answer there. A read one
+reason (the watcher doesn't wake on its rewording alone). A DM line means the chat's last message isn't the user's: it goes once they answer there. A read one
 (Teams is often read first) shows only when the triage says it needs the user or the team.
 
 A mail line stays while Outlook has it unread (Graph's `isRead`), for its whole week: one read only in Jira or
