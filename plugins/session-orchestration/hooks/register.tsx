@@ -299,7 +299,9 @@ const taken = (key: string) => /^\d$/.test(key) ? 'a 1-9 item key' : BUILTIN_KEY
 export const USAGE_EXTRA = ['Stop', 'Run handed','Copy handed', 'Dismiss handed', 'Approval answer', 'Project action', 'Cancel stale']
 // The sections whose title and row presses are logged as fold-SLUG and card-SLUG (retro.py inventories them); a
 // footer the status command or an adapter adds later isn't logged until it's listed here.
-export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Moved', 'Waits on you', 'You wait on', 'New for you', 'Worked on', 'Tasks']
+// The status footer of what this coordinator queued in another project's inbox, until read (session-status).
+export const SENT = 'Sent (session-status --inbox --sent)'
+export const USAGE_SECTIONS = ['Waiting on you', 'Decisions', 'Needs action', 'In review', 'Working', 'Landing', 'Idle', 'Notices', 'Actions', 'Pending', 'Stale prompts', 'Stale', 'Resolved (idle a week)', 'Other projects', 'Other sessions', 'Leftovers (task finished)', 'Moved', 'Waits on you', 'You wait on', 'New for you', 'Worked on', 'Tasks', 'Sent (session-status --inbox --sent)']
 // Its slug: the title, lowercase, its "(…)" dropped; the ones config pane.sections keeps (lib.sh PANE_SLUGS).
 export const sectionSlug = (title: string) => usageName(title.replace(/\s*\(.*$/, ''))
 const ON_YOU = ['waiting-on-you', 'decisions', 'needs-action']
@@ -695,7 +697,7 @@ export const STALE = 'Stale prompts'
 // Each section's accent; a footer section the status command adds later gets suggestion.
 const ACCENT = {
   'Waiting on you': 'warning', Decisions: 'warning', [STALE]: 'inactive', [STALE_ITEMS]: 'inactive', 'Needs action': 'error', 'In review': 'ide', Working: 'suggestion', Landing: 'success',
-  Idle: 'inactive', Notices: 'ide', Actions: 'claude', Pending: 'planMode', [RESOLVED]: 'inactive', [OTHER_PROJECTS]: 'inactive',
+  Idle: 'inactive', [SENT]: 'inactive', Notices: 'ide', Actions: 'claude', Pending: 'planMode', [RESOLVED]: 'inactive', [OTHER_PROJECTS]: 'inactive',
   // The brief's (BRIEF_SECTIONS); Worked on takes suggestion.
   Moved: 'success', 'Waits on you': 'warning', 'You wait on': 'ide', 'New for you': 'permission',
 } as const satisfies Record<string, Color>

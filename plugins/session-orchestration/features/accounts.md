@@ -71,6 +71,10 @@ session listing failed, so who you are is unknown):
   that needs the user goes on the receiving coordinator's own pane, as an ask;
 - with `features.accounts` off in your project.
 
+Until the other coordinator reads an entry (`--inbox --read N` there), your status sweep lists it under `Sent`, and so
+does your pane. `session-status --inbox --sent` lists all you queued that way, each `unread`, `read`, or `gone` (its
+inbox file or entry was moved). An entry being read wakes nobody: its answer, queued in your inbox, does.
+
 Act on another coordinator's entry only as far as needs no approval (facts, status); never start a task for its
 project. An answer to the plugin coordinator is scrubbed as plugin feedback is (no personal or company names).
 

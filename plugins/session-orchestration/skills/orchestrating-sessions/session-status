@@ -138,6 +138,8 @@
 #                       inbox: messages no live coordinator took (the reply tool's backstop), unread ones printed
 #        session-status --inbox-add --root DIR < TEXT   a coordinator queues TEXT in DIR's project coordinator inbox,
 #                       under any account (features/accounts.md, Messaging another project's coordinator)
+#        session-status --inbox --sent   what this coordinator queued that way, each marked unread, read or gone; the
+#                       status sweep's Sent footer lists the unread ones
 #        session-status --report-file SESSION_ID [KEY] < REPORT   the reply tool's report: the top of
 #                       <replies>/<KEY>.md (no KEY: that session's name), its `## Handoff` kept
 #        session-status --init [--check | --write …]   set this folder up for coordination: the setting-up-coordination
@@ -331,6 +333,18 @@ inbox_lock() {
   exec 9>>"$1.flock" && perl -MFcntl=:flock -e 'alarm 60; open(my $l, ">>&=", 9) or exit 1; flock($l, LOCK_EX) or exit 1' ||
     echo "session-status: couldn't lock $1; going on unlocked" >&2
 }
+# What this project's coordinator queued in other projects' inboxes (--inbox-add --root): a line FILE, N, DIR, WHEN each
+# in a personal cache file. sent_marks prints MARK, DIR, N, WHEN and the text's first line per entry, tab-separated, MARK
+# unread, read, or gone (its file or entry no longer there; an entry N of another WHEN is a recreated inbox's).
+# shortcut: the log only grows (a line per message sent); prune its read entries if it ever gets long.
+SENT_LOG=~/.cache/session-status/$ENC.sent
+sent_marks() {
+  [ -f "$SENT_LOG" ] || return 0
+  local f n d w; while IFS=$'\t' read -r f n d w; do
+    awk -v n="$n" -v d="$d" -v w="$w" 'BEGIN { OFS = "\t"; m = "gone" } h { t = $0; exit } /^## [0-9]+ · / && $2 == n { split($0, p, " · "); if (p[3] == w) { m = p[2]; h = 1 } }
+      END { print m, d, n, w, t }' "$f" 2>/dev/null || printf 'gone\t%s\t%s\t%s\t\n' "$d" "$n" "$w"
+  done < "$SENT_LOG"
+}
 if [ "${1:-}" = --inbox-add ]; then
   shift; from= to=
   usage="usage: session-status --inbox-add [--from WHO] [SENDER_ID] < TEXT | --inbox-add --root DIR < TEXT"
@@ -372,7 +386,11 @@ if [ "${1:-}" = --inbox-add ]; then
   [ -f "$f" ] || printf '# Coordinator inbox\n\nMessages no live coordinator took. The next coordinator reads the unread ones (session-status --start, --inbox) and marks each read once acted on: session-status --inbox --read N.\n' > "$f"
   k=$(( $(awk '/^## [0-9]+ · / { n = $2 } END { print n + 0 }' "$f") + 1 ))
   # a `#` line in the text would read as a heading: indented
-  printf '\n## %s · unread · %s · from %s\n%s\n' "$k" "$(date '+%m-%d %H:%M')" "$(tr -d '\n' <<<"${from:-unknown}")" "$(sed 's/^#/ #/' <<<"$body")" >> "$f"
+  w=$(date '+%m-%d %H:%M')
+  printf '\n## %s · unread · %s · from %s\n%s\n' "$k" "$w" "$(tr -d '\n' <<<"${from:-unknown}")" "$(sed 's/^#/ #/' <<<"$body")" >> "$f" ||
+    { echo "couldn't write $f" >&2; exit 1; }
+  # --root: logged, so --inbox --sent and the status footer show it until the other coordinator reads it
+  [ -z "$to" ] || { mkdir -p "${SENT_LOG%/*}"; printf '%s\t%s\t%s\t%s\n' "$f" "$k" "$d" "$w" >> "$SENT_LOG"; }
   echo "$f #$k"; exit 0
 fi
 # --report-file SESSION_ID [KEY] < REPORT: the reply tool's `report`, the status report at the top of <replies>/<KEY>.md
@@ -396,6 +414,11 @@ if [ "${1:-}" = --report-file ]; then
     if [ -f "$f" ] && ! grep -q '^## Handoff' <<<"$body"; then awk '/^## Handoff/ { on = 1 } on' "$f" | sed '1s/^/\n/'; fi
   } > "$f.$$" && mv "$f.$$" "$f" && echo "$f" || { rm -f "$f.$$"; echo "couldn't write $f" >&2; exit 1; }
   exit
+fi
+if [ "${1:-}" = --inbox ] && [ "${2:-}" = --sent ]; then
+  # each entry this coordinator queued in another project's inbox, newest last: `MARK · DIR (its coordinator) #N · WHEN · text`
+  sent_marks | while IFS=$'\t' read -r m d n w t; do printf '%s · %s (%s) #%s%s%s\n' "$m" "$(tilde "$d")" "$(coord_name "$d")" "$n" "${w:+ · $w}" "${t:+ · ${t:0:80}}"; done
+  exit 0
 fi
 if [ "${1:-}" = --inbox ]; then
   shift; f=$(inbox_file) || { echo "(no replies folder: no inbox)"; exit 0; }
@@ -801,13 +824,14 @@ if [ "${1:-}" = --changes ]; then
   shift; last=~/.cache/session-status/$ENC${*:+-$(printf '%s' "$*" | cksum | cut -d' ' -f1)}.last; mkdir -p ~/.cache/session-status
   # (not on notice lines: their text is the user's, and the coordinator looks it up verbatim)
   # A `fix:` line is a pane button, not news: not compared either. Nor is "Other sessions" (states and last
-  # lines change on every run; a session that needs the user shows under Waiting on you), nor "Stale prompts"
+  # lines change on every run; a session that needs the user shows under Waiting on you), nor "Sent" (this
+  # coordinator's own messages: their answer wakes it, via the inbox), nor "Stale prompts"
   # (an entry there moved from Waiting on you, whose `blocked:` line was news already).
   # Resolved needs nothing, so its section isn't compared (kept aside in $last.resolved): an item moving there
   # from Leftovers wakes no one, nor does it going away.
   : > "$last.resolved"
   new=$(SESSION_STATUS_FINISHED_OUT=$last.fin.$$ SESSION_STATUS_PRS_OUT=$last.prs.$$ SESSION_STATUS_NO_FEEDBACK=1 SESSION_STATUS_STRICT=1 "$SELF" "$@" | sed -E '/^  \* /!s/ \(PRs as of [0-9]{1,2}:[0-9]{2}\)//; /^  \* /!s/" (idle|busy)/"/; /^  \* /!s/ closed [0-9]+h/ closed/; /^  \* /!s/ \(maybe [0-9a-f]+: [0-9]+ mentions\)//; /^  \* \(failed\) .*auth/!s/^(  \* \(failed\) [^:]*):.*/\1/; s/^(  \* \(failed\) [^:]*):.*auth.*/\1: sign-in/' |
-    awk -v r="$RESOLVED:" -v out="$last.resolved" '/^fix:/ {next} $0 == "Other sessions:" || $0 == "Stale prompts:" {drop = 1; next} drop && /^  / {next} {drop = 0} $0 == r {skip = 1; next} skip && /^  / {print > out; next} {skip = 0; print}') ||
+    awk -v r="$RESOLVED:" -v out="$last.resolved" '/^fix:/ {next} $0 == "Other sessions:" || $0 == "Stale prompts:" || $0 == "Sent (session-status --inbox --sent):" {drop = 1; next} drop && /^  / {next} {drop = 0} $0 == r {skip = 1; next} skip && /^  / {print > out; next} {skip = 0; print}') ||
     { rm -f "$last.fin.$$" "$last.fin.$$.wt"; echo "$new"; exit 1; }
   # Under --watch, a committing run stops each finished task's background session at rest (Leftovers or Resolved; not
   # one on a prompt, busy or waiting on the user): its line leaves the board and shows under Stopped, which is news.
@@ -2099,6 +2123,12 @@ jq -nr --arg asks "$(cat "$af" 2>/dev/null)" --rawfile entries "$TMP/st.entries"
   --rawfile gone "$TMP/st.gone" --rawfile wtgone "$TMP/st.wtgone" --rawfile asking "$TMP/asking" --arg keyre "$KEYRE" --arg now "$NOW" \
   -f "$(dirname "$SELF")/stale.jq" > "$TMP/st.out" 2>/dev/null || echo "stale.jq failed" > "$TMP/st.out"
 [ -s "$TMP/st.out" ] && printf '\nStale:\n' && sed 's/^/  * /' "$TMP/st.out"
+# What this coordinator queued in another project's inbox (--inbox-add --root), shown until that coordinator reads it
+# (its going wakes no watcher: the answer, queued back here, does).
+[ $# != 0 ] || sent_marks | { h=; while IFS=$'\t' read -r m d n w t; do [ "$m" = unread ] || continue
+  [ -n "$h" ] || { h=1; printf '\nSent (session-status --inbox --sent):\n'; }
+  printf "  * queued in %s's inbox #%s (%s)%s%s\n" "$(coord_name "$d")" "$n" "$(tilde "$d")" "${w:+, $w}" "${t:+: ${t:0:80}}"
+done; }
 
 if [ -n "$NPID" ]; then
   end=$((SECONDS + 60)); while kill -0 "$NPID" 2>/dev/null && [ "$SECONDS" -lt "$end" ]; do sleep 1; done
