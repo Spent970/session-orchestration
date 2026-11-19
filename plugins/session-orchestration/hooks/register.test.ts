@@ -924,6 +924,61 @@ test('features.notify: an ask waiting unseen N minutes shows one local notificat
   expect(shown).toHaveLength(2)
 })
 
+test('open_pane queues each migration ask once, by its key, and drops one the run no longer lists', async ($, on) => {
+  mock.clock(on, { now: 100 * 3600_000 })
+  mock.env(on, { HOME: '/h' })
+  let store: string | undefined
+  on('fs.read', async () => {
+    if (store === undefined) throw new Error('ENOENT')
+    return { value: store }
+  })
+  on('fs.write', async (_, e) => {
+    store = e.text
+    return { value: undefined }
+  })
+  on('session.id', async () => ({ value: 'sess-c' }))
+  const check = 'configured: /work (work-coordinator)\nactive: tracker=none host=github delegate=off\n[m1 ask] delegation found in CLAUDE.md: run setup to move it\n'
+  let migrate = [
+    '[m4 auto] done', '  a → b',
+    '[m1 ask] delegation found in CLAUDE.md: run setup to move it', '  approvals.delegate=true → .claude/coordination.local.json',
+    '[m2 ask] detected ghostty: run setup to record it', '[m2 ask] second account found, accounts off', '  terminal="ghostty" → .claude/coordination.local.json',
+    '[h1 hand] project memory is one flat file (~/m.md): a session splits it',
+    'stamp: not yet (open: m1 m2 h1)',
+  ].join('\n')
+  const runs: unknown[] = []
+  on('process.run', async (_, e) => {
+    if (e.argv.includes('--migrate')) runs.push([e.init?.cwd, e.init?.env?.CLAUDE_CODE_SESSION_ID])
+    const stdout = e.argv.includes('--check') ? check : e.argv.includes('--root') ? '/work' : e.argv.includes('--migrate') ? migrate : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const open = async () => (await $.tool.call({ tool: 'mcp__session-orchestration__open_pane' })).result
+  const r = await open()
+  expect(r).toContain(' Migration (an older setup\'s layout): fixed m4; 3 queued as pane asks (migrate-m1, migrate-m2, migrate-h1): on an answer run what its details name.')
+  expect(r).not.toContain('[m1 ask]') // the config line leaves it to the ask
+  expect(runs).toEqual([['/work', 'sess-c']])
+  const asks = () => parseAsks(store ?? '[]') ?? []
+  expect(asks().map(a => [a.key, a.question, a.options])).toEqual([
+    ['migrate-m1', 'm1: delegation found in CLAUDE.md: run setup to move it', ['Apply', 'Decline']],
+    ['migrate-m2', 'm2: detected ghostty: run setup to record it; second account found, accounts off', ['Apply', 'Decline']],
+    ['migrate-h1', 'h1: project memory is one flat file (~/m.md): a session splits it', ['Start a session', 'Not now']],
+  ])
+  expect(asks()[0]?.details).toBe('What it changes:\napprovals.delegate=true → .claude/coordination.local.json\n\nApply: session-status --init --migrate --apply=m1. Decline: session-status --init --migrate --decline=m1 (open_pane stops asking; --check still names it).')
+  const ids = asks().map(a => a.id)
+  // a reopen whose text changed re-queues in place; a finished run that no longer lists m2 drops its ask
+  migrate = ['[m1 ask] delegation found in CLAUDE.local.md: run setup to move it', '[h1 hand] project memory is one flat file (~/m.md): a session splits it', 'stamp: not yet (open: m1 h1)'].join('\n')
+  await open()
+  expect(asks().map(a => [a.key, a.id])).toEqual([['migrate-m1', ids[0]], ['migrate-h1', ids[2]]])
+  expect(asks()[0]?.question).toBe('m1: delegation found in CLAUDE.local.md: run setup to move it')
+  // a run that didn't finish (busy, failed to start) drops nothing
+  migrate = 'busy: another --migrate runs for this project'
+  expect(await open()).not.toContain('Migration')
+  expect(asks()).toHaveLength(2)
+  migrate = 'current: layout 10 (~/s.json)'
+  await open()
+  expect(asks()).toEqual([])
+})
+
 test('queued asks live in a store per project root: a new coordinator finds them, a re-queue replaces, an old ask is drawn as old and still answers', async ($, on) => {
   const t0 = 100 * 3600_000
   const clock = mock.clock(on, { now: t0 })

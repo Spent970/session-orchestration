@@ -807,6 +807,8 @@ rm -r "$u" "$root/.claude/coordination.local.json"; run --changes >/dev/null
 # --start: the status, the handoff file, the last handover note, the replies written since it with their first
 # lines, and the config, under ## headers; the status's exit code, args passed on (the adapter here lists only the
 # keys given). An old handover still marks what the last coordinator saw; with none, the last day's replies.
+# Stamped current, so --start's migration (the move section's) leaves this fixture's replies/ where it is.
+p=$(pof "$(cd "$root" && pwd -P)"); mkdir -p "$p"; echo "{\"layout\": $(sed -n 's/^LAYOUT=//p' "$here/../../lib.sh")}" > "$p/setup.json"
 echo old > "$root/replies/ABC-48.md"; echo 'Live: none.' > "$root/replies/coordinator-handover.md"
 touch -t 202601010000 "$root/replies/ABC-48.md"; sleep 1; printf 'ABC-49 · proj · done\nmore\n' > "$root/replies/ABC-49.md"
 out=$(run --start ABC-12) && [ "$(grep '^## ' <<<"$out" | sed 's/ (.*//')" = "$(printf '## Status\n## Handoff file\n## Handover\n## Replies written since the handover\n## Coordination config')" ] &&
@@ -1939,6 +1941,13 @@ rc=0; out=$(init "$m" --write --move) || rc=$?
 out=$(init "$m" --check)
 grep -qF "and the committed CLAUDE.md holds their path lines: move these to CLAUDE.local.md (a change to the tracked file), then run session-status --init --write --move:" <<<"$out" &&
   grep -qxF '  Project memory: `.claude/orchestration/memory.md`.' <<<"$out" || { echo "move (m2) check tracked CLAUDE.md: $out"; exit 1; }
+# --migrate: a hand one (its lines kept), no --apply, a --decline that holds (not m7's live put-off); the stamp goes after
+[ ! -e "$pm/setup.json" ] || { echo "move (m2) hand m7: a stamp already"; exit 1; }
+out=$(init "$m" --migrate); rc=0; init "$m" --migrate --apply=m7 >/dev/null || rc=$?
+grep -q '^\[m7 hand\] ' <<<"$out" && grep -qxF '  Project memory: `.claude/orchestration/memory.md`.' <<<"$out" && [ "$rc" = 2 ] &&
+  out=$(init "$m" --migrate --decline=m7) && grep -qxF 'm7: declined (--check still names it; --apply=m7 applies it)' <<<"$out" &&
+  [ "$(jq -c .declined "$pm/setup.json")" = '["m7"]' ] && [ "$(lsm)" = "$before" ] || { echo "move (m2) hand m7: $rc $out"; exit 1; }
+rm -f "$pm/setup.json" "$pm/migrate.log"
 # (m2) a committed adapter naming the handoff file refuses the whole move, and stays byte for byte.
 git -C "$m" show HEAD~1:CLAUDE.md > "$m/CLAUDE.md" && git -C "$m" add -f CLAUDE.md .claude/session-status-adapter && gc "$m" -m ad && before=$(lsm)
 rc=0; out=$(init "$m" --write --move) || rc=$?
@@ -2000,6 +2009,7 @@ pb=$(pof "$mb"); out=$(init "$mb" --write --move) && [ -f "$pb/pending.md" ] && 
 # .claude/orchestration, pending.file and history.dirs left in the repo file. --dry-run writes nothing; the run fixes
 # all three, backs up the files it rewrote, logs each step and stamps P/setup.json; a second run is a no-op.
 # No process here outlives its command: nothing runs in the background.
+L=$(sed -n 's/^LAYOUT=//p' "$here/../../lib.sh")   # the layout --migrate stamps
 lst() { (cd "$1" && find . -path ./.git -prune -o -type f -print | sort | while read -r f; do echo "$f $(cksum < "$f")"; done); }
 m=$(mkdir -p "$tmp/init/g1" && cd "$tmp/init/g1" && pwd -P); git -C "$m" init -q; pm=$(pof "$m"); ps="~${pm#"$tmp"}/setup.json"   # tilde: HOME is $tmp
 old "$m" .claude/orchestration .claude/orchestration/replies/; echo n > "$m/.claude/orchestration/rnd-brief.md"
@@ -2012,7 +2022,7 @@ grep -qxF "[m4 auto] old brief name .claude/orchestration/rnd-brief.md: session-
   grep -qF "[m7 auto] coordinator files outside $pm (.claude/orchestration/replies " <<<"$c" &&
   grep -q '^\[m8 auto\] pending.file and history.dirs are ignored in the repo file' <<<"$c" || { echo "migrate (g1) check: $c"; exit 1; }
 before=$(lst "$m"; lst "$pm"); out=$(init "$m" --migrate --dry-run)
-[ "$(grep -c '^would fix: \[m[478] auto\]' <<<"$out")" = 3 ] && grep -qxF "stamp: would write layout 9 to $ps" <<<"$out" &&
+[ "$(grep -c '^would fix: \[m[478] auto\]' <<<"$out")" = 3 ] && grep -qxF "stamp: would write layout $L to $ps" <<<"$out" &&
   [ "$(lst "$m"; lst "$pm")" = "$before" ] || { echo "migrate (g1) --dry-run: $out"; exit 1; }
 out=$(init "$m" --migrate) && d=$pm/migrate-backup/$(date +%F) &&
   grep -qxF '[m4 auto] done' <<<"$out" && grep -qxF '[m8 auto] done' <<<"$out" && grep -qxF '[m7 auto] done' <<<"$out" &&
@@ -2026,13 +2036,13 @@ out=$(init "$m" --migrate) && d=$pm/migrate-backup/$(date +%F) &&
   grep -qF 'Project memory: `.claude/orchestration/memory.md`.' "$d/CLAUDE.md" && grep -q history "$d/.claude/coordination/coordination.json" &&
   [ "$(awk '{ $1 = ""; print substr($0, 2) }' "$pm/migrate.log" | grep -v ' mv ' | paste -sd, -)" = "m4 start,m4 done,m8 start,m8 done,m7 start,m7 done" ] &&
   grep -q " m7 mv $m/.claude/orchestration/memory.md → $pm/memory.md$" "$pm/migrate.log" &&
-  [ "$(jq -c '[.layout, .declined]' "$pm/setup.json")" = '[9,[]]' ] && grep -qxF "stamp: layout 9 → $ps" <<<"$out" &&
+  [ "$(jq -c '[.layout, .declined]' "$pm/setup.json")" = "[$L,[]]" ] && grep -qxF "stamp: layout $L → $ps" <<<"$out" &&
   ! grep -q '^\[m' <<<"$(init "$m" --check)" || { echo "migrate (g1): $out / $(cat "$pm/migrate.log") / $(init "$m" --check)"; exit 1; }
 before=$(lst "$m"; lst "$pm"); out=$(init "$m" --migrate)
-[ "$out" = "current: layout 9 ($ps)" ] && [ "$(lst "$m"; lst "$pm")" = "$before" ] || { echo "migrate (g1) second run: $out"; exit 1; }
+[ "$out" = "current: layout $L ($ps)" ] && [ "$(lst "$m"; lst "$pm")" = "$before" ] || { echo "migrate (g1) second run: $out"; exit 1; }
 # Without the stamp the detectors still decide: nothing to fix, it stamps again and changes nothing else.
 rm "$pm/setup.json"; before=$(lst "$m"); out=$(init "$m" --migrate)
-[ "$out" = "stamp: layout 9 → $ps" ] && [ "$(lst "$m")" = "$before" ] || { echo "migrate (g1) no stamp: $out"; exit 1; }
+[ "$out" = "stamp: layout $L → $ps" ] && [ "$(lst "$m")" = "$before" ] || { echo "migrate (g1) no stamp: $out"; exit 1; }
 # (g2) a committed repo file: m8 asks instead (listed, nothing written, no stamp).
 m=$(mkdir -p "$tmp/init/g2" && cd "$tmp/init/g2" && pwd -P); git -C "$m" init -q; pm=$(pof "$m"); init "$m" --write >/dev/null
 rf=$m/.claude/coordination/coordination.json; jq '.history.dirs = ["notes"]' "$rf" > "$tmp/x.json" && mv "$tmp/x.json" "$rf"
@@ -2052,7 +2062,7 @@ if [ "$(id -u)" != 0 ]; then   # root ignores the mode that makes mv fail
     { echo "migrate (g3) failure: $rc $out / $(cat "$m/CLAUDE.md")"; exit 1; }
   out=$(init "$m" --migrate) && grep -qxF 'retrying m7: it failed in an earlier run' <<<"$out" && grep -qxF '[m7 auto] done' <<<"$out" &&
     [ -f "$pm/memory.md" ] && [ -f "$pm/pending.md" ] && [ -f "$pm/replies/K-9.md" ] && grep -qF "Project memory: \`$pm/memory.md\`." "$m/CLAUDE.md" &&
-    [ "$(jq -r .layout "$pm/setup.json")" = 9 ] || { echo "migrate (g3) resume: $out"; exit 1; }
+    [ "$(jq -r .layout "$pm/setup.json")" = "$L" ] || { echo "migrate (g3) resume: $out"; exit 1; }
 fi
 # migration fixture: m9
 # (g4) moved already, by a move that left the local adapter's unquoted and double-quoted words: m9 points the ones
@@ -2064,7 +2074,87 @@ grep -qxF "[m9 auto] .claude/session-status-adapter names files already moved to
   { echo "migrate (g4) check: $(init "$m" --check)"; exit 1; }
 out=$(init "$m" --migrate) && grep -qxF '[m9 auto] done' <<<"$out" && grep -qxF "r=$pm/replies/" "$a" && grep -qxF "h=\"$pm/pending.md\"" "$a" &&
   [ "$(tail -3 "$a")" = "$(printf '%s\n' "${keep[@]}")" ] && [ -x "$a" ] && grep -q '^r=.claude/orchestration/replies/$' "$pm/migrate-backup/$(date +%F)/.claude/session-status-adapter" &&
-  ! grep -q '^\[m' <<<"$(init "$m" --check)" && [ "$(jq -r .layout "$pm/setup.json")" = 9 ] || { echo "migrate (g4): $out / $(cat "$a")"; exit 1; }
+  ! grep -q '^\[m' <<<"$(init "$m" --check)" && [ "$(jq -r .layout "$pm/setup.json")" = "$L" ] || { echo "migrate (g4): $out / $(cat "$a")"; exit 1; }
+# migration fixture: m1
+# migration fixture: m3
+# migration fixture: m5
+# migration fixture: m6
+# migration fixture: h1
+# migration fixture: h2
+# (g5) the ask and hand ones: a delegation line in CLAUDE.md (m1), a Stop hook committing a folder (m3), the crontab's
+# rnd-weekly (m5, a file-backed fake crontab), a start mode in memory (m6), a flat memory.md (h1), an adapter reading
+# msgraph (h2). --migrate lists each with what its answer changes and stamps nothing; --apply=ID fixes one, --decline=ID
+# puts one away; once none is open it stamps, the declined ones kept.
+m=$(mkdir -p "$tmp/init/g5" && cd "$tmp/init/g5" && pwd -P); git -C "$m" init -q; pm=$(pof "$m"); ps="~${pm#"$tmp"}/setup.json"; init "$m" --write >/dev/null
+pf=$m/.claude/coordination.local.json; jq 'del(.approvals.delegate)' "$pf" > "$tmp/x.json" && mv "$tmp/x.json" "$pf"   # from before the key
+echo 'This project delegates approvals to the coordinator.' >> "$m/CLAUDE.md"
+hk='git -C notes add -A && git -C notes commit -qm auto'
+jq -n --arg c "$hk" '{hooks: {Stop: [{hooks: [{type: "command", command: $c}]}]}}' > "$m/.claude/settings.local.json"
+printf '#!/bin/sh\ncase $1 in -l) cat %s/crontab 2>/dev/null ;; -) cat > %s/crontab ;; esac\n' "$tmp" "$tmp" > "$tmp/bin/crontab"; chmod +x "$tmp/bin/crontab"
+printf '%s\n' '# m' "0 9 * * 1 /old/plugin/skills/rnd/rnd-weekly $m" > "$tmp/crontab"
+echo '- start mode: propose (the user asked)' >> "$pm/memory.md"; rm -rf "$pm/memory"
+echo '# msgraph chats' >> "$m/.claude/session-status-adapter"
+c=$(init "$m" --check)
+[ "$(grep -oE '^\[[mh][0-9]+ [a-z]+\]' <<<"$c" | paste -sd' ' -)" = "[m1 ask] [m3 ask] [m5 ask] [m6 ask] [h1 hand] [h2 hand]" ] || { echo "migrate (g5) check: $c"; exit 1; }
+before=$(lst "$m"; lst "$pm"; cat "$tmp/crontab"); out=$(init "$m" --migrate)
+rr=$here/../retro/retro-run; rr=$(cd "${rr%/*}" && pwd)/retro-run
+[ "$(grep -oE '^\[[mh][0-9]+ [a-z]+\]' <<<"$out" | paste -sd' ' -)" = "[m1 ask] [m3 ask] [m5 ask] [m6 ask] [h1 hand] [h2 hand]" ] &&
+  grep -qxF '  approvals.delegate=true → .claude/coordination.local.json' <<<"$out" && grep -qxF '  history.dirs += notes (.claude/coordination.local.json)' <<<"$out" &&
+  grep -qxF "  + 0 9 * * 1 $rr $m" <<<"$out" && grep -qF '  start.mode=propose → .claude/coordination.local.json; line ' <<<"$out" &&
+  grep -qxF 'stamp: not yet (open: m1 m3 m5 m6 h1 h2)' <<<"$out" && [ "$(lst "$m"; lst "$pm"; cat "$tmp/crontab")" = "$before" ] ||
+  { echo "migrate (g5) list: $out"; exit 1; }
+# --start runs it first and shows the open asks above the status
+out=$(cd "$m" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin:$PATH "$here/session-status" --start 2>&1) || :
+[ "$(grep '^## ' <<<"$out" | head -2 | sed 's/ (.*//' | paste -sd, -)" = '## Migration,## Status' ] && grep -q '^\[m1 ask\]' <<<"$out" &&
+  [ "$(lst "$m"; lst "$pm"; cat "$tmp/crontab")" = "$before" ] || { echo "migrate (g5) --start: $out"; exit 1; }
+# --apply: an open id only, never a hand one; --dry-run writes nothing
+rc=0; out=$(init "$m" --migrate --apply=h1) || rc=$?; [ "$rc" = 2 ] && grep -q '^h1: no --apply' <<<"$out" || { echo "migrate (g5) apply hand: $rc $out"; exit 1; }
+out=$(init "$m" --migrate --apply=m4); grep -qxF 'm4: not open (--check doesn'\''t name it)' <<<"$out" || { echo "migrate (g5) apply not open: $out"; exit 1; }
+out=$(init "$m" --migrate --apply=m5 --dry-run); [ "$(head -1 <<<"$out")" = 'crontab: rnd-weekly → retro-run' ] && grep -qxF "+ 0 9 * * 1 $rr $m" <<<"$out" &&
+  [ "$(lst "$m"; lst "$pm"; cat "$tmp/crontab")" = "$before" ] || { echo "migrate (g5) apply --dry-run: $out"; exit 1; }
+d=$pm/migrate-backup/$(date +%F)
+for i in m1 m3 m5 m6; do out=$(init "$m" --migrate --apply=$i); grep -qxF "[$i apply] done" <<<"$out" && ! grep -q "^\[$i " <<<"$(sed 1d <<<"$out" | grep -v "^\[$i apply\]")" || { echo "migrate (g5) apply $i: $out"; exit 1; }; done
+[ "$(jq -c '[.approvals.delegate, .history.dirs, .start.mode]' "$pf")" = '[true,["notes"],"propose"]' ] && [ "$(jq -c . "$m/.claude/settings.local.json")" = '{}' ] &&
+  [ "$(cat "$tmp/crontab")" = "$(printf '%s\n' '# m' "0 9 * * 1 $rr $m")" ] && grep -q rnd-weekly "$d/crontab" && grep -qF "$hk" "$d/.claude/settings.local.json" &&
+  ! grep -qi 'start mode' "$pm/memory.md" && grep -qri 'start mode' "$d" ||
+  { echo "migrate (g5) applied: $(cat "$pf") / $(cat "$tmp/crontab") / $(find "$d")"; exit 1; }
+# --decline: put away (not listed again, --check still names it); stamped once nothing undeclined is open
+out=$(init "$m" --migrate --decline=h1)
+grep -qxF 'h1: declined (--check still names it; --apply=h1 applies it)' <<<"$out" && ! grep -q '^\[h1 ' <<<"$out" && grep -q '^\[h2 hand\]' <<<"$out" &&
+  grep -qxF 'declined: h1 (--check still names them; --apply=ID applies one)' <<<"$out" && grep -qxF 'stamp: not yet (open: h2)' <<<"$out" &&
+  [ "$(jq -c '[.layout, .declined]' "$pm/setup.json")" = '[0,["h1"]]' ] || { echo "migrate (g5) decline: $out / $(cat "$pm/setup.json")"; exit 1; }
+out=$(init "$m" --migrate --decline=h2)
+grep -qxF "stamp: layout $L → $ps" <<<"$out" && [ "$(jq -c '[.layout, .declined]' "$pm/setup.json")" = "[$L,[\"h1\",\"h2\"]]" ] &&
+  [ "$(init "$m" --migrate)" = "current: layout $L ($ps)" ] &&
+  [ "$(init "$m" --check | grep -oE '^\[[mh][0-9]+ [a-z]+\]' | paste -sd' ' -)" = "[h1 hand] [h2 hand]" ] || { echo "migrate (g5) stamped: $out / $(cat "$pm/setup.json")"; exit 1; }
+# a stamp from a newer plugin: --check says to update this one, --write and --move write nothing, --migrate leaves it
+jq '.layout = 99 | .plugin = "9.9.9"' "$pm/setup.json" > "$tmp/x.json" && mv "$tmp/x.json" "$pm/setup.json"; before=$(lst "$m"; lst "$pm")
+nw="migrated by plugin 9.9.9 (layout 99; this one knows $L): update this account's plugin"
+rc=0; w=$(init "$m" --write 2>&1) || rc=$?
+grep -qxF "$nw" <<<"$(init "$m" --check)" && [ "$rc" = 1 ] && grep -qxF "refused: $nw" <<<"$w" && [ "$(init "$m" --migrate)" = "$nw" ] &&
+  [ "$(lst "$m"; lst "$pm")" = "$before" ] || { echo "migrate (g5) newer stamp: $rc $w / $(init "$m" --check)"; exit 1; }
+# migration fixture: m2
+# (g6) a second account sharing the transcripts while features.accounts is off: --apply=m2 turns it on.
+m=$(mkdir -p "$tmp/init/g6" && cd "$tmp/init/g6" && pwd -P); git -C "$m" init -q; init "$m" --write >/dev/null; pf=$m/.claude/coordination.local.json
+mkdir -p "$tmp/.claude-work" && ln -s "$tmp/cfg/projects" "$tmp/.claude-work/projects"
+out=$(init "$m" --migrate); grep -q '^\[m2 ask\] second account found, accounts off' <<<"$out" && grep -qxF '  features.accounts=true → .claude/coordination.local.json' <<<"$out" ||
+  { echo "migrate (g6) m2 list: $out"; exit 1; }
+out=$(init "$m" --migrate --apply=m2); grep -qxF '[m2 apply] done' <<<"$out" && [ "$(jq .features.accounts "$pf")" = true ] && grep -q '^stamp: layout ' <<<"$out" ||
+  { echo "migrate (g6) m2 apply: $out / $(cat "$pf")"; exit 1; }
+rm -rf "$tmp/.claude-work"
+# (g7) the live guard: m7 asks while another session of the project runs (its own session doesn't count), and
+# declining it only puts it off; with none other running it moves unasked.
+m=$(mkdir -p "$tmp/init/g7" && cd "$tmp/init/g7" && pwd -P); git -C "$m" init -q; pm=$(pof "$m"); old "$m" .claude/orchestration .claude/orchestration/replies/
+cp "$tmp/bin/claude" "$tmp/claude.default"; o=77777777-2222-3333-4444-555555555555
+printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$o\",\"name\":\"w\",\"cwd\":\"$m/sub\",\"state\":\"idle\"}]'" > "$tmp/bin/claude"
+out=$(init "$m" --migrate)
+grep -q '^\[m7 ask\] coordinator files outside .*, and 1 other running session(s) of this project keep the old paths until they restart: move now (--apply=m7) or wait$' <<<"$out" &&
+  grep -qxF 'stamp: not yet (open: m7)' <<<"$out" && [ -f "$m/.claude/orchestration/memory.md" ] || { echo "migrate (g7) live: $out"; exit 1; }
+out=$(init "$m" --migrate --decline=m7); grep -q '^m7: not declined, put off' <<<"$out" && [ "$(jq -c '.declined // []' "$pm/setup.json" 2>/dev/null || echo '[]')" = '[]' ] ||
+  { echo "migrate (g7) decline: $out"; exit 1; }
+out=$(CLAUDE_CODE_SESSION_ID=$o init "$m" --migrate); grep -qxF '[m7 auto] done' <<<"$out" && [ -f "$pm/memory.md" ] && grep -q '^stamp: layout ' <<<"$out" ||
+  { echo "migrate (g7) own session: $out"; exit 1; }
+mv "$tmp/claude.default" "$tmp/bin/claude"
 
 fi
 

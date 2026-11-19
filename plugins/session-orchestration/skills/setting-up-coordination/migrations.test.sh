@@ -9,7 +9,7 @@ orch=$here/../orchestrating-sessions
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # Ask-only and hand ids that have no fixture yet (stage 2 adds them and empties this list): everything else needs one.
-no_fixture_yet=" m1 m2 m3 m5 m6 h1 h2 "
+no_fixture_yet=" "
 
 # check CODE_FILES... -- TABLE FIXTURES: prints one problem per line, exit 1 if any.
 check() {

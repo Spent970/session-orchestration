@@ -864,6 +864,23 @@ async function setAsksNow($: EngineInterface, f: (l: Ask[]) => Ask[]) {
   }
   return next
 }
+// Queues one ask: a waiting one `same` matches (a restart's re-queue) is replaced in its place, id and age kept; a new
+// id is past every id in the store, which other coordinators' sessions also number.
+async function queueAsk($: EngineInterface, ask: Omit<Ask, 'id' | 'at'>, same: (a: Ask) => boolean, at: number) {
+  const n = await read($, seq)
+  let id = ''
+  let again = false
+  await setAsks($, list => {
+    const was = list.find(a => a.sending === undefined && same(a))
+    again = !!was
+    id = was?.id ?? String(Math.max(n, ...list.map(a => Number(a.id) || 0)) + 1)
+    const next: Ask = { ...ask, id, at: was?.at ?? at }
+    return was ? list.map(a => (a === was ? next : a)) : [...list, next]
+  })
+  if (!again) await update($, seq, () => Number(id))
+  await pruneOpen($)
+  return { id, again }
+}
 // Reads the store into this session's list: at a coordinator's ask call or pane open, then each minute. `setUp`:
 // open_pane's check of the folder, else checked here once.
 async function loadAsks($: EngineInterface, setUp?: boolean) {
@@ -1421,13 +1438,57 @@ async function initCheck($: EngineInterface): Promise<{ setUp: boolean, text: st
     if (r.exitCode === 3) return { setUp: false, text: ` This folder is ${line}. Tell the user, and ask whether this folder gets a coordinator of its own; if they meant the parent's project, its coordinator runs from there (skill setting-up-coordination).` }
     // configured: the lines after the first are the config in effect and its warnings; the indented ones (each
     // feature's start step) are session-status --start's to show
-    const rest = r.stdout.split('\n').slice(1).filter(l => !l.startsWith('  ')).map(l => l.trim()).filter(Boolean).join('; ')
+    const rest = r.stdout.split('\n').slice(1).filter(l => !l.startsWith('  ') && !/^\[[mh]\d+ /.test(l)).map(l => l.trim()).filter(Boolean).join('; ')
     const inbox = /^ {2}review_inbox url: (https:\/\/claude\.ai\/\S+)$/m.exec(r.stdout)?.[1]
     notifyMin = Number(/^ {2}notify after: (\d{1,3}) min$/m.exec(r.stdout)?.[1] ?? 0)
     return { setUp: true, text: rest && ` Coordination config: ${rest}.`, inbox }
   } catch {
     return { setUp: true, text: '' }
   }
+}
+
+// An older setup's layout made current at pane open (session-init --migrate, skill setting-up-coordination's
+// migrations.md): its automatic fixes run, and each ask or hand item it lists (`[ID ask|hand] text`, what its answer
+// changes indented under it) is queued as the pane ask migrate-<ID>, matched by key alone (its text changes: "3 other
+// running sessions" → "2"). A run that finished (stamp: or current:) drops the migrate-* asks it no longer lists.
+// Resolves to open_pane's result line, '' when nothing ran or is asked.
+async function migrateAsks($: EngineInterface) {
+  const r = await projectRoot($)
+  const out = await runStatus($, ['--init', '--migrate'], { ...(r ? { cwd: r } : {}), env: { CLAUDE_CODE_SESSION_ID: await $.session.id() } })
+  const items = new Map<string, { hand: boolean, text: string[], more: string[] }>()
+  let cur: { hand: boolean, text: string[], more: string[] } | undefined
+  for (const l of out.split('\n')) {
+    const m = /^\[([mh]\d+) (ask|hand)\] (.+)$/.exec(l)
+    if (m) {
+      const [, id = '', kind, text = ''] = m
+      cur = items.get(id) ?? { hand: kind === 'hand', text: [], more: [] }
+      items.set(id, cur)
+      cur.text.push(text)
+    } else if (cur && l.startsWith('  ')) cur.more.push(l.slice(2))
+    else cur = undefined
+  }
+  const at = await $.clock.now()
+  const cmd = 'session-status --init --migrate'
+  for (const [id, it] of items) {
+    const answer = it.hand
+      ? `Start a session: start a task session for it (what the line says to do). Not now: ${cmd} --decline=${id} (open_pane stops asking; --check still names it).`
+      : `Apply: ${cmd} --apply=${id}. Decline: ${cmd} --decline=${id} (open_pane stops asking; --check still names it).`
+    const details = clean([...(it.more.length ? ['What it changes:', ...it.more, ''] : []), answer].join('\n')).slice(0, BODY_MAX)
+    await queueAsk($, {
+      key: `migrate-${id}`, question: clean(oneLine(`${id}: ${it.text.join('; ')}`)),
+      options: it.hand ? ['Start a session', 'Not now'] : ['Apply', 'Decline'], details,
+    }, a => a.key === `migrate-${id}`, at)
+  }
+  if (/^(stamp|current):/m.test(out)) await dropAsks($, a => a.key.startsWith('migrate-') && !items.has(a.key.slice('migrate-'.length)))
+  if (items.size) await syncStatus($)
+  const done = [...out.matchAll(/^\[([mh]\d+) auto\] done$/gm)].map(m => m[1])
+  const failed = [...out.matchAll(/^\[([mh]\d+) auto\] failed: (.*)$/gm)].map(m => `${m[1]} (${m[2]})`)
+  const parts = [
+    ...(done.length ? [`fixed ${done.join(', ')}`] : []),
+    ...(failed.length ? [`failed ${failed.join('; ')}: --check still names them`] : []),
+    ...(items.size ? [`${items.size} queued as pane asks (${[...items.keys()].map(i => `migrate-${i}`).join(', ')}): on an answer run what its details name`] : []),
+  ]
+  return parts.length ? ` Migration (an older setup's layout): ${parts.join('; ')}.` : ''
 }
 
 // The review inbox's watch (features.review_inbox), started here so the coordinator loads no ArtifactComments schema
@@ -1640,8 +1701,9 @@ export const register: Register = on => {
     asksFile = undefined
     seenRead = false
     await loadAsks($, init.setUp).catch(() => undefined)
+    const migrated = init.setUp ? await migrateAsks($).catch(() => '') : ''
     const queued = queuedText(await liveAsks($), await $.clock.now())
-    return { result: `${isPlaced ? 'Coordinator pane open.' : 'The pane is waiting: this terminal is too narrow, or this app draws no panes (a background session, the agent view, a Desktop session over WSL). Tell the user /coordinator opens it at any width; where none shows, ask in plain text.'} ${named}${init.text}${inbox}${queued}` }
+    return { result: `${isPlaced ? 'Coordinator pane open.' : 'The pane is waiting: this terminal is too narrow, or this app draws no panes (a background session, the agent view, a Desktop session over WSL). Tell the user /coordinator opens it at any width; where none shows, ask in plain text.'} ${named}${init.text}${inbox}${migrated}${queued}` }
   })
 
   // Any session's own name, `<KEY>-<short-desc>` once it knows its task, through open_pane's /rename at turn end.
@@ -1858,26 +1920,14 @@ export const register: Register = on => {
     await loadAsks($).catch(() => undefined)
     // No pane here and no project store: the ask would live only in this session, where no pane ever shows it.
     if (!timer && !asksFile) return { deny: 'ask_approval: no coordinator pane shows an ask from here (no pane in this session, and no project store for this folder). Put the decision in your report to the coordinator (reply), which queues it.' }
-    // The same question for the key queued again (a restart's re-queue) replaces the waiting one in its place, id and
-    // age kept; a new id is past every id in the store, which other coordinators' sessions also number.
-    const n = await read($, seq)
-    let id = ''
-    let again = false
-    await setAsks($, list => {
-      const was = list.find(a => a.key === key && a.question === question && a.sending === undefined)
-      again = !!was
-      id = was?.id ?? String(Math.max(n, ...list.map(a => Number(a.id) || 0)) + 1)
-      const ask: Ask = {
-        id, key, question, options: labels, at: was?.at ?? at,
-        ...(text ? { details: text.length > BODY_MAX ? `${text.slice(0, BODY_MAX)}\n\n… ${text.length - BODY_MAX} more characters not kept` : text } : {}),
-        ...(opt(target) ? { target: oneLine(clean(String(target))) } : {}),
-        ...(body ? { body } : {}),
-        ...(isKind(kind) ? { kind } : {}),
-      }
-      return was ? list.map(a => (a === was ? ask : a)) : [...list, ask]
-    })
-    if (!again) await update($, seq, () => Number(id))
-    await pruneOpen($)
+    // the same question for the key queued again replaces the waiting one
+    const { id, again } = await queueAsk($, {
+      key, question, options: labels,
+      ...(text ? { details: text.length > BODY_MAX ? `${text.slice(0, BODY_MAX)}\n\n… ${text.length - BODY_MAX} more characters not kept` : text } : {}),
+      ...(opt(target) ? { target: oneLine(clean(String(target))) } : {}),
+      ...(body ? { body } : {}),
+      ...(isKind(kind) ? { kind } : {}),
+    }, a => a.key === key && a.question === question, at)
     const { isPlaced } = await open($)
     await syncStatus($)
     const unsaved = storeError ? ` (not saved for the next coordinator: ${storeError}; mention it in the handover)` : ''

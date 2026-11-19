@@ -666,7 +666,10 @@ ended_free() {
 if [ "${1:-}" = --start ]; then
   shift; rd=$(replies_path); h=${rd:+$rd/coordinator-handover.md}
   TMP=$(mktemp -d); trap 'r=$?; rm -rf "$TMP"; exit_fault $r' EXIT
-  echo '## Status'; "$SELF" "$@" | tee "$TMP/rows"; rc=${PIPESTATUS[0]}
+  # an older setup's layout made current first, so the reads below see the moved files; shown when it did or asks something
+  mg=$("$SELF" --init --migrate 2>&1) || :
+  ! grep -qE '^\[|failed' <<<"$mg" || printf '## Migration (answer an ask: session-status --init --migrate --apply=ID or --decline=ID)\n%s\n\n' "$mg"
+  echo '## Status';"$SELF" "$@" | tee "$TMP/rows"; rc=${PIPESTATUS[0]}
   pf=$(config pending.file 2>/dev/null); printf '\n## Handoff file%s\n' "${pf:+ ($pf)}"
   prc=0; pend=$("$SELF" --pending) || prc=$?; [ -z "$pend" ] || printf '%s\n' "$pend"
   [ "$prc" = 0 ] || echo '(none: the adapter gives no pending text)'
