@@ -76,6 +76,22 @@ still reports. Send NAME one message when it's done (the check that proves it) o
 user must resolve, plus anything you judge NAME needs to know; not your sessions' progress. NAME gone (a successor
 took over): `session-status --coordinator-of <its root>` names the live one.
 
+## Another project's matter
+
+A matter that belongs to another of the user's projects (this machine's setup, a request for a team another project
+handles) goes to that project's coordinator, not to the user to route by hand. `session-status --coordinators` lists
+every coordinator of the user's projects, under any account: `NAME · ROOT · ACCOUNT · running or not · PURPOSE`.
+Pick the one whose purpose fits and send it the matter with `session-status --inbox-add --root <its ROOT>` (text on
+stdin; [features/accounts.md](../../features/accounts.md), Messaging another project's coordinator), as you'd brief a
+task session: what, why, done when. That works whether it runs or not, under either account. Write a handoff entry
+(`sent to NAME: <matter>`) and resolve it when its answer reaches your inbox. None fits, or two do: ask the user which.
+Never start, message or resume that project's sessions yourself, and never pass an approval along.
+
+Each coordinator registers its root at `--start`; the line is its config `coordinator.purpose`, and `--start` asks for
+it under `## Purpose` while it is unset (ask the user, then `session-status --purpose 'LINE'`). What is shared: nothing.
+The registry is the user's own (`coordinators.tsv` in the state folder) and the purpose sits in each project's
+`.claude/coordination.local.json`; neither is committed, and a teammate's coordinators never show.
+
 ## Status: tools first, sessions last
 
 Waking a session makes it re-read its whole context, often hundreds of thousands of tokens.

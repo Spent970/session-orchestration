@@ -56,7 +56,8 @@ session under another account.
 
 ## Messaging another project's coordinator
 
-Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
+`session-status --coordinators` names every project's coordinator, its root, account and purpose (orchestrating-sessions
+SKILL.md, Another project's matter). Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
 project's coordinator often runs under the other account, where SendMessage can't reach it. Queue the message in that
 project's coordinator inbox instead: `session-status --inbox-add --root <its root>`, the text on stdin. Its `--watch`
 reports it under `Inbox` while it runs; its next `--start` prints it when it's closed. The heading names you, your
