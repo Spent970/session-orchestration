@@ -181,12 +181,12 @@ coord_live() {
 coord_purpose() {
   ( [ -z "${1:-}" ] || cd "$1" 2>/dev/null || exit 0
     local f; f=$(person_file 2>/dev/null) && [ -f "$f" ] || exit 0
-    jq -r '.coordinator.purpose // empty | strings | split("\n")[0] | .[0:200]' "$f" 2>/dev/null )
+    jq -r '.coordinator.purpose | strings | split("\n")[0] // empty | .[0:200] | select(length > 0)' "$f" 2>/dev/null )
 }
 # purpose_set TEXT: writes coordinator.purpose to this project's person file (session-status --purpose).
 # Characters are counted by jq (code points), the same on GNU and BSD and in any locale.
 purpose_set() {
-  local t; t=$(jq -rn --arg v "${1:-}" '$v | gsub("[\\n\\t]"; " ") | gsub("^ +| +$"; "") | select(length > 0 and length <= 200)')
+  local t; t=$(jq -rn --arg v "${1:-}" '$v | gsub("[[:cntrl:]]"; " ") | gsub("^ +| +$"; "") | select(length > 0 and length <= 200)')
   [ -n "$t" ] || { echo "usage: session-status --purpose 'ONE LINE, at most 200 characters'" >&2; return 2; }
   person_set purpose '.coordinator.purpose = $v' --arg v "$t"
 }

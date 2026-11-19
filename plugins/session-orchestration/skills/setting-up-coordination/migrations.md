@@ -19,7 +19,7 @@ Class: **auto** = applied without asking (personal, untracked, restorable); **as
 | h1 | the release after memory became index + topic files (0.32.2) | hand | flat `memory.md` | pane note offering a session |
 | h2 | the release after messages modules (0.52) | hand | the adapter mentions msgraph while `messages` is unset | pane note offering a session |
 
-Changes that needed no migration (cosmetic, a feature offer, no reliable detector, or old rows still read): `--init` itself (0.42), the github adapter (0.43), generic coordinator rules in the plugin (0.44), the Replies line wording (0.64), `features.retro` (0.103), adapter `brief` and `standup-template` (0.113).
+Changes that needed no migration (cosmetic, a feature offer, no reliable detector, or old rows still read): `--init` itself (0.42), the github adapter (0.43), generic coordinator rules in the plugin (0.44), the Replies line wording (0.64), `features.retro` (0.103), adapter `brief` and `standup-template` (0.113), `coordinator.purpose` (from the release after coordinator discovery: a feature offer, asked at `--start` while unset).
 
 ## Adding a migration
 

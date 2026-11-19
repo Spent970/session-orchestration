@@ -33,6 +33,8 @@ Every coordinator session, before anything else; the user shouldn't have to ask.
    - do each feature line's start step, and whatever the project's coordinator doc adds;
    - prune the handoff file against the status (Handoff file);
    - act on each unread coordinator inbox entry it lists, then mark it read (`session-status --inbox --read N`);
+   - a `## Purpose` section: ask the user for one line on what this coordinator is for, then
+     `session-status --purpose 'LINE'` (Another project's matter);
    - an `## Ended while the background service was off` section gets one ask ([resuming.md](resuming.md), After a
      restart);
    - recheck each ask `open_pane` listed as queued over a day ago, one by one: look the thing up (the PR merged or
@@ -80,10 +82,13 @@ took over): `session-status --coordinator-of <its root>` names the live one.
 
 A matter that belongs to another of the user's projects (this machine's setup, a request for a team another project
 handles) goes to that project's coordinator, not to the user to route by hand. `session-status --coordinators` lists
-every coordinator of the user's projects, under any account: `NAME · ROOT · ACCOUNT · running or not · PURPOSE`.
-Pick the one whose purpose fits and send it the matter with `session-status --inbox-add --root <its ROOT>` (text on
-stdin; [features/accounts.md](../../features/accounts.md), Messaging another project's coordinator), as you'd brief a
-task session: what, why, done when. That works whether it runs or not, under either account. Write a handoff entry
+every coordinator of the user's projects, under any account: `NAME · ROOT · ACCOUNT · STATE · PURPOSE`. Pick the
+one whose purpose fits and send it the matter as you'd brief a task session: what, why, done when. STATE `running`
+(this account): SendMessage it by NAME (the live session's, a successor's too), as Subprojects says. Otherwise
+(`running under another account`, `not running`, `unknown`: the inbox reaches it either way):
+`session-status --inbox-add --root <its ROOT>` (text on stdin; [features/accounts.md](../../features/accounts.md),
+Messaging another project's coordinator), which needs features.accounts on in your project (off: ask the user to
+turn it on) and refuses a target marked `no inbox` (ask the user to route that one). Write a handoff entry
 (`sent to NAME: <matter>`) and resolve it when its answer reaches your inbox. None fits, or two do: ask the user which.
 Never start, message or resume that project's sessions yourself, and never pass an approval along.
 

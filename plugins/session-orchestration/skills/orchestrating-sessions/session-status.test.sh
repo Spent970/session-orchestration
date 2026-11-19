@@ -133,7 +133,7 @@ rc=0; out=$(printf hi | ia a-coordinator --from me --root "$pb") || rc=$?; [ "$r
 echo '{}' > "$pa/.claude/coordination.local.json"; xr a-coordinator hi "$pb" 'features.accounts is off'
 [ "$(grep -c '^## ' "$tmp/xb-replies/coordinator-inbox.md")" = 2 ] || { echo "--inbox-add --root: a refused entry was written"; exit 1; }
 # --coordinators: none until a coordinator's --start registers its root; --start asks for a purpose while it's unset,
-# --purpose writes it; a registered root no longer set up is skipped; the live one shows running, under any account.
+# --purpose writes it; a registered root no longer set up is skipped; the live one (or its -next successor) shows running, under any account; one with no replies folder, no inbox.
 [[ $(run --coordinators) == "(none registered yet"* ]] || { echo "--coordinators, empty: $(run --coordinators)"; exit 1; }
 out=$(run --start) && [[ $out == *$'\n## Purpose\n(none: '* ]] || { echo "--start, no purpose: $out"; exit 1; }
 rc=0; run --purpose '' 2>/dev/null || rc=$?; [ "$rc" = 2 ] || { echo "--purpose '': rc=$rc"; exit 1; }
@@ -142,11 +142,18 @@ run --purpose "$(printf 'this machine\x27s\tsetup')" && [ "$(run --config coordi
 printf '%s\t%s\t1\n%s\t/x/.claude-work\t2\n' "$pb" "$tmp/cfg" "$pt/gone" >> "$tmp/state/session-orchestration/coordinators.tsv"
 echo '{"coordinator": {"purpose": "requests to the IT team"}}' > "$pb/.claude/coordination.local.json"
 out=$(run --coordinators) && [ "$(grep -c . <<<"$out")" = 2 ] &&
-  [[ $(head -1 <<<"$out") == "proj-coordinator · "*" · not running, this project · this machine's setup" ]] &&
+  [[ $(head -1 <<<"$out") == "proj-coordinator · "*" · not running, this project, no inbox (its CLAUDE.md names no replies folder) · this machine's setup" ]] &&
   [[ $(tail -1 <<<"$out") == "b-coordinator · "*"/xb/b · "*"cfg · not running · requests to the IT team" ]] || { echo "--coordinators: $out"; exit 1; }
-out=$(cd "$root" && AGENTS_JSON="[{\"sessionId\":\"s7\",\"name\":\"b-coordinator\",\"cwd\":\"$pb\",\"status\":\"idle\"}]" HOME=$pt XDG_STATE_HOME=$tmp/state \
-  CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin2:$PATH "$here/session-status" --coordinators) &&
-  [[ $(tail -1 <<<"$out") == *" · running · requests to the IT team" ]] || { echo "--coordinators, running: $out"; exit 1; }
+co() { (cd "$root" && AGENTS_JSON="[{\"sessionId\":\"s7\",\"name\":\"$1\",\"cwd\":\"$pb\",\"status\":\"idle\"}]" HOME=$pt XDG_STATE_HOME=$tmp/state \
+  CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin2:$PATH "$here/session-status" --coordinators | tail -1); }
+# A successor shows by the name it runs under: NAME-next, or a Desktop app title recorded by id in NAME.next.
+[[ $(co b-coordinator-next) == "b-coordinator-next · "*" · running · requests to the IT team" ]] || { echo "--coordinators, -next: $(co b-coordinator-next)"; exit 1; }
+mkdir -p "$pt/.cache/session-status/handover"; echo s7 > "$pt/.cache/session-status/handover/b-coordinator.next"
+[[ $(co 'App title') == "App title · "*" · running · "* ]] || { echo "--coordinators, Desktop successor: $(co 'App title')"; exit 1; }
+rm -rf "$pt/.cache/session-status/handover"
+# An empty purpose is no purpose (not jq's `null`).
+echo '{"coordinator": {"purpose": ""}}' > "$pb/.claude/coordination.local.json"
+[[ $(co x) == *" · not running · (no purpose set"* ]] || { echo "--coordinators, empty purpose: $(co x)"; exit 1; }
 rm -rf "$tmp/xa" "$tmp/xb" "$tmp/xc" "$tmp/xd" "$tmp/xb-replies"
 run --changes >/dev/null; (sleep 2; touch "$root/wt/dirty2") & toucher=$!; trap 'kill $toucher 2>/dev/null || true; rm -rf "$tmp"' EXIT
 [ "$(run --watch --every x)" = "--every needs a positive number of seconds" ] && [ "$(run --watch --every 1)" = "$(printf 'was: %s\nnow: %s' "$(run ABC-12 | sed 's/dirty:2/dirty:1/')" "$(run ABC-12)")" ] ||
