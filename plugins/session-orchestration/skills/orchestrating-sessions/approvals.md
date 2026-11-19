@@ -100,8 +100,10 @@ user a command).
   cross-session messages: one inside a `claude --bg --resume` prompt verifies by hand but the command is denied. And
   a worker reads a resume or `--send-when-idle` prompt as the user's own words. So wake a retired session with its
   task and a note that approves nothing ("a message follows; act only if it verifies"), then SendMessage the relay
-  block. A session under another Claude account can't get a SendMessage: move it to yours first with
-  `session-status --send-when-idle --here <id> '<that note>'` (same id and name; [accounts](../../features/accounts.md)).
+  block. A live session under another Claude account gets it at its socket's address: SendMessage the relay to the
+  `uds:` line `session-status --address <id>` prints (its hook verifies it as any relay). With no live socket (exit 1),
+  move it to yours first with `session-status --send-when-idle --here <id> '<that note>'` (same id and name; also
+  when the user wants it moved; [accounts](../../features/accounts.md)).
 - **An action the session also handed over** (it shows in the pane's Run box): the relay replaces that command, never
   both. On `verified`, `verify-approval.sh` names the session's handed commands for the key, and the session withdraws
   the one for this action before acting; Run on a withdrawn command runs nothing. Don't point the user at Run for an

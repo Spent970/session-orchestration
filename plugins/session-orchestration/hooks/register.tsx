@@ -1538,8 +1538,8 @@ async function openInTerminal($: EngineInterface, p: UiPressArgument, term: stri
   $.ui.toast(c.isCopied ? `${why}: copied ${fallback}` : `${why}, and couldn't copy (${c.reason}): ${fallback}`)
 }
 
-// The PR events the watcher couldn't deliver itself (a live session of this account: a script can't SendMessage; SKILL.md,
-// Watching): sent from here, without waking the coordinator; what came of each goes back for the watcher's next report.
+// The PR events the watcher couldn't deliver itself (a live session, of this account by id, of another by the `uds:`
+// address --outbox looks up: a script can't SendMessage; SKILL.md, Watching): sent from here, without waking the coordinator; what came of each goes back for the watcher's next report.
 async function forwardOutbox($: EngineInterface) {
   const out = await runStatus($, ['--outbox'])
   if (!out || out.startsWith('failed: ')) return
@@ -1547,7 +1547,8 @@ async function forwardOutbox($: EngineInterface) {
   for (const row of out.split('\n')) {
     const [, id, , line, text] = row.split('\t')
     if (!id || !line || !text) continue
-    const sent = await $.session.send({ to: { sessionId: id }, text }).catch((err: unknown) => ({ isDelivered: false, reason: err instanceof Error ? err.message : String(err) }))
+    // A session under another account comes as its socket's `uds:` address (--send-when-idle), which its id isn't.
+    const sent = await $.session.send({ to: id.startsWith('uds:') ? id : { sessionId: id }, text }).catch((err: unknown) => ({ isDelivered: false, reason: err instanceof Error ? err.message : String(err) }))
     done.push(sent.isDelivered ? `ok\t${line}\tsent` : `failed\t${line}\t${oneLine(sent.reason ?? '') || 'not delivered'}`)
   }
   if (done.length) await runBash($, [`${$.plugin.root}/skills/orchestrating-sessions/session-status`, '--outbox-done'],
@@ -1696,7 +1697,8 @@ export const register: Register = on => {
       if (sent.isDelivered) return { result: `Sent to ${name}.${filed}` }
       why.push(`${name}: ${sent.reason}`)
     }
-    // No live coordinator took it (none runs, it is mid-handover, or under another account): the coordinator inbox,
+    // No live coordinator took it (none runs, it is mid-handover, or under another account with no live socket, which
+    // --coordinator leaves out; one with a socket it prints as a `uds:` address, tried above): the coordinator inbox,
     // which the next coordinator reads at Start and a live one's watcher reports.
     if (!toName || /-coordinator(-next)?$/.test(toName)) {
       const r = await runBash($, [`${$.plugin.root}/skills/orchestrating-sessions/session-status`, '--inbox-add', id],

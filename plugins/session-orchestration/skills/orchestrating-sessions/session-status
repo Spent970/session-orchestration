@@ -117,8 +117,10 @@
 #                       it; --here: a session under another account is moved to yours (same id and name), so you can
 #                       SendMessage it next
 #        session-status --coordinator   names of this account's live coordinator sessions (ran --start,
-#                       --changes, --watch or --owner, or opened the pane), newest first, excluding the caller; no
-#                       tracker calls
+#                       --changes, --watch or --owner, or opened the pane), newest first, excluding the caller, then
+#                       (features.accounts on) another account's by their live socket's uds: address; no tracker calls
+#        session-status --address NAME|ID   the uds: address SendMessage reaches a live session at, any listed
+#                       account; exit 1 no live socket, 2 none or several match, 3 a listing failed
 #        session-status --coordinator-of DIR [--start]   the coordinator of DIR's project when it's another than
 #                       this one (a subproject, the parent): its name; exit 1 not running (--start opens it), 3 listing
 #                       failed, 4 none of its own (--start opens a new one there), 5 nothing opened
@@ -178,7 +180,7 @@ SS_LIB=$(cd "$(dirname "$0")/../.." && pwd)/lib.sh SS_FLAG=${1:-}; [[ $SS_FLAG =
 # forks, and usage's config call then hangs.
 exit_fault() {
   case $1 in 0|3|4|12[89]|1[3-9][0-9]|2[0-9][0-9]) return ;; esac
-  case $SS_FLAG in --urls|--pending|--agents|--plan|--coordinator-of|--successor|--handover|--resume-ended|--watch) return ;; esac
+  case $SS_FLAG in --urls|--pending|--agents|--plan|--coordinator-of|--address|--successor|--handover|--resume-ended|--watch) return ;; esac
   [ -n "${SESSION_STATUS_PEEK:-}${SESSION_STATUS_FORWARD:-}" ] ||
     bash -c '. "$1" && usage session-status error "$2" "$3"' _ "$SS_LIB" "$1" "${SS_FLAG:-skills/orchestrating-sessions/session-status}" </dev/null >/dev/null 2>&1
 }
@@ -306,6 +308,21 @@ if [ "${1:-}" = --coordinator-of ]; then
     echo "$(tilde "$d") has no coordinator of its own: --start opens one there, whose setup asks the user to give it its own (--init --own)" >&2; exit 4
   fi
   coord_start "$r" || exit 5
+  exit 0
+fi
+# --address NAME|ID: the `uds:` address SendMessage reaches a live session at, under any account list_accounts names
+# (another one only with features.accounts on): lib.sh's sock_addr of its listed pid. Exit 1: listed, but no live
+# socket; 2: no live session by that name or id (8+ characters), or several; 3: not found, and a listing failed.
+if [ "${1:-}" = --address ]; then
+  [ $# = 2 ] && [ -n "$2" ] || { echo "usage: session-status --address NAME|ID" >&2; exit 2; }
+  TMP=$(mktemp -d) || exit 1; trap 'r=$?; rm -rf "$TMP"; exit_fault $r' EXIT
+  # A running process (a pid), whatever its state: a worker done and waiting on its landing approval is still live.
+  rows=$(list_sessions | awk -F'\t' -v w="$2" '$9 ~ /^[0-9]+$/ && ($2 == w || (length(w) >= 8 && index($1, w) == 1))')
+  [ -n "$rows" ] || [ ! -e "$TMP/ask.failed" ] || { echo "no live session $2 found, but an account's session listing failed: try again" >&2; exit 3; }
+  [ -n "$rows" ] || { echo "no live session $2 in any listed account" >&2; exit 2; }
+  [ "$(grep -c . <<<"$rows")" = 1 ] || { echo "several live sessions match $2: pass its id" >&2; exit 2; }
+  pid=$(cut -f9 <<<"$rows")
+  sock_addr "$pid" || { echo "$2 is listed, but has no live socket (pid ${pid:-none}): no address" >&2; exit 1; }
   exit 0
 fi
 ROOT=$(find_root); cd "$ROOT" || exit 1
@@ -806,7 +823,19 @@ locked_take_old() {   # FILE SECS: prints the entries older than SECS and drops 
 }
 # --outbox: the outbox's entries (the coordinator pane sends each). --outbox-done < `ok|failed<TAB>LINE<TAB>NOTE` lines:
 # what came of them, for the watcher's next report; their entries leave the outbox only then, so none is lost between.
-[ "${1:-}" != --outbox ] || { cat "$(fwd_file outbox)" 2>/dev/null; exit 0; }
+# A session under another account goes as its socket's `uds:` address, looked up now, not when queued: by then its
+# pid may be another session's. One with no live socket keeps its id, which reaches nothing (the pane reports it failed).
+if [ "${1:-}" = --outbox ]; then
+  ob=$(fwd_file outbox); [ -s "$ob" ] || exit 0
+  TMP=$(mktemp -d) || exit 1; trap 'rm -rf "$TMP"' EXIT
+  list_sessions > "$TMP/l" 2>/dev/null || :
+  while IFS=$'\t' read -r ts id rest; do
+    pid=$(awk -F'\t' -v id="$id" '$1 == id && $4 != "claude" { print $9; exit }' "$TMP/l")
+    ! a=$(sock_addr "$pid") || id=$a
+    printf '%s\t%s\t%s\n' "$ts" "$id" "$rest"
+  done < "$ob"
+  exit 0
+fi
 if [ "${1:-}" = --outbox-done ]; then
   d=$(cat); grep . <<<"$d" | locked_append "$(fwd_file forwarded)"
   ob=$(fwd_file outbox); [ -f "$ob" ] || exit 0
@@ -867,12 +896,15 @@ if [ "${1:-}" = --changes ]; then
   [ -z "$stopped" ] || [ -n "${SESSION_STATUS_PEEK:-}" ] ||
     new=$(awk '$0 == "Leftovers (task finished):" { h = $0; next } h != "" && /^  / { print h } { h = ""; print }' <<<"$new")
   rm -f "$last.fin.$$" "$last.fin.$$.wt"
-  # A worker under another account can't SendMessage this coordinator (features/accounts.md): its report reaches only
-  # the replies folder. With accounts on, each <KEY>.md written there in the last day is a line, so writing one is
-  # news; not a key a session of this account works on (it messages), nor the coordinator's own files (plans, briefs).
+  # A worker under another account with no live socket can't SendMessage this coordinator (features/accounts.md): its
+  # report reaches only the replies folder. With accounts on, each <KEY>.md written there in the last day is a line, so
+  # writing one is news; not a key a session that can message works on (this account's, or one with a live socket),
+  # nor the coordinator's own files (plans, briefs).
   if [ "$(config features.accounts 2>/dev/null)" = true ]; then
     rd=$(replies_path)
-    kre=$(key_re "$(adapter_path "$ROOT")"); mine=$(awk -F'\t' '$4 == "claude" { print $2 }' ~/.cache/session-status/"$ENC".agents 2>/dev/null)
+    kre=$(key_re "$(adapter_path "$ROOT")")
+    mine=$(awk -F'\t' '{ print $4 "\t" $2 "\t" $9 }' ~/.cache/session-status/"$ENC".agents 2>/dev/null |
+      while IFS=$'\t' read -r p n pid; do [ "$p" != claude ] && ! sock_addr "$pid" >/dev/null || echo "$n"; done)
     r=(); [ -z "$rd" ] || while IFS= read -r -d '' f; do k=${f##*/}; k=${k%.md}
       grep -qxE "$kre" <<<"$k" && ! grep -qE "^$k(-|\$)" <<<"$mine" && r+=("$f")
     done < <(find "$rd" -maxdepth 1 -type f -name '*.md' -mtime -1 -print0 2>/dev/null)
@@ -931,7 +963,7 @@ if [ "${1:-}" = --changes ]; then
   [ -n "${SESSION_STATUS_PEEK:-}" ] && [ "$first" = 0 ] || ! [ -f "$last.pr-events.$$" ] || mv "$last.pr-events.$$" "$last.pr-events"
   rm -f "$last.pr-events.$$" "$last.prs.$$"
   # Under --watch (SESSION_STATUS_FORWARD) a committing run sends each owned event's nudge itself: --send-when-idle
-  # without waiting, and a live session of this account (`send:`, or busy) through the outbox, which the coordinator
+  # without waiting, and a live session (`send:`, or busy; under another account by its `uds:` address) through the outbox, which the coordinator
   # pane's timer sends (--outbox). What was sent shows under Forwarded beside the next change that wakes the
   # coordinator, not as one; what wasn't stays a PR event, with why. An outbox entry no pane took in OUTBOX_S (600)
   # comes back as a PR event too.
@@ -1426,8 +1458,9 @@ fi
 
 # --send-when-idle ID TEXT: waits until the session isn't busy, then delivers TEXT the way that can't fork it:
 #  - live in this account: prints `send: …` and exits 0; the caller sends TEXT with SendMessage (a script can't);
-#  - live in another account (SendMessage doesn't reach it): idle, stopped and resumed with TEXT; waiting on a
-#    prompt, it says so and exits 3, since a stop would drop that prompt;
+#  - live in another account, at once (busy or on a prompt too): `send: SendMessage to "uds:…"`, the address of its
+#    socket (lib.sh's sock_addr), exit 0. With no live socket (SendMessage by name doesn't reach it): idle, stopped and
+#    resumed with TEXT; waiting on a prompt, it says so and exits 3, since a stop would drop that prompt;
 #  - retired (listed, no process): woken by resuming it with TEXT under its own id;
 #  - not listed in any account: resumed with TEXT, only from this project's transcripts and an unambiguous id.
 #  --here: the resume of a session under another account (live and idle, or retired) runs under this account with its
@@ -1469,6 +1502,10 @@ if [ -n "$SEND" ]; then
         f=$(transcript_of "$id"); [ -z "$f" ] || ! too_big "$f" "$name" "$id" || exit 4
         resume_with "$(to)" "$cwd" "$id" "$text" "$(moved && echo "$name")" || exit 1
         echo "woke \"$name\" (${id:0:8}, $st) with the text$(moved && echo ', moved to this account')"; exit 0
+      fi
+      # Live under another account: its socket takes the message at once, mid-turn or on a prompt too.
+      if [ -z "$here" ] && [ "$pre" != claude ] && addr=$(sock_addr "$pid"); then
+        echo "send: SendMessage to \"$addr\" now (\"$name\", $status, live under another account); the text is yours to send"; exit 0
       fi
       mid_turn || break
     fi
@@ -1674,16 +1711,19 @@ find "$TRANSCRIPTS" -maxdepth 1 -name '*.jsonl' -mtime -30 2>/dev/null > "$TMP/f
 names=$(adapter status-names 2>/dev/null) || names=
 CRE=$(coord_re "$names")
 
-# Coordinators: live sessions of this account in $TMP/watchers (workers run the status command for their own task
-# too, so plain runs don't count here). Newest transcript first. Other accounts are left out: SendMessage doesn't
-# reach them. One grep, not the scan cache below: a cold cache would cost a session's report its whole scan.
+# Coordinators: live sessions in $TMP/watchers (workers run the status command for their own task too, so plain runs
+# don't count here). Newest transcript first: this account's by name, then another account's (features.accounts on)
+# by the `uds:` address SendMessage reaches it at, which its name doesn't. One grep, not the scan cache below: a cold
+# cache would cost a session's report its whole scan.
 if [ -n "$COORD" ]; then
   tr '\n' '\0' < "$TMP/files" | xargs -0 grep -l -E "$CRE" > "$TMP/watchers"
   { IFS=$'\n' read -d '' -ra w < "$TMP/watchers"; [ ${#w[@]} = 0 ] || mtime_named "${w[@]}"; } | sort -rn | sed -E 's#.*/##; s#\.jsonl$##' |
     while read -r id; do
       [ "$id" = "${CLAUDE_CODE_SESSION_ID:-}" ] ||
-        awk -F'\t' -v id="$id" '$1==id && $4=="claude" && $2 !~ /-prev-[0-9]+$/ {print $2}' "$TMP/agents"
-    done
+        awk -F'\t' -v id="$id" '$1==id && $2 !~ /-prev-[0-9]+$/ {print $4 "\t" $2 "\t" $9}' "$TMP/agents"
+    done > "$TMP/coords"
+  awk -F'\t' '$1 == "claude" {print $2}' "$TMP/coords"
+  awk -F'\t' '$1 != "claude" {print $3}' "$TMP/coords" | while read -r pid; do sock_addr "$pid" || :; done
   exit 0
 fi
 

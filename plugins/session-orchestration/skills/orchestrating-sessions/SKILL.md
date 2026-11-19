@@ -62,8 +62,10 @@ that coordinator's, not yours. Before you start or message a session for work in
 - **It prints a name**: delegate. `SendMessage` it one line: `From the coordinator "<your name>": <the request, as
   you'd brief a task session: what, why, done when>. Report back to me only its outcome, or a block I must resolve.`
   Write one handoff entry (`delegated to NAME: <request>`) and track only that; resolve it when NAME reports. Never
-  start, message or resume that project's sessions yourself. A name `under another account`: SendMessage can't reach
-  it, so ask the user to tell it there.
+  start, message or resume that project's sessions yourself. A name `under another account`: SendMessage the `uds:`
+  address that line names; one that says `reaches it only from there` (no live socket, or `features.accounts` off):
+  queue it in its inbox (`--inbox-add --root DIR`, [accounts](../../features/accounts.md)), or with the feature off
+  ask the user to tell it there.
 - **Exit 1** (not running): `--start` opens it, after the user's yes (exit 5: nothing opened; hand the user the
   command it prints). SendMessage it the request once `--coordinator-of` names it.
 - **Exit 4** (no coordinator of its own: yours covers it): propose giving it one. On the user's yes, `--start` opens
@@ -250,7 +252,7 @@ had changes requested, and a task whose PRs are all merged while it is still on 
 is a PR event: `* REPO#ID EVENT @SHA (KEY) → "NAME" ID`, or `* REPO#ID[,…] all-merged (KEY, STATUS) → "NAME" ID`. The
 watcher sends the owner its nudge itself (fix and push; or deploy per the project doc, then move the task on) and
 wakes no one for it: a retired session or one in another account through `--send-when-idle`, a live one of this
-account through your pane's timer (keep the pane open). What it sent shows under `Forwarded` beside the next change
+account (or of another, by its socket's `uds:` address) through your pane's timer (keep the pane open). What it sent shows under `Forwarded` beside the next change
 that wakes you: nothing to do. A `PR events` section in the output is one it couldn't send (`not forwarded: WHY`, or
 `→ no owner`): send that session `PR REPO#ID (KEY): EVENT on SHA. Fix it and push; force-push, post or merge only with
 the usual approval. Reply when pushed, or blocked.` through `session-status --send-when-idle ID TEXT` (it prints
