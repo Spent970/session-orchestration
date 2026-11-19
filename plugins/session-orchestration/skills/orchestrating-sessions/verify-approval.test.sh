@@ -58,6 +58,11 @@ ask() { # $1 tool_use id, $2 question, $3 answer, $4 timestamp, $5 sidechain
   pane session-orchestration "Coordinator pane: where does task ABC-16 stand, and what's next? Answer briefly."
   echo '{"type":"assistant","message":{"content":[{"type":"text","text":"ABC-16 waits on review."}]}}'
   jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: "go ahead"}}'
+  # The Desktop app adds a <system-reminder> block to what the user typed: as its own text block, or inline.
+  jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: [
+    {type: "text", text: "<system-reminder>\nLinked sessions now: top = x (idle)\n</system-reminder>"}, {type: "text", text: "Yes, push ABC-18"}]}}'
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Ship ABC-19?"}]}}'
+  jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: "ship it\n<system-reminder>\nLinked sessions now\n</system-reminder>"}}'
 } > "$proj/$cid.jsonl"
 # `claude agents --json` lists its own account's sessions only; the coordinator's account is in $tmp/coord.
 # features.accounts is on (the person file), so every account sharing the transcript store is asked.
@@ -93,6 +98,9 @@ check ABC-14 "Yes, push ABC-14" "$no ABC-14 in it or in the message it answers" 
 check ABC-13 "Approval pane answer for ABC-11: Yes, merge ABC-11. Asked: Merge PR #5?" "$no ABC-13 in it or in the message it answers"  # a pane row answers no message before it
 check ABC-15 "go ahead" "$no ABC-15 in it or in the message it answers"     # an Ask came between
 check ABC-16 "go ahead" "verified, answering: ABC-16 waits on review."
+check ABC-18 "Yes, push ABC-18" verified                                     # Desktop app reminder block
+check ABC-19 "ship it" "verified, answering: Ship ABC-19?"                     # inline reminder
+check ABC-18 "Linked sessions now" "$no ABC-18 in it or in the message it answers"  # reminder text isn't typed text
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # (above: worker under ~/.claude-work) same account
 echo "$home/.claude-work" > "$tmp/coord"
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # coordinator under ~/.claude-work
