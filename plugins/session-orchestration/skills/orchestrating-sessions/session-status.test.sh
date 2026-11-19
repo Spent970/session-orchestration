@@ -1908,6 +1908,20 @@ out=$(init "$m" --write --move) && ! grep -q 'move failed' <<<"$out" && [ ! -e "
   [ -f "$pm/replies/K-5.md" ] && [ -f "$pm/replies/memory.md" ] && [ -f "$pm/replies/pending.md" ] &&
   grep -qF "Project memory: \`$pm/replies/memory.md\`. Coordinator handoff file: \`$pm/replies/pending.md\`." "$m/CLAUDE.md" &&
   ! grep -q 'coordinator files outside' <<<"$(init "$m" --check)" || { echo "move (m5): $out / $(cd "$pm" && find . | sort)"; exit 1; }
+# (m5h) the handoff line a bare path: with pending.md already in P and pending.file naming it, the move points the
+# line at pending.file; with no pending.file, the file moves and its bare line follows it, backticked.
+m=$(mkdir -p "$tmp/init/m5h" && cd "$tmp/init/m5h" && pwd -P); git -C "$m" init -q; pm=$(pof "$m")
+old "$m" .claude/orchestration .claude/orchestration/replies/
+sed -i.x 's#handoff file: `[^`]*`#handoff file: .claude/orchestration/pending.md#' "$m/CLAUDE.md" && rm "$m/CLAUDE.md.x"
+cp -R "$m" "$tmp/init/m5b" && mb=$(cd "$tmp/init/m5b" && pwd -P)
+mv "$m/.claude/orchestration/pending.md" "$pm/pending.md"
+c=$m/.claude/coordination.local.json; [ -f "$c" ] || echo '{}' > "$c"
+jq --arg f "$pm/pending.md" '.pending.file = $f' "$c" > "$tmp/x.json" && mv "$tmp/x.json" "$c"
+out=$(init "$m" --write --move) && grep -qF "Coordinator handoff file: \`$pm/pending.md\`." "$m/CLAUDE.md" ||
+  { echo "move (m5h) pending.file: $out / $(grep -i handoff "$m/CLAUDE.md")"; exit 1; }
+pb=$(pof "$mb"); out=$(init "$mb" --write --move) && [ -f "$pb/pending.md" ] && grep -qF "Coordinator handoff file: \`$pb/pending.md\`." "$mb/CLAUDE.md" ||
+  { echo "move (m5h) bare: $out / $(grep -i handoff "$mb/CLAUDE.md")"; exit 1; }
+
 # migration fixture: m4
 # migration fixture: m7
 # migration fixture: m8
