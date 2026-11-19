@@ -75,11 +75,13 @@ matches() { jq -r -n --arg q "$q" --arg key "$key" --argjson ref "$ref" --argjso
   def names_key: test("(^|[^A-Za-z0-9-])" + ($key | gsub("(?<c>[.*+?^${}()|\\[\\]\\\\/-])"; "\\\(.c)")) + "($|[^A-Za-z0-9-])");
   # A click in the coordinator pane: the prompt this plugin submits, and nothing else it might submit.
   def pane($o): $o.kind == "plugin" and $o.name == "session-orchestration";
+  # The Desktop app adds <system-reminder> blocks (e.g. "Linked sessions now") to the message the user typed.
+  def typed: gsub("<system-reminder>[\\s\\S]*?</system-reminder>"; "");
   [foreach inputs as $e ({turn: "", asks: {}};
      ($e | if .type == "user" and (.origin.kind == "human" or pane(.origin)) then
-             [.origin, (.message.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end)]
+             [.origin, (.message.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end | typed)]
            elif .type == "attachment" and .attachment.type == "queued_command" and (.attachment.origin.kind == "human" or pane(.attachment.origin)) then
-             [.attachment.origin, (.attachment.prompt | tostring)]
+             [.attachment.origin, (.attachment.prompt | tostring | typed)]
            else [null, null] end
          | if pane(.[0]) and (.[1] | startswith("Approval pane answer for ") | not) then [null, null] else . end) as [$o, $text]
      # The message a typed message answers: the assistant text of the turn just before it. A pane answer
