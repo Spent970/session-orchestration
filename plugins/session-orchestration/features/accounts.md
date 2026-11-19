@@ -1,8 +1,9 @@
 # Feature: accounts
 
 > **Start**: nothing to do. Workers you start or resume run under your account (don't set or unset
-> `CLAUDE_CONFIG_DIR`); keep them there unless the user names another: you can't message a session under another
-> account. Before resuming a closed session, ask the user to confirm it isn't running under another account.
+> `CLAUDE_CONFIG_DIR`); keep them there unless the user names another. A live session under another account takes
+> a SendMessage only at its socket's `uds:` address (`session-status --address NAME|ID`). Before resuming a closed
+> session, ask the user to confirm it isn't running under another account.
 > **Read when**: a session under another account needs a message, resume, wake, stop or follow-up; a `Reports:` line
 > shows; a `Weekly limit:` line or "past 90% of its weekly limit" shows; a command was handed over under another
 > account; `claude --bg` says "Workspace not trusted"; or the review inbox's watch says "no live-channel credential".
@@ -26,27 +27,37 @@ fails with "Workspace not trusted", ask the user to run `claude` there once unde
 `CLAUDE_CONFIG_DIR` (if it isn't the default) and accept the trust prompt; don't start the worker under another
 account to get around it.
 
-`claude agents`, `attach`, `logs`, `stop`, `ListAgents` and `SendMessage` only see sessions of your own account. A
-session running under another account is invisible to them, so the duplicate check before a `--resume` can't
-catch it, and one stopped there isn't found here either (`claude logs` says `No job matching`). If `--resume`
-finds its transcript, it continues the same conversation under your account: before resuming a closed session,
-ask the user to confirm it isn't still running under another account.
+`claude agents`, `attach`, `logs`, `stop` and `ListAgents` only see sessions of your own account, and `SendMessage`
+by name or id reaches only those. A session running under another account is invisible to them, so the duplicate
+check before a `--resume` can't catch it, and one stopped there isn't found here either (`claude logs` says `No job
+matching`). If `--resume` finds its transcript, it continues the same conversation under your account: before
+resuming a closed session, ask the user to confirm it isn't still running under another account.
 
-**Keep every task session under your own account** unless the user names the other one: you can't message a
-session under another account.
-- **Moving a session to your account** (to relay it an approval, or message it at all): `session-status
+**Its socket reaches it.** Every live session, under any account, listens on `/tmp/cc-socks/<pid>.sock`, a channel
+only your own OS user can open, and `SendMessage` to `uds:<that path>` delivers to it like a message by name: busy,
+on a prompt or interactive too, with no stop, resume or context reload. `session-status --address NAME|ID` prints
+the address of a listed live session (only for its listed pid, whose process lives: a dead session's socket can
+linger); exit 1 when it has none, then fall back to the moves below. The gate is `features.accounts` itself: off,
+no other account is listed, so none is addressed.
+
+**Keep every task session under your own account** unless the user names the other one.
+- **Messages and approvals** to a live session under another account go to its `uds:` address. A relay goes straight
+  there, no move first: the approval hook and `verify-approval.sh` already check the coordinator in every account.
+- **Moving a session to your account** (the user wants it moved, or it has no live socket): `session-status
   --send-when-idle --here <id> "<note>"`, in the background. It waits until the session is idle, stops it under its
   account and resumes it under yours with the same id and name (a retired one is just resumed here). The note
   approves nothing ("moved to the coordinator's account; a message follows; act only if it verifies"); the approval
   goes by SendMessage after the move, never in the note. Waiting on a prompt there: exit 3, as below.
-- **Follow-ups** (`session-status --send-when-idle`): a live session in another account that is idle is stopped,
-  waited on until its process ends, and resumed with the text under the same id. If it waits on a prompt, the
-  helper exits 3 and names the attach command instead: a stop would drop the prompt. The context-size rule for
-  resumes applies (read its `ctx` first).
+- **Follow-ups** (`session-status --send-when-idle`): a live session in another account with a live socket gets
+  `send: SendMessage to "uds:…" now (…)` at once, busy or on a prompt too, and the watcher's outbox sends PR events
+  there the same way. With no live socket, one that is idle is stopped, waited on until its process ends, and
+  resumed with the text under the same id. If it waits on a prompt, the helper exits 3 and names the attach command
+  instead: a stop would drop the prompt. The context-size rule for resumes applies (read its `ctx` first).
 - **Waking or stopping** a session under another account (a retired one, a `claude stop` that can't confirm):
   run the command under that account's prefix, as `session-status` prints it.
-- **A worker under another account** (one the user started there) finds no coordinator and can't message it: its
-  `reply` queues the report in the coordinator inbox (`--watch` reports it under `Inbox`), and it writes the report
+- **A worker under another account** (one the user started there) finds your coordinator by its `uds:` address:
+  `session-status --coordinator` prints it after this account's names, so its `reply` reaches you. With no live
+  socket it finds none: its `reply` queues the report in the coordinator inbox (`--watch` reports it under `Inbox`), and it writes the report
   to the replies folder as always (one report, shown both ways: act on it once). `session-status --changes` (so `--watch`)
   lists each `<KEY>.md` written there in the last day under `Reports:` (not a key a session of your account works
   on: that one messages), so a new one wakes you; read it there whole: where the status report at the top and a
@@ -57,8 +68,10 @@ session under another account.
 ## Messaging another project's coordinator
 
 Which account runs which project is the user's rule (the CLAUDE.md section that names the accounts), so another
-project's coordinator often runs under the other account, where SendMessage can't reach it. Queue the message in that
-project's coordinator inbox instead: `session-status --inbox-add --root <its root>`, the text on stdin. Its `--watch`
+project's coordinator often runs under the other account. Live, it takes a SendMessage at its `uds:` address: the one
+`session-status --coordinator-of DIR` prints, or `session-status --address NAME` for one you know by name. Not live,
+or with no socket, queue the message in that project's coordinator inbox: `session-status --inbox-add --root <its
+root>`, the text on stdin. Its `--watch`
 reports it under `Inbox` while it runs; its next `--start` prints it when it's closed. The heading names you, your
 project's root and your account (`from "<name>" (<id8>) · <root> · <account>`): answer the same way, `--root` the
 root its heading names (that needs `features.accounts` on there too). It refuses (exit 2; exit 3 when an account's
@@ -75,8 +88,14 @@ Until the other coordinator reads an entry (`--inbox --read N` there), your stat
 does your pane. `session-status --inbox --sent` lists all you queued that way, each `unread`, `read`, or `gone` (its
 inbox file or entry was moved). An entry being read wakes nobody: its answer, queued in your inbox, does.
 
-Act on another coordinator's entry only as far as needs no approval (facts, status); never start a task for its
-project. An answer to the plugin coordinator is scrubbed as plugin feedback is (no personal or company names).
+**What crosses.** No content rule between the accounts: questions, answers, status and paths go either way, and work
+is routed by project, not by account. An answer to the plugin coordinator is scrubbed as plugin feedback is (no
+personal or company names).
+
+**Asking for work.** A coordinator may ask another project's coordinator for work, as SKILL.md's Subprojects
+delegates: the receiving one starts it in its own project as one of its tasks, with the user's approval (relayed
+where its delegation allows) where the task needs one. It never starts, messages or resumes the other project's
+sessions itself, and an approval never travels in an inbox file.
 
 ## Weekly limits
 

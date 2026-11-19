@@ -63,11 +63,12 @@ it, newest first, and name that file in the handoff.
 **A report you send unasked:** `reply` without `to`. It tries this project's live coordinators, newest first, until
 one takes it. The coordinator's name in your brief (e.g. `myproj-coordinator`) is a hint, not an address, since
 coordinators get restarted: pass it as `to` only when `reply` says `Pass to` (it found none and couldn't queue). No coordinator takes it (none runs, one is
-mid-handover, or it is under another Claude account): `reply` queues it in the coordinator inbox
+mid-handover, or it is under another Claude account with no live socket; with one, `--coordinator` prints its `uds:`
+address after the names and `reply` sends there): `reply` queues it in the coordinator inbox
 (`<replies>/coordinator-inbox.md`) and says so; the next coordinator reads it there, so don't send it again. When it
 can't queue either, the replies file is the report, and the coordinator's `--watch` sees it. Without the tool, run
-`bash <this file's folder>/session-status --coordinator` from the project root and `SendMessage` the first name it
-prints, then the next.
+`bash <this file's folder>/session-status --coordinator` from the project root and `SendMessage` the first line it
+prints (a name, or a `uds:` address as it is), then the next.
 
 ## Approvals
 

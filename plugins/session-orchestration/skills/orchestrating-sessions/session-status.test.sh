@@ -733,6 +733,32 @@ rm "$proj/$s1.jsonl" "$proj/$s2.jsonl"; setacct cfg ""
 # accounts off with a second account sharing the transcripts: an unlisted session may be live there, so no resume
 rm "$root/.claude/coordination.local.json"
 [ "$(run --send-when-idle "${rid:0:8}" "Back" >/dev/null; echo $?)" = 2 ] && ! calls | grep -q -- '--bg' || { echo "send unlisted, accounts off, resumed"; exit 1; }
+# A live socket (pid $$, alive; the sessions above have pid 1 and none): --address prints it, and --send-when-idle
+# sends to it at once, busy or on a prompt too, nothing stopped or resumed; --here still moves it.
+echo '{"features":{"accounts":true}}' > "$root/.claude/coordination.local.json"
+export SESSION_STATUS_SOCK_DIR=$tmp/socks; mkdir -p "$tmp/socks"; addr=uds:$tmp/socks/$$.sock
+(cd "$tmp/socks" && python3 -c 'import socket; socket.socket(socket.AF_UNIX).bind("'$$'.sock")')
+setacct .claude-work "$(sess "$rid" rev idle $$)"; calls >/dev/null
+[ "$(run --address rev)" = "$addr" ] && [ "$(run --address "${rid:0:8}")" = "$addr" ] &&
+  [ "$(run --address nobody 2>/dev/null; echo $?)" = 2 ] && [ "$(run --address "${rid:0:4}" 2>/dev/null; echo $?)" = 2 ] || { echo "--address failed: $(run --address rev 2>&1)"; exit 1; }
+for st in idle busy waiting; do setacct .claude-work "$(sess "$rid" rev $st $$)"
+  out=$(run --send-when-idle "$rid" x)
+  [ "$out" = "send: SendMessage to \"$addr\" now (\"rev\", $st, live under another account); the text is yours to send" ] &&
+    ! calls | grep -q 'stop\|--bg' || { echo "send to the socket, $st: $out"; exit 1; }; done
+setacct .claude-work "$(sess "$rid" rev idle $$)"
+run --send-when-idle --here "$rid" "Moved" | grep -q '^moved "rev" (22222222) to this account' || { echo "send --here with a socket didn't move"; exit 1; }
+setacct .claude-work "$(sess "$rid" rev idle 1)"
+[ "$(run --address rev 2>/dev/null; echo $?)" = 1 ] || { echo "--address with no socket: not exit 1"; exit 1; }
+# Done (reported, waiting on its landing approval) but still running: addressed all the same.
+setacct .claude-work "$(sess "$rid" rev idle $$ | sed 's/"state":"blocked"/"state":"done"/')"
+[ "$(run --address rev)" = "$addr" ] || { echo "--address, a running done session: $(run --address rev 2>&1)"; exit 1; }
+# The outbox keeps the id; --outbox prints the socket's address for one under another account, looked up as it
+# prints (its pid now), and the id when it has no live socket.
+ob=$tmp/.cache/session-status/$(sed 's/[^A-Za-z0-9]/-/g' <<<"$root").outbox; mkdir -p "${ob%/*}"
+printf '1\t%s\trev\tapp#9 ci-failed @- (ABC-12) → "rev" 22222222\tText\n' "$rid" > "$ob"
+[ "$(run --outbox | cut -f2,3,5)" = "$(printf '%s\trev\tText' "$addr")" ] || { echo "--outbox, socket: $(run --outbox)"; exit 1; }
+setacct .claude-work "$(sess "$rid" rev idle 1)"
+[ "$(run --outbox | cut -f2)" = "$rid" ] || { echo "--outbox, no socket: $(run --outbox)"; exit 1; }
 fi
 
 if section handover; then
@@ -1237,6 +1263,24 @@ left="the plain terminal closes nothing: the old coordinator's terminal"
 # A renamed old coordinator (-prev-K) isn't a coordinator the reply tool sends to.
 setacct cfg "$(sess "$cid" p-coordinator idle 1)"; [ "$(run --coordinator)" = p-coordinator ] &&
   setacct cfg "$(sess "$cid" p-coordinator-prev-1 idle 1)" && [ -z "$(run --coordinator)" ] || { echo "--coordinator listed a -prev-K"; exit 1; }
+# Under another account (features.accounts on): --coordinator prints it after this account's names, by its socket's
+# `uds:` address (pid $$, alive), and nothing with no socket; coord_live (--coordinator-of) names the address too.
+export SESSION_STATUS_SOCK_DIR=$tmp/socks; mkdir -p "$tmp/socks"
+(cd "$tmp/socks" && python3 -c 'import socket; socket.socket(socket.AF_UNIX).bind("'$$'.sock")')
+echo '{"features":{"accounts":true}}' > "$root/.claude/coordination.local.json"
+cp "$proj/$cid.jsonl" "$proj/$z.jsonl"; setacct cfg "$(sess "$cid" p-coordinator idle 1)"; setacct .claude-work "$(sess "$z" w-coordinator idle $$)"
+[ "$(run --coordinator)" = "$(printf 'p-coordinator\nuds:%s/%s.sock' "$tmp/socks" $$)" ] || { echo "--coordinator, another account: $(run --coordinator)"; exit 1; }
+setacct .claude-work "$(sess "$z" w-coordinator idle 1)"
+[ "$(run --coordinator)" = p-coordinator ] || { echo "--coordinator, another account with no socket: $(run --coordinator)"; exit 1; }
+mkdir -p "$root/sub/.claude"; echo '{}' > "$root/sub/.claude/coordination.local.json"
+setacct cfg ""; setacct .claude-work "$(sess "$cid" sub-coordinator idle $$ | sed "s#\"cwd\":\"$root\"#\"cwd\":\"$root/sub\"#")"
+# The account's prefix as the platform prints it (~/ on macOS, the full path on Linux): only its folder is checked.
+[[ $(run --coordinator-of sub) == "sub-coordinator, under another account (CLAUDE_CONFIG_DIR="*"/.claude-work claude): SendMessage to \"uds:$tmp/socks/$$.sock\"" ]] ||
+  { echo "coord_live, another account: $(run --coordinator-of sub)"; exit 1; }
+setacct .claude-work "$(sess "$cid" sub-coordinator idle 1 | sed "s#\"cwd\":\"$root\"#\"cwd\":\"$root/sub\"#")"
+[[ $(run --coordinator-of sub) == "sub-coordinator, under another account (CLAUDE_CONFIG_DIR="*"/.claude-work claude): SendMessage reaches it only from there" ]] ||
+  { echo "coord_live, another account with no socket: $(run --coordinator-of sub)"; exit 1; }
+rm -rf "$root/sub" "$root/.claude/coordination.local.json"; unset SESSION_STATUS_SOCK_DIR; setacct .claude-work ""
 
 # --peek: the main thread's last turns as markdown (no sidechain, no system reminder), then what it does now.
 pid=cccccccc-2222-3333-4444-555555555555
@@ -1574,7 +1618,8 @@ grep -F 'second account found, accounts off: set features.accounts to true' <<<"
 echo '{"features":{"accounts":true}}' > "$a/.claude/coordination.local.json"
 # Its doc's start step and when to read it, the wrapped lines of each joined.
 c=$(init "$a" --check); grep -x 'active: .* features=accounts' <<<"$c" >/dev/null &&
-  grep -x "  accounts: nothing to do\. Workers .* another account\. Before resuming .* Read $(cd "$here/../.." && pwd)/features/accounts.md when a session under .* \"no live-channel credential\"\." <<<"$c" >/dev/null &&
+  grep -x "  accounts: nothing to do\. Workers .*\. Before resuming .* Read $(cd "$here/../.." && pwd)/features/accounts.md when a session under .* \"no live-channel credential\"\." <<<"$c" >/dev/null &&
+  grep -qF 'takes a SendMessage only at its socket'\''s `uds:` address (`session-status --address NAME|ID`)' <<<"$c" &&
   ! grep -q 'second account' <<<"$(init "$a" --check)" || { echo "check accounts on: $(init "$a" --check)"; exit 1; }
 b=$(mkdir -p "$tmp/init/bb" && cd "$tmp/init/bb" && pwd -P); git -C "$b" init -q && git -C "$b" remote add origin ssh://git@bitbucket.example.com/x/y.git
 echo 'Review inbox: https://claude.ai/artifact/abc' > "$b/CLAUDE.md"

@@ -131,8 +131,9 @@ and no heading.
    - `feedback`: project scope, `../orchestrating-sessions/feedback list --project` from the project root; plugin
      scope, `feedback list --plugin` and `feedback list --all --plugin` (the cases last run filed or named, and
      whether they are `fixed` now).
-   - `coordinator`: `triggers <coordinator> 7 P`: the coordinator is the first name
-     `bash <orchestrating-sessions skill folder>/session-status --coordinator` prints, run from the project root
+   - `coordinator`: `triggers <coordinator> 7 P`: the coordinator is the first name (not a `uds:` line)
+     `bash <orchestrating-sessions skill folder>/session-status --coordinator` prints (only `uds:` lines: it runs under
+     another account; take its name from `session-status --activity`'s coordinator row), run from the project root
      (`triggers` takes a session name or an id prefix). Add an earlier coordinator's id when last run's "Next run"
      names one. Then `handoff 28 P > handoff.tsv 2> handoff.txt` (config `pending.file`, else the state folder's
      `pending.md`; an entry with no history file has rewordings `-`).

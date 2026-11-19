@@ -161,19 +161,28 @@ plugin_root() { local d; d=$(config feedback.repo_dir 2>/dev/null) && [ -n "$d" 
 slug() { tr 'A-Z' 'a-z' <<<"$1" | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g'; }
 # coord_name ROOT: ROOT's coordinator name.
 coord_name() { echo "$(slug "$(basename "$1")")-coordinator"; }
+# sock_addr PID: the `uds:` address SendMessage reaches a live session at, under any account: every session listens on
+# SOCK_DIR/<pid>.sock, a same-user channel. Only a listed pid whose process lives and whose socket exists, never a scan
+# of the folder: a dead session's socket can linger. Fails otherwise.
+SOCK_DIR=${SESSION_STATUS_SOCK_DIR:-/tmp/cc-socks}
+sock_addr() { [[ ${1:-} =~ ^[0-9]+$ ]] && kill -0 "$1" 2>/dev/null && [ -S "$SOCK_DIR/$1.sock" ] && echo "uds:$SOCK_DIR/$1.sock"; }
 # coord_live ROOT: ROOT's coordinator, when it runs: a live session by its name in ROOT, under any account sharing
-# this transcript store (whatever this project's features.accounts says). Prints its name, and the account when it's
-# another (SendMessage reaches only its own). Never the caller (a subproject named like its parent). Exit 1: not
-# running; 3: not found, but an account's listing failed.
+# this transcript store (whatever this project's features.accounts says). Prints its name, and when it's under another
+# account, that account and the address SendMessage reaches it at (features.accounts on; off, only from there). Never
+# the caller (a subproject named like its parent). Exit 1: not running; 3: not found, but an account's listing failed.
 coord_live() {
-  local TMP rc; TMP=$(mktemp -d) || return 3
+  local TMP rc out a n p pid; TMP=$(mktemp -d) || return 3
   load_module features accounts list_accounts 2>/dev/null
   # No early exit in awk: list_sessions would die of SIGPIPE, and pipefail would fail a found one.
-  list_sessions | awk -F'\t' -v n="$(coord_name "$1")" -v r="$1" -v me="${CLAUDE_CODE_SESSION_ID:-}" '!f && $2 == n && $1 != me && $3 !~ /^(done|failed|stopped)$/ &&
-    ($6 == r || index($6, r "/") == 1) { f = 1; a = $4 }
-    END { if (!f) exit 1; print n (a == "claude" ? "" : ", under another account (" a "): SendMessage reaches it only from there") }'
+  out=$(list_sessions | awk -F'\t' -v n="$(coord_name "$1")" -v r="$1" -v me="${CLAUDE_CODE_SESSION_ID:-}" '!f && $2 == n && $1 != me && $3 !~ /^(done|failed|stopped)$/ &&
+    ($6 == r || index($6, r "/") == 1) { f = 1; print n "\t" $4 "\t" $9 }
+    END { if (!f) exit 1 }')
   rc=$?; [ "$rc" = 0 ] || [ ! -e "$TMP/ask.failed" ] || rc=3
-  rm -rf "$TMP"; return "$rc"
+  rm -rf "$TMP"; [ "$rc" = 0 ] || return "$rc"
+  IFS=$'\t' read -r n p pid <<<"$out"
+  if [ "$p" = claude ]; then echo "$n"
+  elif [ "$(config features.accounts 2>/dev/null)" = true ] && a=$(sock_addr "$pid"); then echo "$n, under another account ($p): SendMessage to \"$a\""
+  else echo "$n, under another account ($p): SendMessage reaches it only from there"; fi
 }
 # coord_start ROOT: opens ROOT's coordinator in a terminal tab (config terminal), named already so others find it
 # before open_pane names it; prints what happened. Exit 1: nothing started (the command to run is printed).
