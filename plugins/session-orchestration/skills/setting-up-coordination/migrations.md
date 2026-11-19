@@ -1,6 +1,6 @@
 # Migrations
 
-What a project set up by an older plugin version needs done when the layout changes. One row per migration; `session-status --init --migrate` runs them in this order: m1 m2 m3 m4 m5 m6 m8 m7 (m8 before m7, so the move sees the `pending.file` m8 brings over). Design: the retro case `claude-plugins-auto-migrate`.
+What a project set up by an older plugin version needs done when the layout changes. One row per migration; `session-status --init --migrate` runs them in this order: m1 m2 m3 m4 m5 m6 m8 m7 m9 (m8 before m7, so the move sees the `pending.file` m8 brings over; m9 last). Design: the retro case `claude-plugins-auto-migrate`.
 
 Class: **auto** = applied without asking (personal, untracked, restorable); **ask** = one pane ask, recommended answer first; **hand** = a pane note offering a session.
 "From" names the release after which a project needs it (docs say "from the release after <feature>", never a version that doesn't exist yet).
@@ -15,7 +15,7 @@ Class: **auto** = applied without asking (personal, untracked, restorable); **as
 | m6 | the release after `start.mode` (0.99) | ask | a memory line naming the start mode | write `start.mode`, delete the line |
 | m7 | the release after the state folder (0.102; includes 0.56 `pending.file` and the replies move) | auto; ask while sessions are live | `coordinator files outside P` | `--move` |
 | m8 | the release after the repo file stopped setting `pending.file` and `history.dirs` (0.112) | auto (untracked repo file), ask (tracked) | `pending.file and history.dirs are ignored in the repo file` | move both keys to the person file |
-| m9 | the release after 0.46, 0.87 and 0.102 changed the section and adapter templates | auto after a move; ask for template drift | a section or adapter line matching an old template render | old line to new line; a line the person edited is left alone and named |
+| m9 | the release after the state folder move (0.102), for a project moved by a move that left the local adapter naming old paths | auto | `.claude/session-status-adapter names files already moved to P` | `--migrate` points the adapter at P |
 | h1 | the release after memory became index + topic files (0.32.2) | hand | flat `memory.md` | pane note offering a session |
 | h2 | the release after messages modules (0.52) | hand | the adapter mentions msgraph while `messages` is unset | pane note offering a session |
 
