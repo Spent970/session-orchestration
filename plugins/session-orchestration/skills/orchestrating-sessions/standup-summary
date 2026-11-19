@@ -29,7 +29,11 @@ uppercase tracker key (like ABC-123) may stay, once, followed by those words; ne
 name or a lowercase task id: quoted names and lowercase slugs (like \"cache-ttl-cleanup\") are labels, not speech.
 Name people as the data does. Sessions' texts address the developer as \"you\": you are the developer.
 Lines starting with \"Note:\" are facts about the project from the developer: follow them, never repeat them.
-Skip noise: probes, sessions that did nothing, tickets only someone else touched. Mention each task once per part.
+Skip noise: probes, sessions that did nothing, tickets only someone else touched. A ticket whose items show someone
+else doing the work (another person or a bot account in people or text, such as a teammate's or an AI developer's
+ticket) and that has no worked item of the developer but a review is not their work: never say they worked on it; say they
+reviewed it (a worked item reading \"reviewed in session\") or discussed it (a discussed or asked item), else leave
+it out. Mention each task once per part.
 The template:"
 
 summarize() {
