@@ -56,11 +56,18 @@ by a parent. Configured adds:
 Each line that names an older layout starts with `[mN CLASS] ` (m1 delegation, m2 terminal, second account or review
 inbox, m3 Stop hook, m4 brief name, m5 crontab, m6 start mode, m7 files outside P, m8 repo-file keys, m9 adapter
 paths). CLASS `auto`: `session-status --init --migrate` fixes it unasked; `ask`: it needs the user's yes (m8 asks when
-the repo file is tracked, m7 when the tracked `CLAUDE.md` holds the path lines). The move rewrites every word of a local adapter that names a moved path, quoted or not.
+the repo file is tracked, m7 while other sessions of the project run; m7 is `hand` when the tracked `CLAUDE.md` holds the path lines). The move rewrites every word of a local adapter that names a moved path, quoted or not.
 `--migrate [--dry-run]` runs the check, then fixes each auto one in the order m1–m6, m8, m7, m9, backing up the
 files it rewrites to `P/migrate-backup/<date>/` and logging each step to `P/migrate.log` (a run after one that
 stopped midway resumes from it), lists the ask ones as open, and stamps `P/setup.json` with the layout once none is
-left (`current: layout N` on the next run). `--dry-run` prints what it would do and writes nothing.
+left (`current: layout N` on the next run). `--dry-run` prints what it would do and writes nothing. Each open ask or
+hand line comes with what its answer changes; `--apply=ID [--dry-run]` runs one ask id's fix, `--decline=ID` puts an
+ask or hand id away (kept in `P/setup.json`'s `declined`, which the stamp then ignores; `--check` still names it). m7
+asks instead of moving while other sessions of the project run (`--decline=m7` only puts it off). Two runs at once:
+the second prints `busy: …` and does nothing. A stamp from a newer plugin's layout: `--migrate` prints which and
+stops, `--write` refuses; update this account's plugin. `session-status --start` runs `--migrate` first (a
+`## Migration` section when it asks or fails), and `open_pane` turns each open ask or hand id into a pane ask
+`migrate-<id>`. Details per id: [migrations.md](migrations.md).
 
 ## Propose, then write
 

@@ -45,6 +45,9 @@ user a command).
   `<option>` (a conditional yes, or a different action): act only on what those words approve. Its **Chat about
   this** asks you to talk it over first ([pane.md](pane.md), Chat about an ask); the ask stays. That whole line is
   the Quote. It verifies for 24h from the click, and only from this plugin's click, so a typed copy doesn't count.
+  An answer for `migrate-<id>` (an older layout's migration, queued by `open_pane`): run the command its details
+  name for that option (`session-status --init --migrate --apply=<id>` or `--decline=<id>`; Start a session: start
+  one for it).
   - Make each option stand alone: the worker sees the answer and the question, not the other options.
   - Keep the question one line (the action, as the hook names it) and put what the user reads into the optional
     fields: `details` (markdown: what's being decided, the review comment being answered), `target` (`app#282
