@@ -1,6 +1,7 @@
 name: test
-# A branch is tested by its pull_request run only; push runs are main's. A new push to a PR cancels its older run;
-# a run on main never is (each gets its own group via run_id). The job names are the ruleset's required checks.
+# A branch is tested by its pull_request run only; push runs are main's, and catch two landings that pass apart and fail
+# together (a branch need not be up to date with main to merge). A new push to a PR cancels its older
+# run; a run on main never is (each gets its own group via run_id). The job names are the ruleset's required checks.
 on:
   push:
     branches: [main]
