@@ -132,6 +132,21 @@ xr a-coordinator hi "$tmp/xd/e" 'names no replies folder'
 rc=0; out=$(printf hi | ia a-coordinator --from me --root "$pb") || rc=$?; [ "$rc" = 2 ] && [[ $out == usage:* ]] || { echo "--inbox-add --from --root: rc=$rc $out"; exit 1; }
 echo '{}' > "$pa/.claude/coordination.local.json"; xr a-coordinator hi "$pb" 'features.accounts is off'
 [ "$(grep -c '^## ' "$tmp/xb-replies/coordinator-inbox.md")" = 2 ] || { echo "--inbox-add --root: a refused entry was written"; exit 1; }
+# --inbox --sent: a's two entries, unread until b's coordinator marks one read; a's sweep lists the unread one under
+# Sent; an entry whose file is gone says so.
+xs() { (cd "$pa" && HOME=$pt XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin2:$PATH "$here/session-status" "$@" 2>&1); }
+out=$(xs --inbox --sent); [[ $out == "unread · ~/xb/b (b-coordinator) #1 · "*" · Is PROJ-1 merged?"$'\n'"unread · ~/xb/b (b-coordinator) #2 · "*" · by ~" ]] ||
+  { echo "--inbox --sent, unread: $out"; exit 1; }
+(cd "$pb" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin2:$PATH "$here/session-status" --inbox --read 1) >/dev/null
+out=$(xs --inbox --sent); [[ $out == "read · ~/xb/b (b-coordinator) #1 · "*$'\n'"unread · ~/xb/b (b-coordinator) #2 · "* ]] || { echo "--inbox --sent, one read: $out"; exit 1; }
+out=$(xs); [[ $out == *$'\nSent (session-status --inbox --sent):\n  * queued in b-coordinator'"'s inbox #2 (~/xb/b), "*": by ~"* ]] && [[ $out != *"inbox #1"* ]] ||
+  { echo "sweep, Sent footer: $out"; exit 1; }
+# the watcher takes no news from it: these are a's own messages
+echo '{"features": {"accounts": true}}' > "$pa/.claude/coordination.local.json"
+xs --changes >/dev/null; printf 'third' | ia a-coordinator --root "$pb" >/dev/null; [ "$(xs --changes)" = "no changes" ] || { echo "--changes, a sent entry: $(xs --changes)"; exit 1; }
+# recreated: b's new #1 (another time) isn't a's
+mv "$tmp/xb-replies/coordinator-inbox.md" "$tmp/xb-replies/x"; printf '\n## 1 · unread · 01-01 00:00 · from w\nnot a\n' > "$tmp/xb-replies/coordinator-inbox.md"
+[[ $(xs --inbox --sent) == "gone · ~/xb/b (b-coordinator) #1 · "*$'\n'"gone · ~/xb/b (b-coordinator) #2 · "*$'\n'"gone · ~/xb/b (b-coordinator) #3 · "* ]] && [[ $(xs) != *Sent* ]] || { echo "--inbox --sent, gone: $(xs --inbox --sent)"; exit 1; }
 rm -rf "$tmp/xa" "$tmp/xb" "$tmp/xc" "$tmp/xd" "$tmp/xb-replies"
 run --changes >/dev/null; (sleep 2; touch "$root/wt/dirty2") & toucher=$!; trap 'kill $toucher 2>/dev/null || true; rm -rf "$tmp"' EXIT
 [ "$(run --watch --every x)" = "--every needs a positive number of seconds" ] && [ "$(run --watch --every 1)" = "$(printf 'was: %s\nnow: %s' "$(run ABC-12 | sed 's/dirty:2/dirty:1/')" "$(run ABC-12)")" ] ||

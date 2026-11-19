@@ -1,7 +1,7 @@
 import type { On, ToolCallResult } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf, sectionSlug, sectionState, parseSections, nativePath } from './register'
+import { HIDDEN_BY_MARKDOWN, overdueAsks, parseAsks, queuedText, byKind, kindCounts, attachFor, clip, fixesOf, groupOf, keyIn, leftoverCommand, notice, wrapText, facts, orderTasks, parsePending, parseStatus, parseTask, pendingOf, prsOf, BUILTIN_KEYS, USAGE_EXTRA, USAGE_SECTIONS, usageName, GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, SENT, staleOf, weakStale, pendingLabel, foldOf, LEFTOVERS, OTHER, cancelText, onYouOf, sectionSlug, sectionState, parseSections, nativePath } from './register'
 
 test('status rows parse whatever the columns hold', async () => {
   const pad = (k: string, st: string) => `${k.padEnd(9)} ${st.padEnd(14)} `
@@ -1059,7 +1059,7 @@ test('a failed /reload-plugins says so and names the command to run', async ($, 
 
 test('usage names: fixed words lib.sh usage accepts', () => {
   const names = [...Object.values(BUILTIN_KEYS), ...USAGE_EXTRA, ...USAGE_SECTIONS.flatMap(s => [`fold ${s}`, `unfold ${s}`, `card ${s}`])].map(usageName)
-  expect([...GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, OTHER, LEFTOVERS].filter(s => !USAGE_SECTIONS.includes(s))).toEqual([])
+  expect([...GROUPS, RESOLVED, STALE, STALE_ITEMS, OTHER_PROJECTS, OTHER, LEFTOVERS, SENT].filter(s => !USAGE_SECTIONS.includes(s))).toEqual([])
   expect(usageName('Attach in tab')).toBe('attach-in-tab')
   expect(names.every(n => /^[a-z0-9-]{1,40}$/.test(n))).toBe(true)
 })

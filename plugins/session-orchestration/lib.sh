@@ -439,7 +439,7 @@ config() {
 
 # The coordinator pane's section slugs (hooks/register.tsx sectionSlug: a title, lowercase, its "(…)" dropped), and
 # the on-you ones, which are never hidden.
-PANE_SLUGS=" waiting-on-you decisions needs-action in-review working landing idle other-sessions leftovers notices stale-prompts stale other-projects pending resolved actions moved waits-on-you you-wait-on new-for-you worked-on tasks "
+PANE_SLUGS=" waiting-on-you decisions needs-action in-review working landing idle other-sessions leftovers notices stale-prompts stale other-projects pending resolved actions moved waits-on-you you-wait-on new-for-you worked-on tasks sent "
 PANE_ON_YOU=" waiting-on-you decisions needs-action "
 # pane_sections: config pane.sections, from the project's person file only (a per-project, per-person key), as one
 # JSON object of its valid entries.
