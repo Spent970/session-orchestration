@@ -88,9 +88,15 @@ echo '{"type":"assistant","input":{"command":"session-status --changes"}}' > "$p
 printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"status\":\"idle\"},{\"sessionId\":\"$nid\",\"name\":\"coord-next\",\"cwd\":\"$root\",\"status\":\"idle\"}]'" > "$tmp/bin3/claude"; chmod +x "$tmp/bin3/claude"
 run3() { (cd "$root" && HOME=$tmp XDG_STATE_HOME=$tmp/state CLAUDE_CONFIG_DIR=$tmp/cfg PATH=$tmp/bin3:$PATH "$here/session-status" "$@"); }
 [ "$(run3 --coordinator | paste -sd' ' -)" = 'coord coord-next' ] || { echo "--coordinator, successor not ready: $(run3 --coordinator)"; exit 1; }
-mkdir -p "$tmp/.cache/session-status/handover"; : > "$tmp/.cache/session-status/handover/coord.ready"
+hod=$tmp/.cache/session-status/handover; mkdir -p "$hod"; echo other > "$hod/coord.ready"
+[ "$(run3 --coordinator | paste -sd' ' -)" = 'coord coord-next' ] || { echo "--coordinator, another id ready: $(run3 --coordinator)"; exit 1; }
+echo "$nid" > "$hod/coord.ready"
 [ "$(run3 --coordinator | paste -sd' ' -)" = 'coord-next coord' ] || { echo "--coordinator, successor ready: $(run3 --coordinator)"; exit 1; }
-rm -f "$proj/$nid.jsonl" "$tmp/.cache/session-status/handover/coord.ready"
+# A Desktop successor, listed under its start_session title, is found by the id it recorded in coord.next.
+printf '#!/bin/sh\necho %s\n' "'[{\"sessionId\":\"$cid\",\"name\":\"coord\",\"cwd\":\"$root\",\"status\":\"idle\"},{\"sessionId\":\"$nid\",\"name\":\"Coordinator handover\",\"cwd\":\"$root\",\"status\":\"idle\"}]'" > "$tmp/bin3/claude"
+echo "$nid" > "$hod/coord.next"
+[ "$(run3 --coordinator | paste -sd'|' -)" = 'Coordinator handover|coord' ] || { echo "--coordinator, Desktop successor ready: $(run3 --coordinator)"; exit 1; }
+rm -f "$proj/$nid.jsonl" "$hod/coord.ready" "$hod/coord.next"
 # --coordinator-of: a subproject with its own config has its own coordinator; a plain subfolder is this one's.
 mkdir -p "$root/sub/.claude" "$root/plain" "$tmp/bin2"; echo '{}' > "$root/sub/.claude/coordination.local.json"
 printf '#!/bin/sh\necho "${AGENTS_JSON:-[]}"\n' > "$tmp/bin2/claude"; chmod +x "$tmp/bin2/claude"
@@ -1014,8 +1020,15 @@ tid2=55555555-2222-3333-4444-555555555555
 echo '{"type":"user","message":{"content":"Session task: weekly retro run. Use the retro skill."}}' > "$proj/$tid2.jsonl"
 setacct cfg "$(sess "$tid2" "retro-weekly-2026-01-05" idle 1)"; calls >/dev/null; echo report > "$root/replies/retro.md"
 out=$(run --handover "$tid2" 'Do Z.') && rc=0 || rc=$?
-[ "$rc" = 0 ] && calls | grep -q -- '--bg -n retro-weekly-2026-01-05 Work on retro: continue from replies/retro.md. Do Z.' ||
-  { echo "retro handover failed: $out"; calls; exit 1; }
+c=$(calls); [ "$rc" = 0 ] && grep -q -- '--bg -n retro-weekly-2026-01-05 Work on retro: continue from replies/retro.md. Do Z.' <<<"$c" &&
+  grep -qx 'Session task: retro' <<<"$c" || { echo "retro handover failed: $out"; echo "$c"; exit 1; }
+# A retro-…-followups task isn't a retro run: no NAME.md, so not handed over from retro.md.
+tid3=55555555-2222-3333-4444-555555555556
+echo '{"type":"user","message":{"content":"Fix the retro followups."}}' > "$proj/$tid3.jsonl"
+setacct cfg "$(sess "$tid3" "retro-project-3-followups" idle 1)"; calls >/dev/null
+out=$(run --handover "$tid3" 'Do Z.') && rc=0 || rc=$?
+[ "$rc" = 2 ] && [[ $out == *"has no retro-project-3-followups.md"* ]] || { echo "followups handover not refused: $rc $out"; calls; exit 1; }
+rm -f "$proj/$tid3.jsonl"
 # The old session ran a status command itself (a worker checking its PR): its key still comes from its first
 # prompt. A name starting with the key in another case is kept; an account defaulting to plan gets
 # --permission-mode default.

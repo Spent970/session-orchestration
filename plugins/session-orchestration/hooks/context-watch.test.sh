@@ -78,7 +78,7 @@ out=$(fire cw3 "$chunk" 126000); fire cw3 "$chunk" 151000 | grep -q window && fa
 unset CLAUDE_CODE_AUTO_COMPACT_WINDOW
 # No autoCompactWindow anywhere (config's guess; a 1M model compacts far later): the note says so, marks unchanged.
 mv "$CLAUDE_CONFIG_DIR/settings.json" "$t/settings.bak"
-expect nw "$coord" 146000 'at 146K: hand off.*No autoCompactWindow is set: these marks assume compact.window 220000'
+expect nw "$coord" 146000 'at 146K: hand off.*No autoCompactWindow found in env, project or user settings: these marks assume compact.window 220000'
 mv "$t/settings.bak" "$CLAUDE_CONFIG_DIR/settings.json"
 
 # Not coordinated (no Session task line), or a subagent's tool call: nothing. Keyless: the transcript isn't read again.

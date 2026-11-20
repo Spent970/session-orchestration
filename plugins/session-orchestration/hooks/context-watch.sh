@@ -98,7 +98,7 @@ thresholds() {   # at, hard and note for $kind, cached
   (( at > 0 && hard - 10000 < at && !small )) && at=$(( hard - 10000 ))
   note=; [ "$w" = "$expect" ] || note="This session's window is $w from $from; expected $expect."
   # config = nothing set it: the real window is the model's own (1M on a 1M model), so the marks are a guess
-  [ "$from" != config ] || note="No autoCompactWindow is set: these marks assume compact.window $w, but this session compacts at its model's own window (a 1M model's is 1M). Set autoCompactWindow in Claude Code settings (setting-up-coordination)."
+  [ "$from" != config ] || note="No autoCompactWindow found in env, project or user settings: these marks assume compact.window $w, but this session compacts at its model's own window (a 1M model's is 1M). Set autoCompactWindow in Claude Code settings (setting-up-coordination)."
   [ -z "$small" ] || note="${note:+$note }It is too small for handoff.stop_room: hand off at 60% of the $small before compaction, stop at 80%."
   mkdir -p "$d" && printf '%s %s %s %s %s %s\n%s' "$kind" "$key" "${n:--}" "$at" "$hard" "$note" "${re:+$re
 }" > "$s.kind.$$" && mv -f "$s.kind.$$" "$s.kind"   # whole or not at all: a writer may be killed
