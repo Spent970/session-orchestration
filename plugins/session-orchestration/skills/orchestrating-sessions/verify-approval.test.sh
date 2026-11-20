@@ -63,6 +63,13 @@ ask() { # $1 tool_use id, $2 question, $3 answer, $4 timestamp, $5 sidechain
     {type: "text", text: "<system-reminder>\nLinked sessions now: top = x (idle)\n</system-reminder>"}, {type: "text", text: "Yes, push ABC-18"}]}}'
   echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Ship ABC-19?"}]}}'
   jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: "ship it\n<system-reminder>\nLinked sessions now\n</system-reminder>"}}'
+  # A row of reminders only is no message: the answer after it still answers the question before it.
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"Merge ABC-20?"}]}}'
+  jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: "<system-reminder>\nLinked sessions now\n</system-reminder>"}}'
+  jq -nc --arg ts "$now" '{type: "user", origin: {kind: "human"}, timestamp: $ts, message: {content: "merge"}}'
+  # Queued while the coordinator was busy, with a reminder in the middle.
+  jq -nc --arg ts "$now" '{type: "attachment", timestamp: $ts, attachment: {type: "queued_command", origin: {kind: "human"},
+    prompt: "Yes, deploy\n<system-reminder>\nLinked sessions now\n</system-reminder>\nABC-21"}}'
 } > "$proj/$cid.jsonl"
 # `claude agents --json` lists its own account's sessions only; the coordinator's account is in $tmp/coord.
 # features.accounts is on (the person file), so every account sharing the transcript store is asked.
@@ -101,6 +108,10 @@ check ABC-16 "go ahead" "verified, answering: ABC-16 waits on review."
 check ABC-18 "Yes, push ABC-18" verified                                     # Desktop app reminder block
 check ABC-19 "ship it" "verified, answering: Ship ABC-19?"                     # inline reminder
 check ABC-18 "Linked sessions now" "$no ABC-18 in it or in the message it answers"  # reminder text isn't typed text
+check ABC-18 $'Yes, push ABC-18\n<system-reminder>\nLinked sessions now: top = x (idle)\n</system-reminder>' verified  # quoted as the coordinator saw it
+check ABC-20 "merge" "verified, answering: Merge ABC-20?"                      # a reminder-only row between
+check ABC-20 " " "$no ABC-20 in it or in the message it answers"               # a blank quote matches no reminder-only row
+check ABC-21 $'Yes, deploy\nABC-21' verified                                   # queued, reminder in the middle
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # (above: worker under ~/.claude-work) same account
 echo "$home/.claude-work" > "$tmp/coord"
 CFG=$home/.claude check ABC-1 yes "verified, answering: Merge ABC-1?"           # coordinator under ~/.claude-work
