@@ -1686,7 +1686,8 @@ if [ -n "$HANDOVER" ]; then
     ! grep -qE ' review([.,;:!)]|$)' <<<"$marks" || { echo "\"$name\" (${id:0:8}) is a review session: not handed over"; exit 2; }
     keys=$( { first_key "$first"; grep -oE "$KEYRE" <<<"$marks"; } | sort -u)
     bn=$name; [[ $name =~ ^(.+)-prev-[0-9]+$ ]] && bn=${BASH_REMATCH[1]}   # renamed already by its own handoff
-    [ -f "$rd/$bn.md" ] || [[ $bn != retro* ]] || bn=retro   # a retro run (retro-weekly-DATE, …) reports in retro.md
+    # a retro run (retro-run's retro-SCOPE-DATE; not a retro-…-followups task) reports in retro.md
+    [ -f "$rd/$bn.md" ] || [[ ! $bn =~ ^retro-[a-z]+-[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || bn=retro
     [ -n "$keys" ] || [ ! -f "$rd/$bn.md" ] || case $bn in */*|.*|*' '*) ;; *) keys=$bn ;; esac   # keyless task: its NAME.md
     [ -n "$keys" ] || { echo "\"$name\" (${id:0:8}) names no task key (first prompt or Session task: marker) and $rdir has no $bn.md: not handed over"; exit 2; }
     [ "$(grep -c . <<<"$keys")" = 1 ] || { echo "\"$name\" (${id:0:8}) names several task keys ($(paste -sd' ' - <<<"$keys")): hand over by hand"; exit 2; }
@@ -1745,6 +1746,8 @@ if [ -n "$HANDOVER" ]; then
   else
     hist=; [ -z "$PENDING" ] || hist=$(bash "$(dirname "$SELF")/pending" history --find "$key" 2>/dev/null)
     text="Work on $key: continue from $rdir/$key.md. ${next%.}. Supersedes: $id (transcript $f; read only the parts you need, never whole).${hist:+ The history of its handoff entry, if you need it: $hist (on demand, not up front).}"
+    # a retro run keeps its retro-SCOPE-DATE name, which `Work on retro` doesn't match: context-watch keys it by marker
+    [ "${bn:-}" != retro ] || [ "$new" = retro ] || text=$text$'\nSession task: retro'
   fi
   # The caller's account, not the old one's: that one may be at its weekly limit, and only the caller's sessions can
   # message the coordinator (features/accounts.md). Unless features.accounts_weekly_switch is on, the caller's is past
@@ -1820,13 +1823,16 @@ if [ -n "$COORD" ]; then
   { IFS=$'\n' read -d '' -ra w < "$TMP/watchers"; [ ${#w[@]} = 0 ] || mtime_named "${w[@]}"; } | sort -rn | sed -E 's#.*/##; s#\.jsonl$##' |
     while read -r id; do
       [ "$id" = "${CLAUDE_CODE_SESSION_ID:-}" ] ||
-        awk -F'\t' -v id="$id" '$1==id && $2 !~ /-prev-[0-9]+$/ {print $4 "\t" $2 "\t" $9}' "$TMP/agents"
+        awk -F'\t' -v id="$id" '$1==id && $2 !~ /-prev-[0-9]+$/ {print $4 "\t" $2 "\t" $9 "\t" $1}' "$TMP/agents"
     done > "$TMP/coords"
-  # A ready successor (NAME-next, handover/NAME.ready) goes before an old one still holding NAME: that one is retiring,
-  # and a message to it costs a forward and a turn of it.
-  awk -F'\t' -v d="$HO_DIR" '$1 == "claude" { n[++k] = $2; has[$2] = 1 }
-    END { for (i = 1; i <= k; i++) { c = n[i]
-            if (has[c "-next"] && (getline x < (d "/" c ".ready")) >= 0 && !out[c "-next"]++) print c "-next"
+  # A ready successor goes before an old one still holding NAME: that one is retiring, and a message to it costs a
+  # forward and a turn of it. The successor is the id in handover/NAME.next (a Desktop one, under whatever name it is
+  # listed, as ho_name), else NAME-next; ready when handover/NAME.ready holds its id.
+  awk -F'\t' -v d="$HO_DIR" '$1 == "claude" { n[++k] = $2; id[$2] = $4; nm[$4] = $2 }
+    END { for (i = 1; i <= k; i++) { c = n[i]; s = ""; x = ""; r = ""
+            f = d "/" c ".next"; if ((getline x < f) > 0 && (x in nm)) s = nm[x]; close(f)
+            if (s == "" && ((c "-next") in id)) s = c "-next"
+            f = d "/" c ".ready"; if (s != "" && (getline r < f) > 0 && r == id[s] && !out[s]++) print s; close(f)
             if (!out[c]++) print c } }' "$TMP/coords"
   awk -F'\t' '$1 != "claude" {print $3}' "$TMP/coords" | while read -r pid; do sock_addr "$pid" || :; done
   exit 0

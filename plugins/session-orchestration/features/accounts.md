@@ -102,7 +102,7 @@ inbox file or entry was moved). An entry being read wakes nobody: its answer, qu
 is routed by project, not by account. An answer to the plugin coordinator is scrubbed as plugin feedback is (no
 personal or company names).
 
-**Asking for work.** A coordinator may ask another project's coordinator for work, as SKILL.md's Subprojects
+**Asking for work.** A coordinator may ask another project's coordinator for work, as Subprojects in skills/orchestrating-sessions/sessions.md
 delegates: the receiving one starts it in its own project as one of its tasks, with the user's approval (relayed
 where its delegation allows) where the task needs one. It never starts, messages or resumes the other project's
 sessions itself, and an approval never travels in an inbox file.

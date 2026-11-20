@@ -47,7 +47,7 @@ feature `design`), never one kind for all.
 
 **Apply sessions.** Start one per batch the user names (with `at_once`, per batch), from this root. Run
 `session-status --kind <its kind> <name>`
-first (`<name>`: a task name the project's key pattern matches, of letters, digits, `.`, `_` and `-`, at most 80), then `claude --bg -n <name>` as SKILL.md says, with this
+first (`<name>`: a task name the project's key pattern matches, of letters, digits, `.`, `_` and `-`, at most 80), then `claude --bg -n <name>` as the coordinator skill's sessions.md says, with this
 brief, which starts with the name so the status shows its owner: `Work on <name>: Apply plugin feedback: <case file paths>. Follow feedback.md,
 Applying, for these cases only, and this repo's CLAUDE.md release checks. <PR line> Why: <what the cases say goes
 wrong>. Done when: the change is implemented with the repo's checks passing, a PR is open, and each case is marked

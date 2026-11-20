@@ -1,7 +1,7 @@
 # Handoff file and project memory: the details
 
 The coordinator's rules beyond the core's short form. Read this when you resolve a handoff entry while config
-`pending.file` is set, need an entry's past, split or prune project memory, carry `[team]` lines, graduate an entry,
+`pending.file` is set, need an entry's past, append to, split or prune project memory, file a lesson the user gives you, carry `[team]` lines, graduate an entry,
 or act on a retro's approved proposals.
 
 ## Handoff file with `pending.file`
@@ -31,8 +31,7 @@ demand, and entries leave once they've proved themselves. A flat file past a scr
 session you start: it builds the topic files and the new index as copies, re-checks for lines appended meanwhile,
 and swaps the index in with one `mv`, so no worker's append is lost.
 
-The project's `CLAUDE.md` may name a project memory file: an index over topic files, read on demand. Sessions append
-to it; you prune it.
+Sessions append to it; you prune it.
 - **Friction is feedback, not memory.** A step you missed or worked around because of this plugin (its docs,
   scripts, tools) goes to `feedback add`, and one the project caused to `feedback add --project`
   ([feedback.md](feedback.md)), never a memory line. Memory holds project facts and the user's preferences.
@@ -40,8 +39,8 @@ to it; you prune it.
   missing project-script step with `feedback add --project`, in addition to any memory line. When it's unclear which
   of plugin feedback, project feedback or memory it is, queue one `ask_approval` with those three before writing.
 - When the user tells you to remember something for the project, or a preference about how you coordinate, append
-  it to the coordinator topic file (a flat file: append there). A preference a config key holds (the start mode
-  above) goes in that key instead.
+  it to the coordinator topic file (a flat file: append there). A preference a config key holds (`start.mode`,
+  [sessions.md](sessions.md)) goes in that key instead.
 - Prune in passing: delete an entry that is wrong, superseded, about a task state that has since resolved, already
   in a `CLAUDE.md`, a doc or a skill, or a caution whose reason no longer holds; merge two about the same trap; and
   rewrite an absolute rule ("never X") with its scope and reason. Splitting a flat file, `[team]`
